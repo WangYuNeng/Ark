@@ -1,4 +1,4 @@
-from operator import is_
+from saa.graph import Graph
 from saa.node import Node, StatefulNode, StatelessNode
 from saa.edge import Edge
 
@@ -35,6 +35,10 @@ class SwitchLadEdge(Edge):
     @property
     def is_on(self):
         return self._is_on
+    
+    @is_on.setter
+    def is_on(self, value):
+        self._is_on = value
 
     @property
     def w_src(self):
@@ -95,28 +99,23 @@ class RNode(StatelessNode):
     def to_spice(self) -> str:
         return None
 
-class GNode(StatelessNode):
-
-    def __init__(self) -> None:
-        super().__init__('0')
-
-    def validation(self) -> bool:
-        raise NotImplementedError
-
-    def to_dynamical_system(self) -> str:
-        raise NotImplementedError
-
-    def to_spice(self) -> str:
-        raise NotImplementedError
-
-class SSrcNode(StatelessNode):
+class VsNode(StatelessNode):
     '''
     Pulse source for now
     '''
 
-    def __init__(self, id, params) -> None:
+    def __init__(self, id, params, r) -> None:
         super().__init__(f'ssrc_{id}')
-        self.params = params
+        self._params = params
+        self._r = r
+
+    @property
+    def params(self):
+        return self._params
+
+    @property
+    def r(self):
+        return self._r
 
     def validation(self) -> bool:
         raise NotImplementedError
@@ -128,8 +127,11 @@ class SSrcNode(StatelessNode):
         )
 
     def to_spice(self) -> str:
+        amplitude = self.params['amplitude']
+        if isinstance(self.conn[0].dst, CNode):
+            amplitude /= self.r
         return 'V{} {} 0 DC 0V PULSE(0V {}V {}s {}s {}s {}s {}s)'.format(
-            self.name, self.name, self.params['amplitude'], self.params['delay'], self.params['rise_time'],
+            self.name, self.name, amplitude, self.params['delay'], self.params['rise_time'],
             self.params['fall_time'], self.params['pulse_width'], self.params['period']
         )
 
@@ -148,11 +150,14 @@ class LCNode(StatefulNode):
 
     def to_dynamical_system(self) -> str:
         
-        rhs = []
+        rhs = self._init_rhs()
         for edge in self.conn:
             assert not isinstance(edge.src, RNode), 'RNode cannot be src'
+            assert not isinstance(edge.dst, VsNode), 'VsNode cannot be dst'
             if isinstance(edge.dst, RNode):
-                rhs_str = '(-{:.3e}/{:.3e} * {})'.format(edge.w_src, edge.dst.r, self.name)
+                rhs_str = self._handle_R(edge)
+            elif isinstance(edge.src, VsNode):
+                rhs_str = self._handle_Vs(edge)
             elif self == edge.src:
                 rhs_str = '(-{:.3e} * {})'.format(edge.w_src, edge.linked_name(self))
             elif self == edge.dst:
@@ -168,8 +173,9 @@ class LCNode(StatefulNode):
         ins, gms = [], []
         for edge in self.conn:
             assert not isinstance(edge.src, RNode), 'RNode cannot be src'
+            assert not isinstance(edge.dst, VsNode), 'VsNode cannot be dst'
             if isinstance(edge.dst, RNode):
-                in_name, in_gm = self.name, -edge.w_src * self.gm_factor
+                continue
             elif self == edge.src:
                 in_name, in_gm = edge.linked_spice_name(self), -edge.w_src * self.gm_factor
             elif self == edge.dst:
@@ -178,9 +184,11 @@ class LCNode(StatefulNode):
                 assert False, 'edge {} does not connect to node {}'.format(edge.name, self.name)
             ins.append(in_name)
             gms.append(in_gm)
+        
+        rloss = self._calc_rloss()
 
         component = 'X{}'.format(self.name)
-        params = 'Cint={:.3e} Rloss={:.3e} '.format(self._val * self.gm_factor, self.Rloss) + \
+        params = 'Cint={:.3e} Rloss={:.3e} '.format(self._val * self.gm_factor, rloss) + \
             ' '.join(['gm{}={:.3e}'.format(i, gm) for i, gm in enumerate(gms)])
         inputs = ' '.join(ins)
         output = self.name
@@ -188,15 +196,67 @@ class LCNode(StatefulNode):
         spice_str = ' '.join([component, inputs, output, model, params])
         return spice_str
 
+    def _init_rhs(self) -> str:
+        raise NotImplementedError
+
+    def _handle_R(self, edge: Edge) -> str:
+        raise NotImplementedError
+
+    def _handle_Vs(self, edge: Edge) -> str:
+        raise NotImplementedError
+
+    def _calc_rloss(self) -> float:
+        raise NotImplementedError
+
 class CNode(LCNode):
 
     def __init__(self, id, val) -> None:
         super().__init__('c', id, val)
 
+    def _init_rhs(self) -> str:
+        return []
+
+    def _handle_R(self, edge: Edge) -> str:
+        rhs_str = '(-1/{:.3e} * {})'.format(edge.dst.r, self.name)
+        return rhs_str
+
+    def _handle_Vs(self, edge: Edge) -> str:
+        rhs_str = '({:.3e} / {:.3e} * {} - 1/{:.3e} * {})'.format(edge.w_dst, edge.src.r, edge.linked_name(self), edge.src.r, self.name)
+        return rhs_str
+
+    def _calc_rloss(self) -> float:
+        re_rloss = [1/self.Rloss]
+        for edge in self.conn:
+            if isinstance(edge.dst, RNode):
+                re_rloss.append(1/edge.dst.r)
+            elif isinstance(edge.src, VsNode):
+                re_rloss.append(1/edge.src.r)
+        return 1/sum(re_rloss)/self.gm_factor
+
 class LNode(LCNode):
 
     def __init__(self, id, val) -> None:
         super().__init__('l', id, val)
+
+    def _init_rhs(self) -> str:
+        return []
+
+    def _handle_R(self, edge: Edge) -> str:
+        rhs_str = '(-{:.3e} * {})'.format(edge.dst.r, self.name)
+        return rhs_str
+
+    def _handle_Vs(self, edge: Edge) -> str:
+        rhs_str = '({:.3e} * {} - {:.3e} * {})'.format(edge.w_dst, edge.linked_name(self), edge.src.r, self.name)
+        return rhs_str
+
+    def _calc_rloss(self) -> float:
+        re_rloss = [1/self.Rloss]
+        for edge in self.conn:
+            if isinstance(edge.dst, RNode):
+                re_rloss.append(edge.dst.r)
+            elif isinstance(edge.src, VsNode):
+                re_rloss.append(edge.src.r)
+        return 1/sum(re_rloss)/self.gm_factor
 
 class SumNode(LCNode):
 
@@ -205,10 +265,17 @@ class SumNode(LCNode):
     def __init__(self, id, val) -> None:
         super().__init__('sum', id, val)
 
-class LadderGraph:
+    def _init_rhs(self) -> str:
+        return ['(-{:.3e} * {})'.format(self.Rloss * self.gm_factor, self.name)]
+
+    def _calc_rloss(self) -> float:
+        return self.Rloss
+
+
+class LadderGraph(Graph):
 
     def __init__(self) -> None:
-        self.sl_node_types = [RNode, SSrcNode]
+        self.sl_node_types = [RNode, VsNode]
         self.sf_node_types = [CNode, LNode, SumNode]
         self.edge_types = [LadEdge, SwitchLadEdge]
         self.node_type_dict = {nt: [] for nt in self.sl_node_types + self.sf_node_types}
@@ -228,12 +295,8 @@ class LadderGraph:
         edges.append(edge)
         return edge
 
-    def connect(self, edge: Edge, src: Node, dst: Node):
-        edge.connect(src=src, dst=dst)
-        src.add_conn(edge=edge)
-        dst.add_conn(edge=edge)
-
     def to_dynamical_system(self):
+        base_strs = self._base_dynamics()
         ds_strs, unpack_var, rtv = [], [], []
 
         for et in self.edge_types:
@@ -256,8 +319,9 @@ class LadderGraph:
                 rtv.append(node.ddt_name)
         fn_def = 'def dynamics(t, x):'
         unpack = ', '.join(unpack_var) + ' = x'
-        rt = 'return [{}]'.format(', '.join(rtv))
-        return '\n\t'.join([fn_def, unpack] + ds_strs + [rt])
+        rt = 'return [{}]\n'.format(', '.join(rtv))
+        var_to_idx = {var:i for i, var in enumerate(unpack_var)}
+        return var_to_idx, '\n\t'.join(base_strs) + '\n\t'.join([fn_def, unpack] + ds_strs + [rt])
 
     def to_spice(self):
         spice_strs = self._base_ckt()
@@ -280,6 +344,19 @@ class LadderGraph:
                 if spice_str:
                     spice_strs.append(spice_str)
         return '\n'.join(spice_strs)
+
+    def _base_dynamics(self):
+        sub_strs = []
+        sub_strs.append('def pulse(t, amplitude, delay, rise_time, fall_time, pulse_width, period):')
+        sub_strs.append('t = (t - delay) % period ')
+        sub_strs.append('if rise_time <= t and pulse_width + rise_time >= t:')
+        sub_strs.append('\treturn amplitude')
+        sub_strs.append('elif t < rise_time:')
+        sub_strs.append('\treturn amplitude * t / rise_time')
+        sub_strs.append('elif pulse_width + rise_time < t and pulse_width + rise_time + fall_time >= t:')
+        sub_strs.append('\treturn amplitude * (1 - (t - pulse_width - rise_time) / fall_time)')
+        sub_strs.append('return 0\n')
+        return sub_strs
 
     def _base_ckt(self):
         sub_strs = []

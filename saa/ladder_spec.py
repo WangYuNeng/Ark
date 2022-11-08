@@ -265,6 +265,10 @@ class SumNode(LCNode):
     def __init__(self, id, val) -> None:
         super().__init__('sum', id, val)
 
+    def _handle_Vs(self, edge: Edge) -> str:
+        rhs_str = '({:.3e} * {})'.format(edge.w_dst, edge.linked_name(self))
+        return rhs_str
+
     def _init_rhs(self) -> str:
         return ['(-{:.3e} * {})'.format(self.Rloss * self.gm_factor, self.name)]
 
@@ -360,7 +364,7 @@ class LadderGraph(Graph):
 
     def _base_ckt(self):
         sub_strs = []
-        for n_in in range(1,4):
+        for n_in in range(1,7):
             vi_str = ' '.join(['vi{}'.format(i) for i in range(n_in)])
             gm_str = ' '.join(['gm{}=1e-3'.format(i) for i in range(n_in)])
             sub_strs.append('.subckt gmc{} {} vo Cint=1e-12 {} Rloss=1e12'.format(n_in, vi_str, gm_str))

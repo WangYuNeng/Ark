@@ -23,43 +23,54 @@ class RewriteGen(ast.NodeTransformer):
 
 class GenRule:
 
-    SRC, DST = 'SRC', 'DST'
+    SRC, DST = False, True
+    SRC_STR, DST_STR = 'SRC', 'DST'
 
-    def __init__(self, tgt_et: EdgeType, src_nt: NodeType, dst_nt: NodeType, gen_tgt: bool, fn_ast: ast.Expr, transformer: ast.NodeTransformer) -> None:
-        self.tgt_et = tgt_et
-        self.src_nt = src_nt
-        self.dst_nt = dst_nt
-        self.gen_tgt = gen_tgt
-        self.fn_ast = fn_ast
-        self.transformer = transformer
+    def __init__(self, tgt_et: EdgeType, src_nt: NodeType, dst_nt: NodeType, gen_tgt: bool, fn_exp: str, transformer=RewriteGen()) -> None:
+        self._tgt_et = tgt_et
+        self._src_nt = src_nt
+        self._dst_nt = dst_nt
+        self._gen_tgt = gen_tgt
+        self._fn_ast = ast.parse(fn_exp, mode='eval')
+        self._transformer = transformer
 
-    def get_identifier(self):
-        return [self.tgt_et.name, self.src_nt.name, self.dst_nt.name, self.gen_tgt]
+    def hook_transformer(self, transformer: RewriteGen):
+        self._transformer = transformer
+
+    @staticmethod
+    def get_identifier(tgt_et: EdgeType, src_nt: NodeType, dst_nt: NodeType, gen_tgt: bool):
+        gen_tgt = bool(gen_tgt)
+        return repr([tgt_et.type_name, src_nt.type_name, dst_nt.type_name, gen_tgt])
+
+    @property
+    def identifier(self):
+        return self.get_identifier(self._tgt_et, self._src_nt, self._dst_nt, self._gen_tgt)
 
     def apply(self, edge: CDGEdge, src_node: CDGNode, dst_node: CDGNode):
-        name_map = {self.tgt_et.type_name: edge.name, self.SRC: src_node.name, self.DST: dst_node.name}
-        self.transformer.name_map = name_map
-        gen_ast = copy.deepcopy(self.fn_ast)
-        self.transformer.visit(gen_ast)
+        name_map = {self._tgt_et.type_name: edge.name, self.SRC_STR: src_node.name, self.DST_STR: dst_node.name}
+        self._transformer.name_map = name_map
+        gen_ast = copy.deepcopy(self._fn_ast)
+        self._transformer.visit(gen_ast)
         return gen_ast
     
 if __name__ == '__main__':
 
     gen_rule_exp = '1/E.qd*SRC+DST.c'
 
+    et = EdgeType('E', {'qs': [], 'qd': []})
+    nt = StatefulNodeType('VN', {})
+
     es, ns = [], []
     for i in range(4):
-        es.append(CDGEdge(i, f'e{i}'))
+        es.append(CDGEdge(i, f'e{i}', et, []))
     
     for i in range(5):
-        ns.append(CDGNode(i, f'n{i}'))
+        ns.append(CDGNode(i, f'n{i}', nt, []))
 
-    et = EdgeType('E', ['qs', 'qd'], [])
-    nt = StatefulNodeType('VN', [], [])
-    fn_ast = ast.parse(gen_rule_exp, mode='eval')
-
-    rule = GenRule(tgt_et=et, src_nt=nt, dst_nt=nt, gen_tgt=0, fn_ast=fn_ast, transformer=RewriteGen())
+    rule = GenRule(tgt_et=et, src_nt=nt, dst_nt=nt, gen_tgt=0, fn_exp=gen_rule_exp, transformer=RewriteGen())
 
     for i in range(4):
         gen_ast = rule.apply(edge=es[i], src_node=ns[i], dst_node=ns[i+1])
         print(ast.unparse(gen_ast))
+
+    print(isinstance(nt, StatefulNodeType))

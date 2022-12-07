@@ -85,11 +85,11 @@ class CDGEdge(CDGElement):
         self._dst = dst
         
     @property
-    def src(self) -> list:
+    def src(self) -> CDGNode:
         return self._src
 
     @property
-    def dst(self) -> list:
+    def dst(self) -> CDGNode:
         return self._dst
 
 class CDG:

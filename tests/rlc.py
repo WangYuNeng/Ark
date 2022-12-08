@@ -7,7 +7,7 @@ from ark.specification.specification import CDGSpec
 from ark.cdg.cdg import CDG
 
 compiler = ArkCompiler(rewrite=RewriteGen())
-validator = ArkValidator(solver=SMTSolver)
+validator = ArkValidator(solver=SMTSolver())
 
 # CDGType
 from ark.specification.types import NodeType, StatefulNodeType, EdgeType

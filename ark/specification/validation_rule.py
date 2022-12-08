@@ -1,18 +1,7 @@
 import numpy as np
 from ark.cdg.cdg import CDGNode, CDGEdge
 from ark.specification.types import EdgeType, NodeType, StatefulNodeType
-
-class DegreeConstraint:
-
-    def __init__(self, expr: str) -> None:
-        self._expr = expr
-
-    @property
-    def expr(self):
-        return self._expr
-
-    def __repr__(self) -> str:
-        return '{}({})'.format(self.__class__.__name__, self.expr)
+from ark.specification.constraint import DegreeConstraint
 
 class Connection:
 
@@ -80,8 +69,8 @@ class ValRule:
                 if edge_id in conn_ids:
                     matrix[i, j] = 1
         
-        print(matrix)
-        print([conn.degree for conn in self._connections])
+        constraints = [conn.degree for conn in self._connections]
+        return matrix, constraints
 
 
     def __repr__(self) -> str:

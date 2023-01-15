@@ -1,5 +1,6 @@
 from ark.globals import Direction
 from ark.specification.types import CDGType, StatefulNodeType, NodeType, EdgeType
+from collections import OrderedDict
 
 class CDGElement:
 
@@ -95,45 +96,69 @@ class CDGEdge(CDGElement):
 class CDG:
 
     def __init__(self) -> None:
-        self._stateful_nodes = []
-        self._stateless_nodes = []
-        self._edges = []
+        self._stateful_nodes = OrderedDict()
+        self._stateless_nodes = OrderedDict()
+        self._edges = OrderedDict()
         self._switches = []
-        self._elements = []
-
+        self._elements = OrderedDict()
+        self._next_id = 0
+        
+    def _get_id(self) -> int:
+        self._next_id += 1
+        return self._next_id - 1
+    
+        # TODO: SHOULD WE THROW ERROR IF NAME IS ALREADY IN DICTIONARY?
     def add_node(self, name: str, cdg_type: CDGType, attrs: dict) -> CDGNode:
-        id = len(self._elements)
+        id = self._get_id()
         node = CDGNode(id=id, name=name, cdg_type=cdg_type, attrs=attrs)
         if isinstance(cdg_type, StatefulNodeType):
-            self._stateful_nodes.append(node)
+            self._stateful_nodes[name] = node
         elif isinstance(cdg_type, NodeType):
-            self._stateless_nodes.append(node)
-        self._elements.append(node)
+            self._stateless_nodes[name] = node
+        self._elements[name] = node
         return node
 
-    def add_edge(self, name: str, cdg_type: CDGType, attrs: dict, src: CDGNode, dst: CDGNode) -> CDGNode:
-        id = len(self._elements)
+    def add_edge(self, name: str, cdg_type: CDGType, attrs: dict, src: CDGNode, dst: CDGNode) -> CDGEdge:
+        id = self._get_id()
         edge = CDGEdge(id=id, name=name, cdg_type=cdg_type, attrs=attrs, src=src, dst=dst)
         src.add_edge(edge)
         dst.add_edge(edge)
-        self._edges.append(edge)
-        self._elements.append(edge)
+        self._edges[name] = edge
+        self._elements[name] = edge
         return edge
+
+    def delete_node(self, node_name: str) -> None: 
+        node = self._elements[node_name]
+        # delete edges
+        for edge in node.edges():
+            self._edges.pop(edge.name())
+        # verify there are no edges connected 
+        if self._verify_no_edges(node_name):
+            if isinstance(node.cdg_type(), StatefulNodeType):
+                self._stateful_nodes.pop(node.name())
+            elif isinstance(node.cdg_type(), NodeType):
+                self._stateless_nodes.pop(node.name())
+            self._elements.pop(node.name())
+        else:
+            print("edges still connected to node")
+        
+    def _verify_no_edges(self, node_name: str) -> bool:
+        raise NotImplementedError
 
     @property
     def nodes(self) -> list:
-        return self._stateful_nodes + self.stateless_nodes
+        return list(self._stateful_nodes.values()) + list(self.stateless_nodes.values())
     @property
     def stateful_nodes(self) -> list:
-        return self._stateful_nodes
+        return list(self._stateful_nodes.values())
 
     @property
     def stateless_nodes(self) -> list:
-        return self._stateless_nodes
+        return list(self.stateless_nodes.values())
     
     @property
     def edges(self) -> list:
-        return self._edges
+        return list(self._edges.values())
 
     @property
     def switches(self) -> list:

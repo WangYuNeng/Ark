@@ -44,7 +44,7 @@ class CDGNode(CDGElement):
 
     @property
     def edges(self) -> list:
-        return self._edges
+        return list(self._edges)
 
     @property
     def degree(self) -> int:
@@ -52,6 +52,9 @@ class CDGNode(CDGElement):
 
     def add_edge(self, e):
         self._edges.add(e)
+    
+    def remove_edge(self, e):
+        self._edges.remove(e)
 
     def is_src(self, edge: 'CDGEdge') -> bool:
         return edge.src == self
@@ -84,6 +87,12 @@ class CDGEdge(CDGElement):
         super().__init__(id, name, cdg_type, attrs)
         self._src = src
         self._dst = dst
+        
+    def set_src(self, node: CDGNode) -> None:
+        self._src = node
+        
+    def set_dst(self, node: CDGNode) -> None:
+        self._dst = node
         
     @property
     def src(self) -> CDGNode:
@@ -126,35 +135,42 @@ class CDG:
         self._edges[name] = edge
         self._elements[name] = edge
         return edge
-
+    
+    def update_edge(self, edge: CDGEdge):
+        name = edge.name
+        self._edges[name] = edge
+        self._elements[name] = edge
+        
     def delete_node(self, node_name: str) -> None: 
         node = self._elements[node_name]
-        # delete edges
-        for edge in node.edges():
-            self._edges.pop(edge.name())
         # verify there are no edges connected 
         if self._verify_no_edges(node_name):
-            if isinstance(node.cdg_type(), StatefulNodeType):
-                self._stateful_nodes.pop(node.name())
-            elif isinstance(node.cdg_type(), NodeType):
-                self._stateless_nodes.pop(node.name())
-            self._elements.pop(node.name())
+            if isinstance(node.cdg_type, StatefulNodeType):
+                self._stateful_nodes.pop(node.name)
+            elif isinstance(node.cdg_type, NodeType):
+                self._stateless_nodes.pop(node.name)
+            self._elements.pop(node.name)
         else:
             print("edges still connected to node")
         
     def _verify_no_edges(self, node_name: str) -> bool:
-        raise NotImplementedError
+        node = self._elements[node_name]
+        for e in self.edges:
+            if e.src == node or e.dst == node:
+                return False
+        return True
 
     @property
     def nodes(self) -> list:
-        return list(self._stateful_nodes.values()) + list(self.stateless_nodes.values())
+        return list(self._stateful_nodes.values()) + list(self._stateless_nodes.values())
+    
     @property
     def stateful_nodes(self) -> list:
         return list(self._stateful_nodes.values())
 
     @property
     def stateless_nodes(self) -> list:
-        return list(self.stateless_nodes.values())
+        return list(self._stateless_nodes.values())
     
     @property
     def edges(self) -> list:

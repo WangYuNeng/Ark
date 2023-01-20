@@ -60,6 +60,8 @@ class ArkCompiler():
             return n
 
         def concat_expr(exprs, op):
+            if len(exprs) == 1:
+                return exprs[0].body
             if len(exprs) == 2:
                 return ast.BinOp(left=exprs[0].body, op=op(), right=exprs[1].body)
             return ast.BinOp(left=exprs[0].body, op=op(), right=concat_expr(exprs[1:], op).body)

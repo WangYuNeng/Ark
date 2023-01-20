@@ -10,12 +10,18 @@ class ArkCompiler():
 
     def __init__(self, rewrite: RewriteGen) -> None:
         self._rewrite = rewrite
+        self._var_mapping = {}
         self._namespace = {}
         pass
 
     @property
     def prog_name(self):
         return 'dynamics'
+    
+    @property
+    def var_mapping(self) -> dict:
+        # map variable (node.name) to the corresponding index in the state variables
+        return self._var_mapping
 
     def prog(self):
         return self._namespace[self.prog_name]
@@ -94,7 +100,8 @@ class ArkCompiler():
                 self._rewrite.mapping = gen_rule.get_rewrite_mapping(edge=edge)
                 rhs.append(self._apply_rule(edge=edge, rule=rule_dict[id], transformer=self._rewrite))
             stmts.append(ast.Assign(targets=[set_ctx(mk_var(vname), ast.Store)], value=concat_expr(rhs, ast.Add)))
-        
+            
+        self._var_mapping = {node.name: i for i, node in enumerate(cdg.stateful_nodes)}
         stmts.append(set_ctx(ast.Return(ast.List([mk_var(ddt(node.name)) for node in cdg.stateful_nodes])), ast.Load))
 
         arguments =ast.arguments(posonlyargs=[], args=[mk_arg('t'), mk_arg(input_vec)], kwonlyargs=[], kw_defaults=[], defaults=[])

@@ -153,8 +153,10 @@ class CDG:
         for e in self.edges:
             if e.src.id not in self._elements:
                 warnings.warn("Source Node of Edge not in graph")
+                return False
             elif e.dst.id not in self._elements:
                 warnings.warn("Source Node of Edge not in graph")
+                return False
         return True
 
     @property

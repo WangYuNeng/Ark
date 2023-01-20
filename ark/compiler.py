@@ -10,17 +10,28 @@ class ArkCompiler():
 
     def __init__(self, rewrite: RewriteGen) -> None:
         self._rewrite = rewrite
+        self._var_mapping = {}
         self._namespace = {}
         pass
 
     @property
     def prog_name(self):
         return 'dynamics'
+    
+    @property
+    def var_mapping(self) -> dict:
+        # map variable (node.name) to the corresponding index in the state variables
+        return self._var_mapping
 
     def prog(self):
         return self._namespace[self.prog_name]
 
-    def compile(self, cdg: CDG, cdg_spec: CDGSpec, help_fn):
+    def compile(self, cdg: CDG, cdg_spec: CDGSpec, help_fn=[], import_lib={}):
+        '''
+        Compile the cdg to a function for dynamical system simulation
+        help_fn: list of non-built-in function written in attributes, e.g., [sin, trapezoidal]
+        import_lib: additional libraries, e.g., {'np': np}
+        '''
 
         def ddt(v):
             return 'ddt_{}'.format(v)
@@ -94,7 +105,8 @@ class ArkCompiler():
                 self._rewrite.mapping = gen_rule.get_rewrite_mapping(edge=edge)
                 rhs.append(self._apply_rule(edge=edge, rule=rule_dict[id], transformer=self._rewrite))
             stmts.append(ast.Assign(targets=[set_ctx(mk_var(vname), ast.Store)], value=concat_expr(rhs, ast.Add)))
-        
+            
+        self._var_mapping = {node.name: i for i, node in enumerate(cdg.stateful_nodes)}
         stmts.append(set_ctx(ast.Return(ast.List([mk_var(ddt(node.name)) for node in cdg.stateful_nodes])), ast.Load))
 
         arguments =ast.arguments(posonlyargs=[], args=[mk_arg('t'), mk_arg(input_vec)], kwonlyargs=[], kw_defaults=[], defaults=[])
@@ -104,7 +116,7 @@ class ArkCompiler():
         module = ast.Module(top_stmts, type_ignores=[])
         module = ast.fix_missing_locations(module)
         code = compile(source=module, filename='__tmp_{}.py'.format(self.prog_name), mode='exec')
-        self._namespace = {}
+        self._namespace = import_lib
         print(ast.unparse(module))
         exec(code, self._namespace)
 

@@ -26,7 +26,12 @@ class ArkCompiler():
     def prog(self):
         return self._namespace[self.prog_name]
 
-    def compile(self, cdg: CDG, cdg_spec: CDGSpec, help_fn):
+    def compile(self, cdg: CDG, cdg_spec: CDGSpec, help_fn=[], import_lib={}):
+        '''
+        Compile the cdg to a function for dynamical system simulation
+        help_fn: list of non-built-in function written in attributes, e.g., [sin, trapezoidal]
+        import_lib: additional libraries, e.g., {'np': np}
+        '''
 
         def ddt(v):
             return 'ddt_{}'.format(v)
@@ -111,7 +116,7 @@ class ArkCompiler():
         module = ast.Module(top_stmts, type_ignores=[])
         module = ast.fix_missing_locations(module)
         code = compile(source=module, filename='__tmp_{}.py'.format(self.prog_name), mode='exec')
-        self._namespace = {}
+        self._namespace = import_lib
         print(ast.unparse(module))
         exec(code, self._namespace)
 

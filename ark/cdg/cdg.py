@@ -1,5 +1,7 @@
 from ark.globals import Direction
 from ark.specification.types import CDGType, StatefulNodeType, NodeType, EdgeType
+from collections import OrderedDict
+import warnings
 
 class CDGElement:
 
@@ -43,7 +45,7 @@ class CDGNode(CDGElement):
 
     @property
     def edges(self) -> list:
-        return self._edges
+        return list(self._edges)
 
     @property
     def degree(self) -> int:
@@ -51,6 +53,9 @@ class CDGNode(CDGElement):
 
     def add_edge(self, e):
         self._edges.add(e)
+    
+    def remove_edge(self, e):
+        self._edges.remove(e)
 
     def is_src(self, edge: 'CDGEdge') -> bool:
         return edge.src == self
@@ -84,6 +89,12 @@ class CDGEdge(CDGElement):
         self._src = src
         self._dst = dst
         
+    def set_src(self, node: CDGNode) -> None:
+        self._src = node
+        
+    def set_dst(self, node: CDGNode) -> None:
+        self._dst = node
+        
     @property
     def src(self) -> CDGNode:
         return self._src
@@ -95,45 +106,72 @@ class CDGEdge(CDGElement):
 class CDG:
 
     def __init__(self) -> None:
-        self._stateful_nodes = []
-        self._stateless_nodes = []
-        self._edges = []
+        self._stateful_nodes = OrderedDict()
+        self._stateless_nodes = OrderedDict()
+        self._edges = OrderedDict()
         self._switches = []
-        self._elements = []
-
+        self._elements = OrderedDict()
+        self._next_id = 0
+        
+    def _get_id(self) -> int:
+        self._next_id += 1
+        return self._next_id - 1
+    
     def add_node(self, name: str, cdg_type: CDGType, attrs: dict) -> CDGNode:
-        id = len(self._elements)
+        id = self._get_id()
         node = CDGNode(id=id, name=name, cdg_type=cdg_type, attrs=attrs)
         if isinstance(cdg_type, StatefulNodeType):
-            self._stateful_nodes.append(node)
+            self._stateful_nodes[id] = node
         elif isinstance(cdg_type, NodeType):
-            self._stateless_nodes.append(node)
-        self._elements.append(node)
+            self._stateless_nodes[id] = node
+        self._elements[id] = node
         return node
 
-    def add_edge(self, name: str, cdg_type: CDGType, attrs: dict, src: CDGNode, dst: CDGNode) -> CDGNode:
-        id = len(self._elements)
+    def add_edge(self, name: str, cdg_type: CDGType, attrs: dict, src: CDGNode, dst: CDGNode) -> CDGEdge:
+        id = self._get_id()
         edge = CDGEdge(id=id, name=name, cdg_type=cdg_type, attrs=attrs, src=src, dst=dst)
         src.add_edge(edge)
         dst.add_edge(edge)
-        self._edges.append(edge)
-        self._elements.append(edge)
+        self._edges[id] = edge
+        self._elements[id] = edge
         return edge
+    
+    def update_edge(self, edge: CDGEdge):
+        id = edge.id
+        self._edges[id] = edge
+        self._elements[id] = edge
+        
+    def delete_node(self, node_id: int) -> None: 
+        node = self._elements[node_id]
+        if isinstance(node.cdg_type, StatefulNodeType):
+            self._stateful_nodes.pop(node.id)
+        elif isinstance(node.cdg_type, NodeType):
+            self._stateless_nodes.pop(node.id)
+        self._elements.pop(node.id)
+        
+    def check_connectivity(self) -> bool:
+        for e in self.edges:
+            if e.src.id not in self._elements:
+                warnings.warn("Source Node of Edge not in graph")
+            elif e.dst.id not in self._elements:
+                warnings.warn("Source Node of Edge not in graph")
+        return True
 
     @property
     def nodes(self) -> list:
-        return self._stateful_nodes + self.stateless_nodes
+        return list(self._stateful_nodes.values()) + list(self._stateless_nodes.values())
+    
     @property
     def stateful_nodes(self) -> list:
-        return self._stateful_nodes
+        return list(self._stateful_nodes.values())
 
     @property
     def stateless_nodes(self) -> list:
-        return self._stateless_nodes
+        return list(self._stateless_nodes.values())
     
     @property
     def edges(self) -> list:
-        return self._edges
+        return list(self._edges.values())
 
     @property
     def switches(self) -> list:

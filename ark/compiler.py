@@ -26,7 +26,7 @@ class ArkCompiler():
     def prog(self):
         return self._namespace[self.prog_name]
 
-    def compile(self, cdg: CDG, cdg_spec: CDGSpec, help_fn=[], import_lib={}):
+    def compile(self, cdg: CDG, cdg_spec: CDGSpec, help_fn=[], import_lib={}, to_numba=False):
         '''
         Compile the cdg to a function for dynamical system simulation
         help_fn: list of non-built-in function written in attributes, e.g., [sin, trapezoidal]
@@ -107,14 +107,23 @@ class ArkCompiler():
                 self._rewrite.mapping = gen_rule.get_rewrite_mapping(edge=edge)
                 rhs.append(self._apply_rule(edge=edge, rule=rule_dict[id], transformer=self._rewrite))
             stmts.append(ast.Assign(targets=[set_ctx(mk_var(vname), ast.Store)], value=concat_expr(rhs, ast.Add)))
-            
+
         self._var_mapping = {node.name: i for i, node in enumerate(cdg.stateful_nodes)}
-        stmts.append(set_ctx(ast.Return(ast.List([mk_var(ddt(node.name)) for node in cdg.stateful_nodes])), ast.Load))
 
-        arguments =ast.arguments(posonlyargs=[], args=[mk_arg('t'), mk_arg(input_vec)], kwonlyargs=[], kw_defaults=[], defaults=[])
+        if to_numba == False:    
+            stmts.append(set_ctx(ast.Return(ast.List([mk_var(ddt(node.name)) for node in cdg.stateful_nodes])), ast.Load))
+            arguments =ast.arguments(posonlyargs=[], args=[mk_arg('t'), mk_arg(input_vec)], kwonlyargs=[], kw_defaults=[], defaults=[])
+            decorator_list = []
+        
+        else:
+            data, ddt_input = '__DATA', ddt(input_vec)
+            arguments =ast.arguments(posonlyargs=[], args=[mk_arg('t'), mk_arg(input_vec), mk_arg(ddt_input), mk_arg(data)], kwonlyargs=[], kw_defaults=[], defaults=[])
+            stmts.append(ast.Assign(targets=[set_ctx(mk_var(ddt_input), ctx=ast.Store)], value=set_ctx(ast.List([mk_var(ddt(node.name)) for node in cdg.stateful_nodes]), ctx=ast.Load)))
+            assert 'cfunc' in import_lib and 'lsoda_sig' in import_lib, 'cfunc and lsoda_sig should be imported to use numba!'
+            decorator_list = [ast.Call(func=set_ctx(mk_var('cfunc'), ctx=ast.Load), args=[set_ctx(mk_var('lsoda_sig'), ctx=ast.Load)], keywords=[])]
+            
         top_stmts = []
-        top_stmts.append(ast.FunctionDef(self.prog_name, arguments, stmts, decorator_list=[]))
-
+        top_stmts.append(ast.FunctionDef(self.prog_name, arguments, stmts, decorator_list=decorator_list))
         module = ast.Module(top_stmts, type_ignores=[])
         module = ast.fix_missing_locations(module)
         code = compile(source=module, filename='__tmp_{}.py'.format(self.prog_name), mode='exec')

@@ -1,8 +1,9 @@
-from scipy.integrate import solve_ivp
-import matplotlib.pyplot as plt
-import numpy as np
-import math
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Jan 11 10:39:40 2023
 
+@author: zousa
+"""
 from ark.compiler import ArkCompiler
 from ark.rewrite import RewriteGen
 from ark.solver import SMTSolver
@@ -29,7 +30,7 @@ gen_rules = []
 gen_rules.append(GenRule(tgt_et=E, src_nt=IN, dst_nt=VN, gen_tgt=GenRule.SRC, fn_exp='-E.q_src*DST/SRC.l'))
 gen_rules.append(GenRule(tgt_et=E, src_nt=VN, dst_nt=IN, gen_tgt=GenRule.DST, fn_exp='E.q_dst*SRC/DST.l'))
 gen_rules.append(GenRule(tgt_et=E, src_nt=IN, dst_nt=R, gen_tgt=GenRule.SRC, fn_exp='-DST.r*SRC/SRC.l'))
-gen_rules.append(GenRule(tgt_et=E, src_nt=S, dst_nt=IN, gen_tgt=GenRule.DST, fn_exp='1/DST.l*(E.q_src*SRC.fn-SRC.r*DST)'))
+gen_rules.append(GenRule(tgt_et=E, src_nt=S, dst_nt=IN, gen_tgt=GenRule.DST, fn_exp='1/DST.l/(E.q_src*SRC.fn-SRC.r*DST)'))
 gen_rules.append(GenRule(tgt_et=E, src_nt=VN, dst_nt=IN, gen_tgt=GenRule.SRC, fn_exp='-DST/SRC.c*E.q_src'))
 gen_rules.append(GenRule(tgt_et=E, src_nt=IN, dst_nt=VN, gen_tgt=GenRule.DST, fn_exp='SRC/DST.c*E.q_dst'))
 gen_rules.append(GenRule(tgt_et=E, src_nt=VN, dst_nt=R, gen_tgt=GenRule.SRC, fn_exp='-SRC/SRC.c/DST.r'))
@@ -61,53 +62,44 @@ val_rules = [VN_rule, IN_rule, S_rule, R_rule]
 # Specification
 spec = CDGSpec(cdg_types=cdg_types, generation_rules=gen_rules, validation_rules=val_rules)
 
-# Helper Function
-def pulse(t, amplitude=1, delay=0, rise_time=5e-9, fall_time=5e-9, pulse_width=10e-9, period=1):
-    t = (t - delay) % period 
-    if rise_time <= t and pulse_width + rise_time >= t:
-        return amplitude
-    elif t < rise_time:
-        return amplitude * t / rise_time
-    elif pulse_width + rise_time < t and pulse_width + rise_time + fall_time >= t:
-        return amplitude * (1 - (t - pulse_width - rise_time) / fall_time)
-    return 0
-
-def sin(t):
-    return math.sin(t*1e7)
-
 # CDG
 graph = CDG()
-# vs = graph.add_node(name='vs', cdg_type=S, attrs={'fn': 'pulse(t)', 'r':'1'})
 vs = graph.add_node(name='vs', cdg_type=S, attrs={'fn': 'sin(t)', 'r':'1'})
-n_ladder = 1
-l = graph.add_node(name='l{}'.format(0), cdg_type=IN, attrs={'l': '1e-9'})
-e = graph.add_edge(name='es_l0', cdg_type=E, attrs={'q_src': '1', 'q_dst': '1'}, src=vs, dst=l)
-for i in range(n_ladder - 1):
-    c = graph.add_node(name='c{}'.format(i), cdg_type=VN, attrs={'c': '1e-9'})
-    e1 = graph.add_edge(name='e_l{}_c{}'.format(i, i), cdg_type=E, attrs={'q_src': '1', 'q_dst': '1'}, src=l, dst=c)
-    l = graph.add_node(name='l{}'.format(i + 1), cdg_type=IN, attrs={'l': '1e-9'})
-    e2 = graph.add_edge(name='e_c{}_l{}'.format(i, i+1), cdg_type=E, attrs={'q_src': '1', 'q_dst': '1'}, src=c, dst=l)
-c = graph.add_node(name='c{}'.format(n_ladder - 1), cdg_type=VN, attrs={'c': '1e-9'})
-e = graph.add_edge(name='e_l{}_c{}'.format(n_ladder - 1, n_ladder - 1), cdg_type=E, attrs={'q_src': '1', 'q_dst': '1'}, src=l, dst=c)
-r = graph.add_node(name='r', cdg_type=R, attrs={'r': '1e3'})
-e3 = graph.add_edge(name='e_c{}_r'.format(n_ladder - 1), cdg_type=E, attrs={'q_src': '1', 'q_dst': '1'}, src=c, dst=r)
+l1 = graph.add_node(name='l1', cdg_type=IN, attrs={'l': 1e-9})
+c1 = graph.add_node(name='c1', cdg_type=VN, attrs={'c': 1e-9})
+rl = graph.add_node(name='rl', cdg_type=R, attrs={'r': 1})
+e1 = graph.add_edge(name='e1', cdg_type=E, attrs={'q_src': 1, 'q_dst': 1}, src=vs, dst=l1)
+e2 = graph.add_edge(name='e2', cdg_type=E, attrs={'q_src': 1, 'q_dst': 1}, src=l1, dst=c1)
+e3 = graph.add_edge(name='e3', cdg_type=E, attrs={'q_src': 1, 'q_dst': 1}, src=c1, dst=rl)
 
-# validate
-validator.validate(cdg=graph, cdg_spec=spec)
 
-# compile
-compiler.compile(cdg=graph, cdg_spec=spec, help_fn=[sin], import_lib={'math': math})
 
-n_states = n_ladder * 2
-time_range = [0, 100e-9]
-time_points = np.linspace(*time_range, 1000)
-states = [0 for _ in range(n_states)]
-sol = solve_ivp(compiler.prog(), time_range, states, dense_output=True, max_step=1e-10)
-# print(sol.sol(time_points))
-plt.plot(time_points, [sin(t) for t in time_points])
-for i in range(2):
-    plt.plot(time_points, sol.sol(time_points)[i].T)
-plt.xlabel('time(s)')
-plt.ylabel('Amplitude(V)')
-plt.savefig('tmp.png')
-plt.clf()
+# validator.validate(cdg=graph, cdg_spec=spec)
+# Mutation operations 
+import random  
+
+
+def swap(graph):
+    node = random.choice(graph.nodes)
+    edges = node.edges
+    new_node = graph.add_node(name='l2', cdg_type=IN, attrs={'l': 1e-9}) # TODO: CHANGE LATER
+    for e in edges:
+        if node.is_src(e):
+            e.set_src(new_node)
+        elif node.is_dst(e):
+            e.set_dst(new_node)
+        node.remove_edge(e)
+        new_node.add_edge(e)
+        graph.update_edge(e) # TODO: verify if this line is needed
+    graph.delete_node(node.id)
+    
+edges_before = graph.edges
+for e in edges_before:
+    print(e.src)
+    print(e.dst)
+before=graph.nodes
+swap(graph)
+print(len(graph.nodes) == len(before))
+for e in graph.edges:
+    print(e.src)
+    print(e.dst)

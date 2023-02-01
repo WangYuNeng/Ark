@@ -1,3 +1,4 @@
+import re
 from ark.test.ladder.model import LadderModel
 from ark.cdg.cdg import CDG, CDGNode, CDGEdge
 
@@ -5,25 +6,28 @@ GM_FACTOR = 1e-3
 RLOSS_BASE = 1e12
 MODEL = LadderModel()
 
+FUNC_PATTERN = r'([\w|_]+)=([0-9|e|\.|\+|\-]+)'
+RE_OBJ = re.compile(FUNC_PATTERN)
 
 class SpiceMapper:
 
-    def __init__(self, graph: CDG) -> None:
-        self._graph = graph
+    def __init__(self) -> None:
+        pass
 
-    def to_spice(self):
+    def to_spice(self, graph: CDG):
 
         node: CDGNode
         spice_strs: list
 
+        self._graph = graph
         spice_strs = self._base_ckt()
 
         for node in self._graph.nodes:
             if node.cdg_type == MODEL.VN or node.cdg_type == MODEL.IN:
-                spice_strs.append(self._map_LC())
+                spice_strs.append(self._map_LC(node=node))
 
             elif node.cdg_type == MODEL.S:
-                spice_strs.append()
+                spice_strs.append(self._map_src(node=node))
 
         
         for edge in self._graph.edges:
@@ -38,7 +42,7 @@ class SpiceMapper:
         def calc_rloss():
             edge: CDGEdge
             
-            re_rloss = [1/RLOSS_BASE]
+            re_rloss = []
             for edge in node.edges:
 
                 if edge.dst.cdg_type == MODEL.R:
@@ -56,7 +60,7 @@ class SpiceMapper:
 
         edge: CDGEdge
         component = 'X{}'.format(node.name)
-        ins, gms = [], []
+        ins, gms = list(), list()
         for edge in node.edges:
 
             if node.is_src(edge=edge):
@@ -85,15 +89,19 @@ class SpiceMapper:
 
     def _map_src(self, node: CDGNode):
 
-        def parse_attr():
-            pass
+        def parse_attr(attr_str):
+
+            matches = RE_OBJ.findall(attr_str)
+            params = {m[0]: float(m[1]) for m in matches}
+            return params['amplitude'], params['delay'], params['rise_time'], \
+                params['fall_time'], params['pulse_width'], params['period']
         
-        amp, delay, rise_time, fall_time, pulse_width, period = parse_attr()
-        if isinstance(self.conn[0].dst, CNode):
-            amplitude /= self.r
+        amplitude, delay, rise_time, fall_time, pulse_width, period = parse_attr(node.attrs['fn'])
+
+        if node.edges[0].dst.cdg_type == MODEL.VN:
+            amplitude /= float(node.attrs['r'])
         return 'V{} {} 0 DC 0V PULSE(0V {}V {}s {}s {}s {}s {}s)'.format(
-            self.name, self.name, amplitude, self.params['delay'], self.params['rise_time'],
-            self.params['fall_time'], self.params['pulse_width'], self.params['period']
+            node.name, node.name, amplitude, delay, rise_time, fall_time, pulse_width, period
         )
 
 
@@ -108,3 +116,5 @@ class SpiceMapper:
             sub_strs.append('Rr vo 0 r=Rloss')
             sub_strs.append('Cc vo 0 c=Cint')
             sub_strs.append('.ends gmc{}'.format(n_in))
+
+        return sub_strs

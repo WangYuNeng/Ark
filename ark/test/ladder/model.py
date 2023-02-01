@@ -76,6 +76,18 @@ class LadderModel:
     _cdg_types = cdg_types
     _spec = spec
     _help_fn = pulse
+    _param_ranges = {
+        VN: VN.attrs,
+        IN: IN.attrs,
+        R: R.attrs,
+        E: E.attrs,
+        S: {'amplitude': [-5, 5], 'delay': [0, 50e-9], 'rise_time': [0, 50e-9], 'fall_time': [0, 50e-9], 
+            'pulse_width': [0, 50e-9], 'period': [1, 2], 'r': [0, 1e6]} # arbitrary param range only for random testing
+    }
+
+    
+    def get_param_range(self, cdg_type) -> dict:
+        return self._param_ranges[cdg_type]
 
     @property
     def VN(self):

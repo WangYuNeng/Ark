@@ -134,8 +134,8 @@ class Generator:
                             choices.remove(new_in)
                         if connect_in in choices:
                             choices.remove(connect_in)
-                if nb_type == m.S:
-                    choices.remove(new_source)
+                        if new_source in choices:
+                            choices.remove(new_source)
 
 
             return choices
@@ -273,8 +273,8 @@ if __name__ == '__main__':
 
     mapper = SpiceMapper()
     for seed in range(5):
-        graph = g.generate(max_op=3, seed=seed)
+        graph = g.generate(max_op=10, seed=seed)
         spice_str = mapper.to_spice(graph=graph)
 
         sim.ds_sim(graph=graph, model=g._ladder_model, file_name='ds{}.png'.format(seed))
-        # sim.spice_sim(spice_str=spice_str, file_name='sp{}.png'.format(seed))
+        sim.spice_sim(spice_str=spice_str, file_name='sp{}.png'.format(seed))

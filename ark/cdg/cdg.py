@@ -88,6 +88,16 @@ class CDGNode(CDGElement):
         else:
             assert False, '{} does not connect to {}'.format(self, edge)
 
+    def print_local(self):
+        print(self.name)
+        for edge in self.edges:
+            if self.is_src(edge=edge):
+                arrow = '-{}>'.format(edge.name)
+            else:
+                arrow = '<{}-'.format(edge.name)
+            print('\t', arrow, self.get_neighbor(edge=edge).name)
+            
+
 
 class CDGEdge(CDGElement):
 

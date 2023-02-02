@@ -63,6 +63,9 @@ class SpiceMapper:
         ins, gms = list(), list()
         for edge in node.edges:
 
+            if node.get_neighbor(edge=edge).cdg_type == MODEL.R:
+                continue
+
             if node.is_src(edge=edge):
                 in_name, in_gm = edge.dst.name, -float(edge.attrs['q_src']) * GM_FACTOR
             else:

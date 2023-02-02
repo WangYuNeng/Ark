@@ -37,8 +37,9 @@ class SMTSolver(Solver):
         model = get_model(problem)
         if model:
             print(model)
+            return True
         else:
-            assert False, 'Can satisfy constraints!'
+            return False
     
     def interpret_constraint(self, constraint: Constraint):
 

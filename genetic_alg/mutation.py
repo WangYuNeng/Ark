@@ -97,9 +97,10 @@ edges_before = graph.edges
 for e in edges_before:
     print(e.src)
     print(e.dst)
-before=graph.nodes
+before =graph.nodes
 swap(graph)
 print(len(graph.nodes) == len(before))
 for e in graph.edges:
     print(e.src)
     print(e.dst)
+    

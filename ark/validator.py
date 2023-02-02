@@ -23,5 +23,6 @@ class ArkValidator:
             print(candidate_rules)
             for rule in candidate_rules:
                 matrix, constraints = rule.get_validation_matrix(node=node)
-            self._solver.solve_validation_matrix(matrix=matrix, constraints=constraints)
+            if not self._solver.solve_validation_matrix(matrix=matrix, constraints=constraints):
+                return False
         return True

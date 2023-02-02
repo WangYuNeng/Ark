@@ -1,0 +1,4 @@
+Selection	View	Channel	Begin Time (s)	End Time (s)	Low Freq (Hz)	High Freq (Hz)	Species Code	Common Name	Confidence
+1	Spectrogram 1	1	0	3.0	150	12000	ribgul	Ring-billed Gull	0.2902
+2	Spectrogram 1	1	0	3.0	150	12000	hergul	Herring Gull	0.2322
+3	Spectrogram 1	1	0	3.0	150	12000	lbbgul	Lesser Black-backed Gull	0.1250

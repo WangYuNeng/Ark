@@ -3,7 +3,7 @@ from ark.test.ladder.model import LadderModel
 from ark.cdg.cdg import CDG, CDGNode, CDGEdge
 
 GM_FACTOR = 1e-3
-RLOSS_BASE = 1e12
+RLOSS_BASE = 1e20
 MODEL = LadderModel()
 
 FUNC_PATTERN = r'([\w|_]+)=([0-9|e|\.|\+|\-]+)'
@@ -42,7 +42,7 @@ class SpiceMapper:
         def calc_rloss():
             edge: CDGEdge
             
-            re_rloss = []
+            re_rloss = [1/RLOSS_BASE] # prevent division by zero error and error from no loading in subckt
             for edge in node.edges:
 
                 if edge.dst.cdg_type == MODEL.R:
@@ -75,7 +75,7 @@ class SpiceMapper:
 
         if node.cdg_type == MODEL.VN:
             base_val = node.attrs['c']
-        elif node.cdg_type == MODEL.VN:
+        elif node.cdg_type == MODEL.IN:
             base_val = node.attrs['l']
     
         component = 'X{}'.format(node.name)

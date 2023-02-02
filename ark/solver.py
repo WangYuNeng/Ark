@@ -36,9 +36,10 @@ class SMTSolver(Solver):
         problem = And(*row_constraints, *col_constraints)
         model = get_model(problem)
         if model:
-            print(model)
+            # print(model)
+            pass
         else:
-            assert False, 'Can satisfy constraints!'
+            assert False, 'Can\'t satisfy constraints!'
     
     def interpret_constraint(self, constraint: Constraint):
 

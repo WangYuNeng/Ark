@@ -46,9 +46,9 @@ class SpiceMapper:
             for edge in node.edges:
 
                 if edge.dst.cdg_type == MODEL.R:
-                    inv_r = edge.dst.attrs['r']
+                    inv_r = float(edge.dst.attrs['r'])
                 elif edge.src.cdg_type == MODEL.S:
-                    inv_r = edge.src.attrs['r']
+                    inv_r = float(edge.src.attrs['r'])
                 else:
                     continue
                 
@@ -64,9 +64,9 @@ class SpiceMapper:
         for edge in node.edges:
 
             if node.is_src(edge=edge):
-                in_name, in_gm = edge.dst.name, -edge.attrs['q_src'] * GM_FACTOR
+                in_name, in_gm = edge.dst.name, -float(edge.attrs['q_src']) * GM_FACTOR
             else:
-                in_name, in_gm = edge.src.name, edge.attrs['q_dst'] * GM_FACTOR
+                in_name, in_gm = edge.src.name, float(edge.attrs['q_dst']) * GM_FACTOR
 
             ins.append(in_name)
             gms.append(in_gm)
@@ -74,9 +74,9 @@ class SpiceMapper:
         rloss = calc_rloss()
 
         if node.cdg_type == MODEL.VN:
-            base_val = node.attrs['c']
+            base_val = float(node.attrs['c'])
         elif node.cdg_type == MODEL.IN:
-            base_val = node.attrs['l']
+            base_val = float(node.attrs['l'])
     
         component = 'X{}'.format(node.name)
         params = 'Cint={:.3e} Rloss={:.3e} '.format(base_val * GM_FACTOR, rloss) + \

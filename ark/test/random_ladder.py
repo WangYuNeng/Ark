@@ -1,4 +1,10 @@
 import numpy as np
+import matplotlib.pyplot as plt
+from scipy.integrate import solve_ivp
+import PySpice.Logging.Logging as Logging
+logger = Logging.setup_logging()
+from PySpice.Spice.Netlist import Circuit
+
 from ark.test.ladder.model import LadderModel
 from ark.cdg.cdg import CDG, CDGNode, CDGType
 
@@ -24,17 +30,19 @@ class Generator:
         self._sampler = None
 
         m = self._ladder_model
-        self._type2elements = {m.VN: [], m.IN: [], m.S: [], m.R: [], m.E: []}
+        self._type2elements = {}
         self._type2prefix = {m.VN: 'c', m.IN: 'l', m.S: 's', m.R: 'r', m.E: 'e'}
 
     def generate(self, max_op, seed) -> CDG:
         self._sampler = Sampler(seed=seed)
         graph = CDG()
+        m = self._ladder_model
+        s = self._sampler
+        self._type2elements = {m.VN: [], m.IN: [], m.S: [], m.R: [], m.E: []}
         self._initialize(graph=graph)
 
         n_op = self._sampler.sample_int(0, max_op + 1)
-        m = self._ladder_model
-        s = self._sampler
+
         vnodes, inodes = self._type2elements[m.VN], self._type2elements[m.IN]
         for _ in range(n_op):
             choices = vnodes + inodes
@@ -52,12 +60,14 @@ class Generator:
         def new_source(graph: CDG, node: CDGNode):
             src = self._gen_S(graph=graph)
             edge = self._gen_edge(graph=graph, cdg_type=m.E, src=src, dst=node)
+            return True
 
         def new_r(graph: CDG, node: CDGNode):
             res = self._gen_R(graph=graph)
             edge = self._gen_edge(graph=graph, cdg_type=m.E, src=node, dst=res)
+            return True
 
-        def new_vn_or_in(graph, node):
+        def new_vn_or_in(graph: CDG, node: CDGNode):
             if node.cdg_type == m.VN:
                 n_node = self._gen_IN(graph=graph)
             elif node.cdg_type == m.IN:
@@ -69,19 +79,34 @@ class Generator:
         def new_out(graph: CDG, node: CDGNode):
             n_node = new_vn_or_in(graph=graph, node=node)
             edge = self._gen_edge(graph=graph, cdg_type=m.E, src=node, dst=n_node)
-            
+            return True
 
         def new_in(graph: CDG, node: CDGNode):
             n_node = new_vn_or_in(graph=graph, node=node)
             edge = self._gen_edge(graph=graph, cdg_type=m.E, src=n_node, dst=node)
+            return True
+
+        def sample_valid_VN(node: CDGNode):
+            if self._type2elements[m.VN] == []:
+                return False
+            vnode = s.sample_choice(self._type2elements[m.VN])
+            if node.is_neighbor(vnode):
+                return False
+            return vnode
 
         def connect_out(graph: CDG, node: CDGNode):
-            vnode = s.sample_choice(self._type2elements[m.VN])
-            edge = self._gen_edge(graph=graph, cdg_type=m.E, src=node, dst=vnode)
+            vnode = sample_valid_VN(node=node)
+            if vnode:
+                edge = self._gen_edge(graph=graph, cdg_type=m.E, src=node, dst=vnode)
+                return True
+            return False
 
         def connect_in(graph: CDG, node: CDGNode):
-            vnode = s.sample_choice(self._type2elements[m.VN])
-            edge = self._gen_edge(graph=graph, cdg_type=m.E, src=vnode, dst=node)
+            vnode = sample_valid_VN(node=node)
+            if vnode:
+                edge = self._gen_edge(graph=graph, cdg_type=m.E, src=vnode, dst=node)
+                return True
+            return False
 
         def filter_choices(node: CDGNode, choices: set):
             
@@ -119,8 +144,7 @@ class Generator:
         if len(choices) == 0:
             return False
         choice_func = s.sample_choice(choices=list(choices))
-        choice_func(graph, node)
-        return True
+        return choice_func(graph, node)
 
     def _gen_node(self, graph: CDG, cdg_type: CDGType):
 
@@ -133,6 +157,7 @@ class Generator:
         name = self._type_id_str(cdg_type, len(nodes))
         
         node = graph.add_node(name=name, cdg_type=cdg_type, attrs=attrs)
+        print(node)
         nodes.append(node)
         return node
 
@@ -144,6 +169,7 @@ class Generator:
         name = self._type_id_str(cdg_type, len(edges))
         
         edge = graph.add_edge(name=name, cdg_type=cdg_type, attrs=attrs, src=src, dst=dst)
+        print(edge)
         edges.append(edge)
         return edge
 
@@ -162,7 +188,7 @@ class Generator:
     def _gen_attrs(self, cdg_type: CDGType):
 
         param_range = self._ladder_model.get_param_range(cdg_type=cdg_type)
-        attrs = {key: self._sampler.sample_float(val[0], val[1]) for key, val in param_range.items()}
+        attrs = {key: str(self._sampler.sample_float(val[0], val[1])) for key, val in param_range.items()}
 
         return attrs
 
@@ -179,16 +205,76 @@ class Generator:
         return '{}{}'.format(self._type2prefix[t], i)
 
     def _pulse_fn_str(self, attrs):
-        return 'pulse(t, amplitude={}, delay={}, rise_time={}, fall_time={}, pulse_width={}, period={}'.format(
+        return 'pulse(t, amplitude={}, delay={}, rise_time={}, fall_time={}, pulse_width={}, period={})'.format(
             attrs['amplitude'], attrs['delay'], attrs['rise_time'], attrs['fall_time'], 
             attrs['pulse_width'], attrs['period']
         )
         
-    
+class Simulator:
+
+    def spice_sim(self, spice_str, file_name, temperature=25, nominal_temperature=25, step_time=1e-10, end_time=75e-9):
+        circuit = Circuit('simulation')
+        print('spice_sim')
+        circuit.raw_spice += spice_str
+        simulator = circuit.simulator(temperature=temperature, nominal_temperature=nominal_temperature)
+        analysis = simulator.transient(step_time=step_time, end_time=end_time)
+
+        time_data = analysis.time.as_ndarray()
+        plt.figure(1)
+        for name in analysis.nodes:
+            data = analysis.nodes[name]
+            series_name = name
+            series_data = data.as_ndarray()
+            plt.plot(time_data, series_data, label=series_name)
+        plt.legend()
+        plt.savefig(file_name)
+        plt.clf()
+        # return analysis
+        # return time_data, analysis.nodes['c_0'].as_ndarray(), analysis.nodes['sum_0'].as_ndarray()
+
+    def ds_sim(self, graph: CDG, model: LadderModel, file_name, time_range=[0, 75e-9], n_time_points=1000):
+
+        from ark.compiler import ArkCompiler
+        from ark.rewrite import RewriteGen
+        from ark.solver import SMTSolver
+        from ark.validator import ArkValidator
+        compiler = ArkCompiler(rewrite=RewriteGen())
+        validator = ArkValidator(solver=SMTSolver())
+
+        spec = model.spec
+        help_fn = model.help_fn
+        validator.validate(cdg=graph, cdg_spec=spec)
+
+        # validate
+        validator.validate(cdg=graph, cdg_spec=spec)
+
+        # compile
+        compiler.compile(cdg=graph, cdg_spec=spec, help_fn=help_fn, import_lib={})
+
+        var_to_idx = compiler.var_mapping
+        n_states = len(var_to_idx)
+        time_points = np.linspace(*time_range, n_time_points)
+        states = [0 for _ in range(n_states)]
+        sol = solve_ivp(compiler.prog(), time_range, states, dense_output=True, max_step=1e-10)
+        plt.figure(1)
+        for name in var_to_idx:
+            idx = var_to_idx[name]
+            plt.plot(time_points, sol.sol(time_points)[idx].T, label=name)
+        plt.legend()
+        plt.savefig(file_name)
+        plt.clf()
+        # return time_points, var_to_idx, sol
+        # return time_points, sol.sol(time_points)[var_to_idx['c_0']], sol.sol(time_points)[var_to_idx['sum_0']]
+
 if __name__ == '__main__':
     g = Generator()
+    sim = Simulator()
     from ark.test.ladder.mapping import SpiceMapper
 
     mapper = SpiceMapper()
-    for seed in range(100):
-        print(mapper.to_spice(g.generate(max_op=3, seed=seed)))
+    for seed in range(5):
+        graph = g.generate(max_op=3, seed=seed)
+        spice_str = mapper.to_spice(graph=graph)
+
+        sim.ds_sim(graph=graph, model=g._ladder_model, file_name='ds{}.png'.format(seed))
+        # sim.spice_sim(spice_str=spice_str, file_name='sp{}.png'.format(seed))

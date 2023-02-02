@@ -15,8 +15,8 @@ validator = ArkValidator(solver=SMTSolver())
 from ark.specification.types import NodeType, StatefulNodeType, EdgeType
 VN = StatefulNodeType(type_name='VN', attrs={'c': [0.1e-9, 10e-9]})
 IN = StatefulNodeType(type_name='IN', attrs={'l': [0.1e-9, 10e-9]})
-R = NodeType(type_name='R', attrs={'r': [0, 1e6]})
-S = NodeType(type_name='S', attrs={'fn': ['func', -2, 2], 'r': [0, 1e6]})
+R = NodeType(type_name='R', attrs={'r': [0.5, 1.5]})
+S = NodeType(type_name='S', attrs={'fn': ['func', -2, 2], 'r': [0.5, 1.5]})
 E = EdgeType(type_name='E', attrs={'q_src': [0.5, 1.5], 'q_dst': [0.5, 1.5]})
 cdg_types = [VN, IN, R, S, E]
 
@@ -75,14 +75,14 @@ class LadderModel:
 
     _cdg_types = cdg_types
     _spec = spec
-    _help_fn = pulse
+    _help_fn = [pulse]
     _param_ranges = {
         VN: VN.attrs,
         IN: IN.attrs,
         R: R.attrs,
         E: E.attrs,
         S: {'amplitude': [-5, 5], 'delay': [0, 50e-9], 'rise_time': [0, 50e-9], 'fall_time': [0, 50e-9], 
-            'pulse_width': [0, 50e-9], 'period': [1, 2], 'r': [0, 1e6]} # arbitrary param range only for random testing
+            'pulse_width': [0, 50e-9], 'period': [1, 2], 'r': [0.5, 1.5]} # arbitrary param range only for random testing
     }
 
     

@@ -212,27 +212,9 @@ class Generator:
         
 class Simulator:
 
-    def spice_sim(self, spice_str, file_name, temperature=25, nominal_temperature=25, step_time=1e-10, end_time=75e-9):
-        circuit = Circuit('simulation')
-        print('spice_sim')
-        circuit.raw_spice += spice_str
-        simulator = circuit.simulator(temperature=temperature, nominal_temperature=nominal_temperature)
-        analysis = simulator.transient(step_time=step_time, end_time=end_time)
+    def sim_cmp(self, spice_str: str, graph: CDG, model: LadderModel, tol: float):
 
-        time_data = analysis.time.as_ndarray()
-        plt.figure(1)
-        for name in analysis.nodes:
-            data = analysis.nodes[name]
-            series_name = name
-            series_data = data.as_ndarray()
-            plt.plot(time_data, series_data, label=series_name)
-        plt.legend()
-        plt.savefig(file_name)
-        plt.clf()
-        # return analysis
-        # return time_data, analysis.nodes['c_0'].as_ndarray(), analysis.nodes['sum_0'].as_ndarray()
-
-    def ds_sim(self, graph: CDG, model: LadderModel, file_name, time_range=[0, 75e-9], n_time_points=1000):
+        time_range = [0, 75e-9]
 
         from ark.compiler import ArkCompiler
         from ark.rewrite import RewriteGen
@@ -253,28 +235,47 @@ class Simulator:
 
         var_to_idx = compiler.var_mapping
         n_states = len(var_to_idx)
-        time_points = np.linspace(*time_range, n_time_points)
         states = [0 for _ in range(n_states)]
         sol = solve_ivp(compiler.prog(), time_range, states, dense_output=True, max_step=1e-10)
-        plt.figure(1)
+
+        circuit = Circuit('simulation')
+        circuit.raw_spice += spice_str
+        simulator = circuit.simulator(temperature=25, nominal_temperature=25)
+        analysis = simulator.transient(step_time=1e-10, end_time=time_range[1])
+
+        time_data = analysis.time.as_ndarray()
+
         for name in var_to_idx:
             idx = var_to_idx[name]
-            plt.plot(time_points, sol.sol(time_points)[idx].T, label=name)
-        plt.legend()
-        plt.savefig(file_name)
-        plt.clf()
-        # return time_points, var_to_idx, sol
-        # return time_points, sol.sol(time_points)[var_to_idx['c_0']], sol.sol(time_points)[var_to_idx['sum_0']]
+            ds_data = sol.sol(time_data)[idx].T
+            spice_data = analysis.nodes[name].as_ndarray()
+            max_error = np.max(ds_data - spice_data)
+            if max_error > tol:
+                plt.figure(1)
+                for name in var_to_idx:
+                    idx = var_to_idx[name]
+                    ds_data = sol.sol(time_data)[idx].T
+                    spice_data = analysis.nodes[name].as_ndarray()
+                    plt.plot(time_data, ds_data, label='ds_{}'.format(name))
+                    plt.plot(time_data, spice_data, label='spice_{}'.format(name))
+                plt.legend()
+                plt.savefig('fail.png')
+                plt.clf()
+                assert False
+
 
 if __name__ == '__main__':
     g = Generator()
     sim = Simulator()
     from ark.test.ladder.mapping import SpiceMapper
+    from PySpice.Spice.NgSpice.Shared import NgSpiceCommandError
 
     mapper = SpiceMapper()
-    for seed in range(5):
-        graph = g.generate(max_op=10, seed=seed)
+    for seed in range(20):
+        graph = g.generate(max_op=20, seed=seed)
         spice_str = mapper.to_spice(graph=graph)
 
-        sim.ds_sim(graph=graph, model=g._ladder_model, file_name='ds{}.png'.format(seed))
-        sim.spice_sim(spice_str=spice_str, file_name='sp{}.png'.format(seed))
+        try:
+            sim.sim_cmp(spice_str=spice_str, graph=graph, model=g._ladder_model, tol=0.0001)
+        except NgSpiceCommandError:
+            pass

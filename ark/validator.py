@@ -19,8 +19,8 @@ class ArkValidator:
 
         for node in cdg.nodes:
             candidate_rules = rule_dict[node.cdg_type.type_name]
-            print(node)
-            print(candidate_rules)
+            # print(node)
+            # print(candidate_rules)
             for rule in candidate_rules:
                 matrix, constraints = rule.get_validation_matrix(node=node)
             self._solver.solve_validation_matrix(matrix=matrix, constraints=constraints)

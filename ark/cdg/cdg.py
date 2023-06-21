@@ -63,6 +63,13 @@ class CDGNode(CDGElement):
     def is_dst(self, edge: 'CDGEdge') -> bool:
         return edge.dst == self
 
+    def is_neighbor(self, node: 'CDGNode') -> bool:
+        for edge in self.edges:
+            if self.get_neighbor(edge=edge) == node:
+                return True
+
+        return False
+
     def get_direction(self, edge: 'CDGEdge') -> int:
         if self.is_src(edge) and self.is_dst(edge):
             return Direction.SELF
@@ -80,6 +87,16 @@ class CDGNode(CDGElement):
             return edge.src
         else:
             assert False, '{} does not connect to {}'.format(self, edge)
+
+    def print_local(self):
+        print(self.name)
+        for edge in self.edges:
+            if self.is_src(edge=edge):
+                arrow = '-{}>'.format(edge.name)
+            else:
+                arrow = '<{}-'.format(edge.name)
+            print('\t', arrow, self.get_neighbor(edge=edge).name)
+            
 
 
 class CDGEdge(CDGElement):

@@ -1,7 +1,4 @@
-from scipy.integrate import solve_ivp
-import matplotlib.pyplot as plt
 import numpy as np
-from copy import deepcopy
 
 from ark.compiler import ArkCompiler
 from ark.rewrite import RewriteGen
@@ -18,8 +15,8 @@ validator = ArkValidator(solver=SMTSolver())
 from ark.specification.types import NodeType, StatefulNodeType, EdgeType
 VN = StatefulNodeType(type_name='VN', attrs={'c': [0.1e-9, 10e-9]})
 IN = StatefulNodeType(type_name='IN', attrs={'l': [0.1e-9, 10e-9]})
-R = NodeType(type_name='R', attrs={'r': [0, 1e6]})
-S = NodeType(type_name='S', attrs={'fn': ['func', -2, 2], 'r': [0, 1e6]})
+R = NodeType(type_name='R', attrs={'r': [0.5, 1.5]})
+S = NodeType(type_name='S', attrs={'fn': ['func', -2, 2], 'r': [0.5, 1.5]})
 E = EdgeType(type_name='E', attrs={'q_src': [0.5, 1.5], 'q_dst': [0.5, 1.5]})
 cdg_types = [VN, IN, R, S, E]
 
@@ -73,37 +70,50 @@ def pulse(t, amplitude=1, delay=0, rise_time=5e-9, fall_time=5e-9, pulse_width=1
     return 0
 
 # CDG
-graph = CDG()
-vs = graph.add_node(name='vs', cdg_type=S, attrs={'fn': 'pulse(t)', 'r':'1'})
-n_ladder = 20
-l = graph.add_node(name='l{}'.format(0), cdg_type=IN, attrs={'l': '1e-9'})
-e = graph.add_edge(name='es_l0', cdg_type=E, attrs={'q_src': '1', 'q_dst': '1'}, src=vs, dst=l)
-for i in range(n_ladder - 1):
-    c = graph.add_node(name='c{}'.format(i), cdg_type=VN, attrs={'c': '1e-9'})
-    e1 = graph.add_edge(name='e_l{}_c{}'.format(i, i), cdg_type=E, attrs={'q_src': '1', 'q_dst': '1'}, src=l, dst=c)
-    l = graph.add_node(name='l{}'.format(i + 1), cdg_type=IN, attrs={'l': '1e-9'})
-    e2 = graph.add_edge(name='e_c{}_l{}'.format(i, i+1), cdg_type=E, attrs={'q_src': '1', 'q_dst': '1'}, src=c, dst=l)
-c = graph.add_node(name='c{}'.format(n_ladder - 1), cdg_type=VN, attrs={'c': '1e-9'})
-e = graph.add_edge(name='e_l{}_c{}'.format(n_ladder - 1, n_ladder - 1), cdg_type=E, attrs={'q_src': '1', 'q_dst': '1'}, src=l, dst=c)
-r = graph.add_node(name='r', cdg_type=R, attrs={'r': '1e3'})
-e3 = graph.add_edge(name='e_c{}_r'.format(n_ladder - 1), cdg_type=E, attrs={'q_src': '1', 'q_dst': '1'}, src=c, dst=r)
 
-# validate
-validator.validate(cdg=graph, cdg_spec=spec)
+class LadderModel:
 
-# compile
-compiler.compile(cdg=graph, cdg_spec=spec, help_fn=[pulse], import_lib={})
+    _cdg_types = cdg_types
+    _spec = spec
+    _help_fn = [pulse]
+    _param_ranges = {
+        VN: VN.attrs,
+        IN: IN.attrs,
+        R: R.attrs,
+        E: E.attrs,
+        S: {'amplitude': [-5, 5], 'delay': [0, 50e-9], 'rise_time': [0, 50e-9], 'fall_time': [0, 50e-9], 
+            'pulse_width': [0, 50e-9], 'period': [1, 2], 'r': [0.5, 1.5]} # arbitrary param range only for random testing
+    }
 
-n_states = n_ladder * 2
-time_range = [0, 100e-9]
-time_points = np.linspace(*time_range, 1000)
-states = [0 for _ in range(n_states)]
-sol = solve_ivp(compiler.prog(), time_range, states, dense_output=True, max_step=1e-10)
-# print(sol.sol(time_points))
-plt.plot(time_points, [pulse(t) for t in time_points])
-for i in range(2):
-    plt.plot(time_points, sol.sol(time_points)[i].T)
-plt.xlabel('time(s)')
-plt.ylabel('Amplitude(V)')
-plt.savefig('tmp.png')
-plt.clf()
+    
+    def get_param_range(self, cdg_type) -> dict:
+        return self._param_ranges[cdg_type]
+
+    @property
+    def VN(self):
+        return self._cdg_types[0]
+
+    @property
+    def IN(self):
+        return self._cdg_types[1]
+
+    @property
+    def R(self):
+        return self._cdg_types[2]
+
+    @property
+    def S(self):
+        return self._cdg_types[3]
+    
+    @property
+    def E(self):
+        return self._cdg_types[4]
+
+    @property
+    def spec(self):
+        return self._spec
+
+    @property
+    def help_fn(self):
+        return self._help_fn
+

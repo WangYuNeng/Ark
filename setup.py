@@ -5,5 +5,5 @@ setup(
     version = '0.1.0',
     description = 'Spatial Analog Abstraction',
     packages=['ark'],
-    install_requires=['pyspice', 'matplotlib', 'numpy']
+    install_requires=['pyspice', 'matplotlib', 'numpy', 'pysmt']
 )

@@ -1,46 +1,19 @@
-from ark.globals import Direction
-from ark.specification.types import CDGType, StatefulNodeType, NodeType, EdgeType
 from collections import OrderedDict
 import warnings
+from ark.globals import Direction
+# from ark.specification.types import CDGType, NodeType, EdgeType
 
 class CDGElement:
 
-    def __init__(self, id: int, name: str, cdg_type: CDGType, attrs: dict) -> None:
-        self._id = id
-        self._name = name
-        self._cdg_type = cdg_type
-        self._attrs = attrs
-
-    @property
-    def id(self) -> int:
-        return self._id
-        
-    @property
-    def name(self)-> str:
-        return self._name
-
-    @property
-    def cdg_type(self) -> CDGType:
-        return self._cdg_type
-
-    @property
-    def attrs(self) -> dict:
-        return self._attrs
-
-    def __repr__(self) -> str:
-        return '{}({}, {}, {}, {})'.format(self.__class__.__name__, self._id, self.name, self.cdg_type, self.attrs)
-
-    def __eq__(self, __o: object) -> bool:
-        return self._id == __o.id
-    
-    def __hash__(self) -> int:
-        return self.id.__hash__()
+    def __init__(self, cdg_type: 'CDGType', **attrs) -> None:
+        self.cdg_type = cdg_type
+        self.attrs = attrs
 
 
 class CDGNode(CDGElement):
 
-    def __init__(self, id: int, name: str, cdg_type: CDGType, attrs: dict) -> None:
-        super().__init__(id, name, cdg_type, attrs)
+    def __init__(self, cdg_type: 'NodeType', **attrs) -> None:
+        super().__init__(cdg_type, **attrs)
         self._edges = set()
 
     @property
@@ -101,7 +74,7 @@ class CDGNode(CDGElement):
 
 class CDGEdge(CDGElement):
 
-    def __init__(self, id: int, name: str, cdg_type: CDGType, attrs: dict, src: CDGNode, dst: CDGNode) -> None:
+    def __init__(self, id: int, name: str, cdg_type: 'CDGType', attrs: dict, src: CDGNode, dst: CDGNode) -> None:
         super().__init__(id, name, cdg_type, attrs)
         self._src = src
         self._dst = dst
@@ -134,7 +107,7 @@ class CDG:
         self._next_id += 1
         return self._next_id - 1
     
-    def add_node(self, name: str, cdg_type: CDGType, attrs: dict) -> CDGNode:
+    def add_node(self, name: str, cdg_type: 'CDGType', attrs: dict) -> CDGNode:
         id = self._get_id()
         node = CDGNode(id=id, name=name, cdg_type=cdg_type, attrs=attrs)
         if isinstance(cdg_type, StatefulNodeType):
@@ -144,7 +117,7 @@ class CDG:
         self._elements[id] = node
         return node
 
-    def add_edge(self, name: str, cdg_type: CDGType, attrs: dict, src: CDGNode, dst: CDGNode) -> CDGEdge:
+    def add_edge(self, name: str, cdg_type: 'CDGType', attrs: dict, src: CDGNode, dst: CDGNode) -> CDGEdge:
         id = self._get_id()
         edge = CDGEdge(id=id, name=name, cdg_type=cdg_type, attrs=attrs, src=src, dst=dst)
         src.add_edge(edge)

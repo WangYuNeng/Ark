@@ -1,5 +1,5 @@
 import ast
-from ark.specification.types import EdgeType, NodeType, StatefulNodeType
+from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.generation_rule import GenRule
 from ark.specification.validation_rule import ValRule
 from ark.cdg.cdg import CDG, CDGEdge, CDGNode

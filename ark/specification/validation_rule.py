@@ -1,6 +1,6 @@
 import numpy as np
 from ark.cdg.cdg import CDGNode, CDGEdge
-from ark.specification.types import EdgeType, NodeType, StatefulNodeType
+from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.constraint import DegreeConstraint
 
 class Connection:

@@ -1,6 +1,6 @@
 import ast
 import copy
-from ark.specification.types import EdgeType, NodeType, StatefulNodeType
+from ark.specification.cdg_types import EdgeType, NodeType
 from ark.cdg .cdg import CDGEdge, CDGNode
 
 class GenRule:

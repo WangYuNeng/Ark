@@ -12,7 +12,7 @@ compiler = ArkCompiler(rewrite=RewriteGen())
 validator = ArkValidator(solver=SMTSolver())
 
 # CDGType
-from ark.specification.types import NodeType, StatefulNodeType, EdgeType
+from ark.specification.cdg_types import NodeType, StatefulNodeType, EdgeType
 VN = StatefulNodeType(type_name='VN', attrs={'c': [0.1e-9, 10e-9]})
 IN = StatefulNodeType(type_name='IN', attrs={'l': [0.1e-9, 10e-9]})
 R = NodeType(type_name='R', attrs={'r': [0.5, 1.5]})

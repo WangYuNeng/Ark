@@ -1,12 +1,12 @@
 """Global variables and constants for the ark package."""
+from enum import Enum
 from dataclasses import dataclass
 
-@dataclass
-class Direction:
+class Direction(Enum):
     """Class for keeping track of the direction of an edge in a CDG."""
-    _in: int = 0
-    _out: int = 1
-    _self: int = 2
+    IN: int = 0
+    OUT: int = 1
+    SELF: int = 2
 
 @dataclass
 class Range:
@@ -16,7 +16,7 @@ class Range:
 
 class Attr:
     """Ａttribute definition for a CDGType."""
-    def __init__(self, attr_type: type, attr_range: Range):
+    def __init__(self, attr_type: type, attr_range: Range=None):
         self.type = attr_type
         self.valid_range = attr_range
 
@@ -27,6 +27,8 @@ class Attr:
         """Check if val is in the valid range of this attribute."""
         if not isinstance(val, self.type):
             raise TypeError(f'Expected type {self.type}, got {type(val)}')
+        if self.valid_range is None:
+            return True
         if self.valid_range.min is not None and val < self.valid_range.min or \
             self.valid_range.max is not None and val > self.valid_range.max:
             raise ValueError(f'Expected value in range {self.valid_range}, got {val}')

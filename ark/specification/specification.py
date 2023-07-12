@@ -11,9 +11,10 @@ class CDGSpec:
         self._generation_rules = generation_rules
         self._gen_rule_dict = self._collect_gen_identifier()
         self._gen_rule_class = self._check_class(generation_rules)
-        self._validation_rules = validation_rules
-        self._val_rule_dict = self._collect_val_identifier()
-        self._val_rule_class = self._check_class(validation_rules)
+        if validation_rules is not None:
+            self._validation_rules = validation_rules
+            self._val_rule_dict = self._collect_val_identifier()
+            self._val_rule_class = self._check_class(validation_rules)
 
     @property
     def cdg_types(self):
@@ -48,7 +49,7 @@ class CDGSpec:
         Call the corresponding generation rule to walk the ast and generate expr
         '''
         id = GenRule.get_identifier(tgt_et=edge.cdg_type, src_nt=src.cdg_type, dst_nt=dst.cdg_type, gen_tgt=tgt)
-        rule = self._genid_dict[id]
+        rule = self._gen_rule_dict[id]
         return rule.apply(edge=edge, src_node=src, dst_node=dst)
 
     def _collect_val_identifier(self):

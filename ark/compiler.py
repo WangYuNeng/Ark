@@ -1,4 +1,5 @@
 import ast, inspect
+from types import FunctionType
 import copy
 
 from ark.rewrite import RewriteGen
@@ -45,8 +46,12 @@ class ArkCompiler():
         def mk_arg(v):
             return ast.arg(arg=v)
 
-        def parse_expr(text):
-            mod = ast.parse(text)
+        def parse_expr(val):
+            if isinstance(val, int) or isinstance(val, float):
+                val = str(val)
+            elif isinstance(val, FunctionType):
+                raise NotImplementedError
+            mod = ast.parse(val)
             return mod.body[0].value
 
         def set_ctx(n, ctx):
@@ -80,7 +85,7 @@ class ArkCompiler():
         
         input_vec = '__VARIABLES'
         stmts.append(ast.Assign([
-            set_ctx(ast.Tuple([mk_var(node.name) for node in cdg.stateful_nodes]), ast.Store)],
+            set_ctx(ast.Tuple([mk_var(node.name) for node in cdg.nodes(order=0)]), ast.Store)],
             set_ctx(mk_var(input_vec), ast.Load)))
         for ele in cdg.nodes + cdg.edges:
             vname = ele.name
@@ -96,20 +101,20 @@ class ArkCompiler():
 
         rule_dict = cdg_spec.gen_rule_dict
         rule_class = cdg_spec.gen_rule_class
-        for node in cdg.stateful_nodes:
+        for node in cdg.nodes_in_order(1):
             # print(node)
             vname = ddt(node.name)
             rhs = []
             for edge in node.edges:
                 src, dst = edge.src, edge.dst
-                id = rule_class.get_identifier(tgt_et=edge.cdg_type, src_nt=src.cdg_type, dst_nt=dst.cdg_type, gen_tgt=node.is_dst(edge))
+                id = rule_class.get_identifier(tgt_et=edge.cdg_type, src_nt=src.cdg_type, dst_nt=dst.cdg_type, gen_tgt=node.gen_tgt_type(edge))
                 gen_rule = rule_dict[id]
                 self._rewrite.mapping = gen_rule.get_rewrite_mapping(edge=edge)
                 rhs.append(self._apply_rule(edge=edge, rule=rule_dict[id], transformer=self._rewrite))
             stmts.append(ast.Assign(targets=[set_ctx(mk_var(vname), ast.Store)], value=concat_expr(rhs, ast.Add)))
             
-        self._var_mapping = {node.name: i for i, node in enumerate(cdg.stateful_nodes)}
-        stmts.append(set_ctx(ast.Return(ast.List([mk_var(ddt(node.name)) for node in cdg.stateful_nodes])), ast.Load))
+        self._var_mapping = {node.name: i for i, node in enumerate(cdg.nodes_in_order(1))}
+        stmts.append(set_ctx(ast.Return(ast.List([mk_var(ddt(node.name)) for node in cdg.nodes_in_order(1)])), ast.Load))
 
         arguments =ast.arguments(posonlyargs=[], args=[mk_arg('t'), mk_arg(input_vec)], kwonlyargs=[], kw_defaults=[], defaults=[])
         top_stmts = []

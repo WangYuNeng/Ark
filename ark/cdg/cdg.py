@@ -1,20 +1,27 @@
 from typing import Dict, List
 from ark.globals import Direction
-from ark.specification.generation_rule import SRC, DST, SELF
+from ark.specification.generation_rule import SRC, DST, SELF, GenRuleKeyword
 # from ark.specification.types import CDGType, NodeType, EdgeType
 
 class CDGElement:
+    """Base class for CDG nodes and edges."""
 
-    def __init__(self, cdg_type: 'CDGType', name: str, **attrs) -> None:
+    def __init__(self, cdg_type: "CDGType", name: str, **attrs) -> None:
         self.cdg_type = cdg_type
         self.name = name
         self.attrs = attrs
 
+    def __str__(self) -> str:
+        return self.name
+
+def sort_element(elements: List[CDGElement]) -> List[CDGElement]:
+    """Sort CDG elements by their names."""
+    return sorted(elements, key=lambda x: x.name)
 
 class CDGNode(CDGElement):
     """Constrained Dynamic Graph (CDG) node class."""
 
-    def __init__(self, cdg_type: 'NodeType', name: str, **attrs) -> None:
+    def __init__(self, cdg_type: "NodeType", name: str, **attrs) -> None:
         super().__init__(cdg_type, name, **attrs)
         self.edges = set()
 
@@ -28,7 +35,7 @@ class CDGNode(CDGElement):
     def remove_edge(self, e):
         self.edges.remove(e)
 
-    def gen_tgt_type(self, edge: 'CDGEdge') -> 'GenRuleKeyword':
+    def gen_tgt_type(self, edge: "CDGEdge") -> GenRuleKeyword:
         """Return whether this node is src/dst/self of the edge."""
         if edge.src == edge.dst:
             return SELF
@@ -37,20 +44,20 @@ class CDGNode(CDGElement):
         elif edge.dst == self:
             return DST
 
-    def is_src(self, edge: 'CDGEdge') -> bool:
+    def is_src(self, edge: "CDGEdge") -> bool:
         return edge.src == self
 
-    def is_dst(self, edge: 'CDGEdge') -> bool:
+    def is_dst(self, edge: "CDGEdge") -> bool:
         return edge.dst == self
 
-    def is_neighbor(self, node: 'CDGNode') -> bool:
+    def is_neighbor(self, node: "CDGNode") -> bool:
         for edge in self.edges:
             if self.get_neighbor(edge=edge) == node:
                 return True
 
         return False
 
-    def get_direction(self, edge: 'CDGEdge') -> int:
+    def get_direction(self, edge: "CDGEdge") -> int:
         if self.is_src(edge) and self.is_dst(edge):
             return Direction.SELF
         elif self.is_src(edge):
@@ -58,7 +65,7 @@ class CDGNode(CDGElement):
         elif self.is_dst(edge):
             return Direction.IN
         else:
-            assert False, '{} does not connect to {}'.format(self, edge)
+            assert False, f'{self} does not connect to {edge}'
 
     def get_neighbor(self, edge: 'CDGEdge'):
         if self.is_src(edge):
@@ -66,27 +73,27 @@ class CDGNode(CDGElement):
         elif self.is_dst(edge):
             return edge.src
         else:
-            assert False, '{} does not connect to {}'.format(self, edge)
+            assert False, f'{self} does not connect to {edge}'
 
     def print_local(self):
         print(self.name)
         for edge in self.edges:
             if self.is_src(edge=edge):
-                arrow = '-{}>'.format(edge.name)
+                arrow = f'-{edge.name}>'
             else:
-                arrow = '<{}-'.format(edge.name)
+                arrow = f'<{edge.name}-'
             print('\t', arrow, self.get_neighbor(edge=edge).name)
 
 class CDGEdge(CDGElement):
     """Constrained Dynamic Graph (CDG) edge class."""
 
-    def __init__(self, cdg_type: 'CDGType', name: str, **attrs) -> None:
+    def __init__(self, cdg_type: "CDGType", name: str, **attrs) -> None:
         super().__init__(cdg_type, name, **attrs)
         self._src, self._dst = None, None
 
     def connect(self, src: CDGNode, dst: CDGNode) -> None:
         """Connect this edge to two nodes."""
-        if src is None or dst is None:
+        if self._src is not None or self._dst is not None:
             raise RuntimeError('Edge already connected')
         self._src, self._dst = src, dst
 
@@ -151,19 +158,19 @@ class CDG:
         self._order_to_nodes[order].add(node)
 
     def nodes_in_order(self, order: int) -> list:
-        """Return nodes in the graph based on order.
+        """Return nodes in the graph based on order sorted by node.name.
 
         If order is -1, return all nodes.
         """
         if order == -1:
-            return list(set.union(*self._order_to_nodes))
+            return sort_element(list(set.union(*self._order_to_nodes)))
         else:
-            return list(self._order_to_nodes[order])
+            return sort_element(list(self._order_to_nodes[order]))
 
     @property
     def nodes(self) -> list:
-        """Return all nodes in the graph."""
-        return list(set.union(*self._order_to_nodes))
+        """Return all nodes in the graph sorted by node.name."""
+        return sort_element(list(set.union(*self._order_to_nodes)))
 
     @property
     def edges(self) -> list:

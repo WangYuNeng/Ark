@@ -5,7 +5,8 @@ import copy
 from ark.rewrite import RewriteGen
 from ark.cdg.cdg import CDG, CDGNode, CDGEdge, CDGElement
 from ark.specification.specification import CDGSpec
-from ark.specification.generation_rule import GenRule
+from ark.specification.generation_rule import GenRule, TIME, kw_name
+from ark.reduction import Reduction
 
 class ArkCompiler():
 
@@ -13,44 +14,45 @@ class ArkCompiler():
         self._rewrite = rewrite
         self._var_mapping = {}
         self._namespace = {}
-        pass
 
     @property
     def prog_name(self):
+        """name of the program to be generated"""
         return 'dynamics'
-    
+
     @property
     def var_mapping(self) -> dict:
-        # map variable (node.name) to the corresponding index in the state variables
+        """map variable (node.name) to the corresponding index in the state variables"""
         return self._var_mapping
 
     def prog(self):
+        """return the compiled program"""
         return self._namespace[self.prog_name]
 
-    def compile(self, cdg: CDG, cdg_spec: CDGSpec, help_fn=[], import_lib={}):
+    def compile(self, cdg: CDG, cdg_spec: CDGSpec, help_fn: list, import_lib: list):
         '''
         Compile the cdg to a function for dynamical system simulation
         help_fn: list of non-built-in function written in attributes, e.g., [sin, trapezoidal]
         import_lib: additional libraries, e.g., {'np': np}
         '''
 
-        def ddt(v):
-            return 'ddt_{}'.format(v)
+        def ddt(name: str) -> str:
+            return f'ddt_{name}'
 
-        def rn_attr(v, attr):
-            return '{}_{}'.format(v, attr)
+        def rn_attr(name: str, attr: str) -> str:
+            return f'{name}_{attr}'
 
-        def mk_var(v):
-            return ast.Name(v)
+        def mk_var(name: str) -> ast.Name:
+            return ast.Name(name)
 
-        def mk_arg(v):
-            return ast.arg(arg=v)
+        def mk_arg(name: str) -> ast.arg:
+            return ast.arg(arg=name)
 
-        def parse_expr(val):
+        def parse_expr(val: 'int | float | FunctionType | str') -> ast.Expr:
             if isinstance(val, int) or isinstance(val, float):
                 val = str(val)
             elif isinstance(val, FunctionType):
-                raise NotImplementedError
+                val = val.__name__
             mod = ast.parse(val)
             return mod.body[0].value
 
@@ -77,15 +79,19 @@ class ArkCompiler():
         dst: CDGNode
         edge: CDGEdge
         gen_rule: GenRule
+        reduction: Reduction
 
         stmts = []
 
         for fn in help_fn:
             stmts.append(ast.parse(inspect.getsource(fn)).body[0])
-        
+
         input_vec = '__VARIABLES'
+        if cdg.ds_order != 1:
+            raise NotImplementedError('only support first order dynamical system now')
+
         stmts.append(ast.Assign([
-            set_ctx(ast.Tuple([mk_var(node.name) for node in cdg.nodes(order=0)]), ast.Store)],
+            set_ctx(ast.Tuple([mk_var(node.name) for node in cdg.nodes_in_order(1)]), ast.Store)],
             set_ctx(mk_var(input_vec), ast.Load)))
         for ele in cdg.nodes + cdg.edges:
             vname = ele.name
@@ -96,27 +102,26 @@ class ArkCompiler():
             stmts.append(ast.Assign([
                 set_ctx(ast.Tuple(lhs), ast.Store)],
                 set_ctx(ast.Tuple(rhs), ast.Load)))
-            
 
-
-        rule_dict = cdg_spec.gen_rule_dict
-        rule_class = cdg_spec.gen_rule_class
         for node in cdg.nodes_in_order(1):
-            # print(node)
             vname = ddt(node.name)
+            reduction = node.reduction
             rhs = []
             for edge in node.edges:
                 src, dst = edge.src, edge.dst
-                id = rule_class.get_identifier(tgt_et=edge.cdg_type, src_nt=src.cdg_type, dst_nt=dst.cdg_type, gen_tgt=node.gen_tgt_type(edge))
-                gen_rule = rule_dict[id]
+                gen_rule = cdg_spec.match_gen_rule(edge=edge, src=src, dst=dst,
+                                                   tgt=node.gen_tgt_type(edge))
                 self._rewrite.mapping = gen_rule.get_rewrite_mapping(edge=edge)
-                rhs.append(self._apply_rule(edge=edge, rule=rule_dict[id], transformer=self._rewrite))
-            stmts.append(ast.Assign(targets=[set_ctx(mk_var(vname), ast.Store)], value=concat_expr(rhs, ast.Add)))
-            
-        self._var_mapping = {node.name: i for i, node in enumerate(cdg.nodes_in_order(1))}
-        stmts.append(set_ctx(ast.Return(ast.List([mk_var(ddt(node.name)) for node in cdg.nodes_in_order(1)])), ast.Load))
+                rhs.append(self._apply_rule(edge=edge, rule=gen_rule,
+                                            transformer=self._rewrite))
+            stmts.append(ast.Assign(targets=[set_ctx(mk_var(vname), ast.Store)],
+                                    value=concat_expr(rhs, reduction.ast_op())))
 
-        arguments =ast.arguments(posonlyargs=[], args=[mk_arg('t'), mk_arg(input_vec)], kwonlyargs=[], kw_defaults=[], defaults=[])
+        self._var_mapping = {node.name: i for i, node in enumerate(cdg.nodes_in_order(1))}
+        stmts.append(set_ctx(ast.Return(ast.List([mk_var(ddt(node.name))
+                                                  for node in cdg.nodes_in_order(1)])), ast.Load))
+
+        arguments =ast.arguments(posonlyargs=[], args=[mk_arg(kw_name(TIME)), mk_arg(input_vec)], kwonlyargs=[], kw_defaults=[], defaults=[])
         top_stmts = []
         top_stmts.append(ast.FunctionDef(self.prog_name, arguments, stmts, decorator_list=[]))
 

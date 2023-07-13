@@ -157,36 +157,56 @@ SRC, DST = GenRuleKeyword('SRC'), GenRuleKeyword('DST'),
 EDGE, SELF = GenRuleKeyword('EDGE'), GenRuleKeyword('SELF')
 TIME = Variable('TIME')
 
-def VAR(gen_rule_keyword: GenRuleKeyword) -> Variable:
+def var(gen_rule_keyword: GenRuleKeyword) -> Variable:
     """Returns a state variable for writing generation rules"""
     name = object.__getattribute__(gen_rule_keyword, 'name')
     return Variable(name)
+
+VAR = var
 
 def kw_name(keyword: GenRuleKeyword):
     """Returns the name of the keyword"""
     return object.__getattribute__(keyword, 'name')
 
+@dataclass
+class GenRuleId:
+    """Generation Rule Identifier Class"""
+
+    et: "EdgeType"
+    src_nt: "NodeType"
+    dst_nt: "NodeType"
+    gen_tgt: GenRuleKeyword
+
+    def __hash__(self) -> int:
+        return repr([self.et.name, self.src_nt.name,
+                     self.dst_nt.name, kw_name(self.gen_tgt)]).__hash__()
+
+    def __str__(self) -> str:
+        return str([self.et.name, self.src_nt.name,
+                    self.dst_nt.name, kw_name(self.gen_tgt)])
+
 class GenRule:
     """Generation Rule Class"""
 
-    def __init__(self, tgt_et: "EdgeType", src_nt: "NodeType", dst_nt: "NodeType",
+    def __init__(self, et: "EdgeType", src_nt: "NodeType", dst_nt: "NodeType",
                  gen_tgt: GenRuleKeyword, fn_exp: Expression) -> None:
-        self._tgt_et = tgt_et
+        self._et = et
         self._src_nt = src_nt
         self._dst_nt = dst_nt
         self._gen_tgt = gen_tgt
-        self._fn_ast = ast.parse(str(fn_exp), mode='eval')
+        self._id = GenRuleId(et, src_nt, dst_nt, gen_tgt)
+        self._fn_exp = fn_exp
 
     @staticmethod
-    def get_identifier(tgt_et: "EdgeType", src_nt: "NodeType", dst_nt: "NodeType",
-                       gen_tgt: GenRuleKeyword):
+    def get_identifier(et: "EdgeType", src_nt: "NodeType", dst_nt: "NodeType",
+                       gen_tgt: GenRuleKeyword) -> GenRuleId:
         """Returns a unique identifier for the generation rule"""
-        return repr([tgt_et.name, src_nt.name, dst_nt.name, kw_name(gen_tgt)])
+        return GenRuleId(et.name, src_nt.name, dst_nt.name, kw_name(gen_tgt))
 
     @property
-    def identifier(self):
+    def identifier(self) -> GenRuleId:
         """Unique identifier for the generation rule"""
-        return self.get_identifier(self._tgt_et, self._src_nt, self._dst_nt, self._gen_tgt)
+        return self._id
 
     @property
     def fn_ast(self):
@@ -194,7 +214,7 @@ class GenRule:
         TODO: Change to a more pythonic way of doing this, e.g., overload
         the arithmetic operators.
         """
-        return self._fn_ast
+        return ast.parse(str(self._fn_exp), mode='eval')
 
     def get_rewrite_mapping(self, edge: 'CDGEdge'):
         """
@@ -205,5 +225,9 @@ class GenRule:
         dst: 'CDGNode'
 
         src, dst = edge.src, edge.dst
-        name_map = {kw_name(EDGE): edge.name, kw_name(SRC): src.name, kw_name(DST): dst.name}
+        name_map = {kw_name(EDGE): edge.name, kw_name(SRC): src.name,
+                    kw_name(DST): dst.name, kw_name(TIME): kw_name(TIME)}
         return name_map
+
+    def __str__(self) -> str:
+        return f'{self.identifier}: {self._fn_exp}'

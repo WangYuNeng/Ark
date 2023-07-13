@@ -1,7 +1,8 @@
 '''
 Meta classes for CDG types.
 '''
-from typing import Dict
+from abc import abstractmethod
+import inspect
 from ark.reduction import Reduction, SUM
 from ark.cdg.cdg import CDGElement, CDGNode, CDGEdge
 
@@ -28,7 +29,6 @@ class CDGType(type):
         super().__init__(cls)
 
     def __call__(cls, **attrs) -> CDGElement:
-        print(cls.__dict__)
         element_name = cls.new_name() # Why does this trigger a pylint error?
         return super().__call__(cdg_type=cls, name=element_name, **attrs)
 
@@ -48,6 +48,11 @@ class CDGType(type):
         cls.new_instance_id += 1
         return element_name
 
+    @abstractmethod
+    def base_cdg_types(cls) -> "list[CDGType]":
+        """Return the base CDG types of this CDGType"""
+        raise NotImplementedError
+
     @staticmethod
     def instance_name(type_name, id):
         """Unique name of an instance of this CDGType"""
@@ -65,11 +70,11 @@ class NodeType(CDGType):
 
     Keyword arguments:
     name -- name of this node type
-    parent_type -- parent NodeType of this node type
+    base -- parent NodeType of this node type
     attrs -- attributes of this node type
     order -- the derivative taken in the dynamical system of this node type
     """
-    def __new__(mcs, name: str, base: CDGType=None, attr_defs: Dict=None,
+    def __new__(mcs, name: str, base: CDGType=None, attr_defs: dict=None,
                 order: int=0, reduction: Reduction=SUM):
 
         if base is None:
@@ -87,6 +92,10 @@ class NodeType(CDGType):
         bases = (base,)
         return super().__new__(mcs, name, bases, class_attrs)
 
+    def base_cdg_types(cls) -> 'list[NodeType]':
+        base_types = filter(lambda x: isinstance(x, NodeType), inspect.getmro(cls))
+        return list(base_types)
+
 class EdgeType(CDGType):
     """CDG edge type.
 
@@ -95,8 +104,12 @@ class EdgeType(CDGType):
     parent_type -- parent NodeType of this node type
     attrs -- attributes of this node type
     """
-    def __new__(mcs, name: str, base: CDGType=None, attr_defs: Dict=None):
+    def __new__(mcs, name: str, base: CDGType=None, attr_defs: dict=None):
         if base is None:
             bases = (CDGEdge,)
         class_attrs = {'attr_defs': attr_defs}
         return super().__new__(mcs, name, bases, class_attrs)
+
+    def base_cdg_types(cls) -> "list[EdgeType]":
+        base_types = filter(lambda x: isinstance(x, EdgeType), inspect.getmro(cls))
+        return list(base_types)

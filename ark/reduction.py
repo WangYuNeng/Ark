@@ -1,15 +1,15 @@
 """
 Reduction functions for the dynamical system.
 """
-from typing import Any
-
+import ast
 
 class Reduction:
     """
     Reduction base class.
     """
 
-    def __call__(self, *args: Any, **kwds: Any) -> Any:
+    def ast_op(self) -> ast.operator:
+        """return the ast operato correspond to the reduction"""
         raise NotImplementedError
 
 class Sum(Reduction):
@@ -17,16 +17,17 @@ class Sum(Reduction):
     Summation
     """
 
-    def __call__(self, *args: Any, **kwds: Any) -> Any:
-        pass
+    def ast_op(self) -> ast.operator:
+        return ast.Add
 
 class Product(Reduction):
     """
     Product
     """
 
-    def __call__(self, *args: Any, **kwds: Any) -> Any:
-        pass
+    def ast_op(self) -> ast.operator:
+        return ast.Mult
+
 
 SUM = Sum()
-PRODUCT = Product()
+PROD = Product()

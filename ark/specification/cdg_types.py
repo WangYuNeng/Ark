@@ -77,6 +77,8 @@ class NodeType(CDGType):
     def __new__(mcs, name: str, base: CDGType=None, attr_defs: dict=None,
                 order: int=0, reduction: Reduction=SUM):
 
+        if attr_defs is None:
+            attr_defs = {}
         if base is None:
             base = CDGNode
         else:

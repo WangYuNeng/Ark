@@ -36,8 +36,8 @@ class ArkCompiler():
         import_lib: additional libraries, e.g., {'np': np}
         '''
 
-        def ddt(name: str) -> str:
-            return f'ddt_{name}'
+        def ddt(name: str, order: int) -> str:
+            return f"{'ddt_' * order}{name}"
 
         def rn_attr(name: str, attr: str) -> str:
             return f'{name}_{attr}'
@@ -96,29 +96,33 @@ class ArkCompiler():
         for ele in cdg.nodes + cdg.edges:
             vname = ele.name
             lhs, rhs = [], []
-            for attr, val in ele.attrs.items():
-                lhs.append(mk_var(rn_attr(vname, attr)))
-                rhs.append(parse_expr(val))
-            stmts.append(ast.Assign([
-                set_ctx(ast.Tuple(lhs), ast.Store)],
-                set_ctx(ast.Tuple(rhs), ast.Load)))
+            if ele.attrs.items():
+                for attr, val in ele.attrs.items():
+                    lhs.append(mk_var(rn_attr(vname, attr)))
+                    rhs.append(parse_expr(val))
+                stmts.append(ast.Assign([
+                    set_ctx(ast.Tuple(lhs), ast.Store)],
+                    set_ctx(ast.Tuple(rhs), ast.Load)))
 
-        for node in cdg.nodes_in_order(1):
-            vname = ddt(node.name)
-            reduction = node.reduction
-            rhs = []
-            for edge in node.edges:
-                src, dst = edge.src, edge.dst
-                gen_rule = cdg_spec.match_gen_rule(edge=edge, src=src, dst=dst,
-                                                   tgt=node.gen_tgt_type(edge))
-                self._rewrite.mapping = gen_rule.get_rewrite_mapping(edge=edge)
-                rhs.append(self._apply_rule(edge=edge, rule=gen_rule,
-                                            transformer=self._rewrite))
-            stmts.append(ast.Assign(targets=[set_ctx(mk_var(vname), ast.Store)],
-                                    value=concat_expr(rhs, reduction.ast_op())))
+        for order in range(cdg.ds_order + 1):
+            for node in  cdg.nodes_in_order(order):
+                vname = ddt(node.name, order=order)
+                reduction = node.reduction
+                rhs = []
+                for edge in node.edges:
+                    src, dst = edge.src, edge.dst
+                    gen_rule = cdg_spec.match_gen_rule(edge=edge, src=src, dst=dst,
+                                                    tgt=node.gen_tgt_type(edge))
+                    if gen_rule is not None:
+                        self._rewrite.mapping = gen_rule.get_rewrite_mapping(edge=edge)
+                        rhs.append(self._apply_rule(edge=edge, rule=gen_rule,
+                                                    transformer=self._rewrite))
+                if rhs:
+                    stmts.append(ast.Assign(targets=[set_ctx(mk_var(vname), ast.Store)],
+                                            value=concat_expr(rhs, reduction.ast_op())))
 
-        self._var_mapping = {node.name: i for i, node in enumerate(cdg.nodes_in_order(1))}
-        stmts.append(set_ctx(ast.Return(ast.List([mk_var(ddt(node.name))
+        self._var_mapping = {node: i for i, node in enumerate(cdg.nodes_in_order(1))}
+        stmts.append(set_ctx(ast.Return(ast.List([mk_var(ddt(node.name, order=1))
                                                   for node in cdg.nodes_in_order(1)])), ast.Load))
 
         arguments =ast.arguments(posonlyargs=[], args=[mk_arg(kw_name(TIME)), mk_arg(input_vec)], kwonlyargs=[], kw_defaults=[], defaults=[])

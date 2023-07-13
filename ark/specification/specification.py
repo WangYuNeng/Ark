@@ -86,8 +86,7 @@ class CDGSpec:
                     return match
                 raise NotImplementedError('Have not implemented match in the heirarchy.')
 
-        raise KeyError(f'No generation rule found for edge {edge}, \
-                        source node {src}, destination node {dst}, and target {tgt}.')
+        return None
 
     def _collect_val_identifier(self) -> dict[str, ValRule]:
         rule: ValRule

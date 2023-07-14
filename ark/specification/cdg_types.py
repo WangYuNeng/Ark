@@ -29,8 +29,9 @@ class CDGType(type):
         super().__init__(cls)
 
     def __call__(cls, **attrs) -> CDGElement:
-        element_name = cls.new_name() # Why does this trigger a pylint error?
-        return super().__call__(cdg_type=cls, name=element_name, **attrs)
+        if cls.check_attr(**attrs):
+            element_name = cls.new_name() # Why does this trigger a pylint error?
+            return super().__call__(cdg_type=cls, name=element_name, **attrs)
 
     def check_attr(cls, **attrs) -> bool:
         """Check whether the given attributes are valid for this CDGType"""

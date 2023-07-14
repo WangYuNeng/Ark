@@ -226,7 +226,8 @@ class GenRule:
 
         src, dst = edge.src, edge.dst
         name_map = {kw_name(EDGE): edge.name, kw_name(SRC): src.name,
-                    kw_name(DST): dst.name, kw_name(TIME): kw_name(TIME)}
+                    kw_name(DST): dst.name, kw_name(SELF): src.name,
+                    kw_name(TIME): kw_name(TIME)}
         return name_map
 
     def __str__(self) -> str:

@@ -1,5 +1,6 @@
 '''
 Example: Chemical Reaction Network
+https://link.springer.com/article/10.1007/s11047-019-09775-1
 '''
 import numpy as np
 from scipy.integrate import solve_ivp

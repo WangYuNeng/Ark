@@ -11,7 +11,7 @@ from ark.compiler import ArkCompiler
 from ark.rewrite import RewriteGen
 # from ark.solver import SMTSolver
 # from ark.validator import ArkValidator
-from ark.globals import Range, Attr
+from ark.specification.attribute import Range, Attr
 from ark.specification.specification import CDGSpec
 from ark.cdg.cdg import CDG
 from ark.specification.cdg_types import NodeType, EdgeType

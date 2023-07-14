@@ -75,11 +75,11 @@ class NodeType(CDGType):
     attrs -- attributes of this node type
     order -- the derivative taken in the dynamical system of this node type
     """
-    def __new__(mcs, name: str, base: CDGType=None, attr_defs: dict=None,
+    def __new__(mcs, name: str, base: CDGType=None, attr_defs: list=None,
                 order: int=0, reduction: Reduction=SUM):
 
         if attr_defs is None:
-            attr_defs = {}
+            attr_defs = []
         if base is None:
             base = CDGNode
         else:

@@ -11,16 +11,16 @@ from ark.compiler import ArkCompiler
 from ark.rewrite import RewriteGen
 # from ark.solver import SMTSolver
 # from ark.validator import ArkValidator
-from ark.specification.attribute import Range, Attr
+from ark.specification.attribute_def import Range, AttrDef
 from ark.specification.specification import CDGSpec
 from ark.cdg.cdg import CDG
 from ark.specification.cdg_types import NodeType, EdgeType
 from ark.specification.generation_rule import GenRule, SRC, DST, SELF, EDGE, VAR, TIME
 from ark.reduction import SUM, PROD
 
-Osc = NodeType(name='Osc', order=1, attr_defs={'lock_fn': Attr(attr_type=FunctionType),
-                                               'osc_fn': Attr(attr_type=FunctionType)})
-Coupling = EdgeType(name='Coupling', attr_defs={'k': Attr(attr_type=float)})
+Osc = NodeType(name='Osc', order=1, attr_def=[AttrDef('lock_fn', attr_type=FunctionType),
+                                               AttrDef('osc_fn', attr_type=FunctionType)])
+Coupling = EdgeType(name='Coupling', attr_def=[AttrDef('k', attr_type=float)])
 
 def locking_fn(t, tau=np.pi * 5):
     return np.exp(-t / tau)
@@ -53,7 +53,7 @@ cdg_types = [Osc, Coupling]
 generation_rules = [rule1, rule2, rule3]
 spec = CDGSpec(cdg_types, generation_rules, None)
 compiler = ArkCompiler(rewrite=RewriteGen())
-compiler.compile(cdg=graph, cdg_spec=spec, help_fn=[locking_fn, sin_fn], import_lib={'np': np})
+compiler.compile(cdg=graph, cdg_spec=spec, help_fn=[locking_fn, sin_fn], import_lib={})
 
 time_range = [0, 15]
 time_points = np.linspace(*time_range, 1000)

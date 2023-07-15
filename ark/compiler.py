@@ -1,7 +1,7 @@
 import ast, inspect
 from types import FunctionType
 import copy
-
+import numpy as np
 from ark.rewrite import RewriteGen
 from ark.cdg.cdg import CDG, CDGNode, CDGEdge, CDGElement
 from ark.specification.specification import CDGSpec
@@ -13,7 +13,7 @@ class ArkCompiler():
     def __init__(self, rewrite: RewriteGen) -> None:
         self._rewrite = rewrite
         self._var_mapping = {}
-        self._namespace = {}
+        self._namespace = {'np': np}
 
     @property
     def prog_name(self):
@@ -29,7 +29,7 @@ class ArkCompiler():
         """return the compiled program"""
         return self._namespace[self.prog_name]
 
-    def compile(self, cdg: CDG, cdg_spec: CDGSpec, help_fn: list, import_lib: list):
+    def compile(self, cdg: CDG, cdg_spec: CDGSpec, help_fn: list, import_lib: dict):
         '''
         Compile the cdg to a function for dynamical system simulation
         help_fn: list of non-built-in function written in attributes, e.g., [sin, trapezoidal]
@@ -50,10 +50,14 @@ class ArkCompiler():
 
         def parse_expr(val: 'int | float | FunctionType | str') -> ast.Expr:
             if isinstance(val, int) or isinstance(val, float):
-                val = str(val)
+                val_str = str(val)
             elif isinstance(val, FunctionType):
-                val = val.__name__
-            mod = ast.parse(val)
+                val_str = val.__name__
+            elif isinstance(val, str):
+                val_str = val
+            else:
+                raise TypeError(f'Unsupported type {type(val)}')
+            mod = ast.parse(val_str)
             return mod.body[0].value
 
         def set_ctx(n, ctx):
@@ -97,9 +101,10 @@ class ArkCompiler():
             vname = ele.name
             lhs, rhs = [], []
             if ele.attrs.items():
-                for attr, val in ele.attrs.items():
-                    lhs.append(mk_var(rn_attr(vname, attr)))
-                    rhs.append(parse_expr(val))
+                for attr_name in ele.attrs.keys():
+                    lhs.append(mk_var(rn_attr(vname, attr_name)))
+                    val_str = ele.get_attr_str(attr_name)
+                    rhs.append(parse_expr(val_str))
                 stmts.append(ast.Assign([
                     set_ctx(ast.Tuple(lhs), ast.Store)],
                     set_ctx(ast.Tuple(rhs), ast.Load)))
@@ -132,7 +137,7 @@ class ArkCompiler():
         module = ast.Module(top_stmts, type_ignores=[])
         module = ast.fix_missing_locations(module)
         code = compile(source=module, filename='__tmp_{}.py'.format(self.prog_name), mode='exec')
-        self._namespace = import_lib
+        self._namespace.update(import_lib)
         print(ast.unparse(module))
         exec(code, self._namespace)
 

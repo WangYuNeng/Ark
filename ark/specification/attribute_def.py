@@ -2,10 +2,10 @@
 Attribute class for CDGType.
 """
 from dataclasses import dataclass
-from typing import Any
+from typing import NewType, Union
 from types import FunctionType
-import ast
 
+AttrImpl = NewType('AttrImpl', Union[int, float, FunctionType]) # why pylint error?
 
 @dataclass
 class Range:
@@ -13,39 +13,28 @@ class Range:
     min: float = None
     max: float = None
 
-class Attr:
-    """Ａttribute for a CDGType."""
-    def __init__(self, name: str, attr_type: type, attr_range: Range):
+class AttrDef:
+    """Ａttribute Definition for a CDGType."""
+    def __init__(self, name: str, attr_type: type, attr_range: Range=None):
         self.name = name
         self.type = attr_type
         self.valid_range = attr_range
-        self.value = None
 
     def __repr__(self) -> str:
-        return f'Attr(name={self.name}, type={self.type}, \
-            valid_range={self.valid_range}, value={self.value})'
+        return f'AttrDef(name={self.name}, type={self.type}, \
+            valid_range={self.valid_range})'
 
-    def set_val(self, val) -> None:
-        """Set the value of this attribute."""
-        if self.check(val):
-            self.value = val
-
-    def get_val(self) -> Any:
-        """Get the value of this attribute."""
-        return self.value
-
-    def ast_expr(self) -> ast.Expr:
+    def attr_str(self, val: AttrImpl) -> str:
         """Get an AST expression for this attribute."""
         if self.type == int or self.type == float:
-            val = str(self.value)
+            val_str = str(val)
         elif self.type == FunctionType:
-            val = self.value.__name__
+            val_str = val.__name__
         else:
             raise NotImplementedError(f'AST expression for type {self.type} not implemented')
-        mod = ast.parse(val)
-        return mod.body[0].value
+        return val_str
 
-    def check(self, val) -> bool:
+    def check(self, val: AttrImpl) -> bool:
         """Check if val is in the valid range of this attribute."""
         if not isinstance(val, self.type):
             raise TypeError(f'Expected type {self.type}, got {type(val)}')
@@ -56,15 +45,22 @@ class Attr:
             raise ValueError(f'Expected value in range {self.valid_range}, got {val}')
         return True
 
-class MismatchAttr(Attr):
-    """Attribute definition that will for a CDGType."""
+class AttrDefMismatch(AttrDef):
+    """Attribute definition for a CDGType where the value is sampled 
+    from a normal distribution to model the random mismatch in hardware.
+    
+    Args:
+        rstd: relative standard deviation of the random value 
+        
+    The check() method only check whether the nominal value is in range
+    and does not check the random value.
+    """
     def __init__(self, name: str, attr_type: type, attr_range: Range, rstd: float):
         self.rstd = rstd
         super().__init__(name, attr_type, attr_range)
 
-    def ast_expr(self) -> ast.Expr:
+    def attr_str(self, val: AttrImpl) -> str:
         if not self.type == float:
             raise NotImplementedError(f'AST expression for a mismatched attribute \
                                       should be float, not {self.type}')
-        val = f'np.random.normal({self.value}, {self.rstd})'
-        return ast.parse(val).body[0].value
+        return f'np.random.normal({val}, {self.rstd})'

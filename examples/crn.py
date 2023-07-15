@@ -11,20 +11,20 @@ from ark.rewrite import RewriteGen
 # from ark.validator import ArkValidator
 from ark.specification.specification import CDGSpec
 from ark.cdg.cdg import CDG
-from ark.specification.attribute import Range, Attr
+from ark.specification.attribute_def import Range, AttrDef
 from ark.specification.cdg_types import NodeType, EdgeType
 from ark.specification.generation_rule import GenRule, SRC, DST, SELF, EDGE, VAR, TIME
 from ark.reduction import SUM, PROD
 
 Cpd = NodeType(name='Cpd', order=1)
 Rct = NodeType(name='Rct', order=0, reduction=PROD,
-               attr_defs={'k': Attr(attr_type=float,
+               attr_def=[AttrDef('k', attr_type=float,
                                     attr_range=Range(min=0.0, max=1.0))
-                        }
+                        ]
                )
-Rct_et = EdgeType(name='Rct_et', attr_defs={'nc': Attr(attr_type=int),
-                                            'coeff': Attr(attr_type=int, attr_range=Range(min=1))
-                                            }
+Rct_et = EdgeType(name='Rct_et', attr_def=[AttrDef('nc', attr_type=int),
+                                            AttrDef('coeff', attr_type=int, attr_range=Range(min=1))
+                                            ]
                   )
 
 rule1 = GenRule(Rct_et, Cpd, Rct, SRC, DST.k * EDGE.nc * VAR(DST))

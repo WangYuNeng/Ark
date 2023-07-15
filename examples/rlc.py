@@ -7,7 +7,7 @@ from ark.compiler import ArkCompiler
 from ark.rewrite import RewriteGen
 # from ark.solver import SMTSolver
 # from ark.validator import ArkValidator
-from ark.globals import Range, Attr
+from ark.specification.attribute_def import Range, AttrDef, AttrDefMismatch
 from ark.specification.specification import CDGSpec
 from ark.cdg.cdg import CDG
 from ark.specification.cdg_types import NodeType, EdgeType
@@ -18,24 +18,24 @@ lc_range, gr_range = Range(min=0.1e-9, max=10e-9), Range(min=0)
 w_range = Range(min=1, max=1)
 V_base = NodeType(name='V_base', order=1,
                   reduction=SUM,
-                  attr_defs={'c': Attr(attr_type=float,attr_range=lc_range),
-                             'g': Attr(attr_type=float, attr_range=gr_range)
-                             })
+                  attr_def=[AttrDef('c', attr_type=float,attr_range=lc_range),
+                         AttrDef('g', attr_type=float, attr_range=gr_range)
+                        ])
 I_base = NodeType(name='I_base', order=1,
                   reduction=PROD,
-                  attr_defs={'l': Attr(attr_type=float, attr_range=lc_range),
-                             'r': Attr(attr_type=float, attr_range=gr_range)
-                            })
+                  attr_def=[AttrDef('l', attr_type=float, attr_range=lc_range),
+                         AttrDef('r', attr_type=float, attr_range=gr_range)
+                        ])
 E_base = EdgeType(name='E_base',
-                  attr_defs={'ws': Attr(attr_type=float,attr_range=w_range),
-                             'wt': Attr(attr_type=float,attr_range=w_range)
-                             })
+                  attr_def=[AttrDef('ws', attr_type=float,attr_range=w_range),
+                         AttrDef('wt', attr_type=float,attr_range=w_range)
+                        ])
 InpV = NodeType(name='InpV',
-                attr_defs={'fn': Attr(attr_type=FunctionType),
-                           'r': Attr(attr_type=float, attr_range=gr_range)
-                           })
+                attr_def=[AttrDef('fn', attr_type=FunctionType),
+                       AttrDef('r', attr_type=float, attr_range=gr_range)
+                       ])
 
-V_derive = NodeType(name='V_derive', base=V_base)
+V_derive = NodeType(name='V_derive', base=V_base, attr_def=[AttrDefMismatch('g', attr_type=float, attr_range=gr_range, rstd=0.1)])
 V_derive2 = NodeType(name='V_derive2', base=V_derive)
 I_derive = NodeType(name='I_derive', base=I_base)
 

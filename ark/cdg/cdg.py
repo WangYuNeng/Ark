@@ -1,12 +1,14 @@
-from typing import Dict, List
+from typing import Mapping
 from ark.globals import Direction
 from ark.specification.generation_rule import SRC, DST, SELF, GenRuleKeyword
+from ark.specification.attribute_def import AttrDef, AttrImpl
 # from ark.specification.types import CDGType, NodeType, EdgeType
 
 class CDGElement:
     """Base class for CDG nodes and edges."""
+    attr_def: Mapping[str, AttrDef]
 
-    def __init__(self, cdg_type: "CDGType", name: str, **attrs) -> None:
+    def __init__(self, cdg_type: "CDGType", name: str, **attrs: Mapping[str, AttrImpl]) -> None:
         self.cdg_type = cdg_type
         self.name = name
         self.attrs = attrs
@@ -14,7 +16,12 @@ class CDGElement:
     def __str__(self) -> str:
         return self.name
 
-def sort_element(elements: List[CDGElement]) -> List[CDGElement]:
+    def get_attr_str(self, attr_name: str) -> str:
+        """Return the string representation of the attribute value."""
+        val = self.attrs[attr_name]
+        return self.attr_def[attr_name].attr_str(val)
+
+def sort_element(elements: list[CDGElement]) -> list[CDGElement]:
     """Sort CDG elements by their names."""
     return sorted(elements, key=lambda x: x.name)
 
@@ -112,7 +119,7 @@ class CDG:
     Constrained Dynamic Graph (CDG) class.
     """
 
-    _order_to_nodes: List[Dict]
+    _order_to_nodes: list[dict]
 
     def __init__(self) -> None:
         self._order_to_nodes = [set()]

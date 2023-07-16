@@ -2,6 +2,7 @@ from typing import Mapping
 from ark.globals import Direction
 from ark.specification.generation_rule import SRC, DST, SELF, GenRuleKeyword
 from ark.specification.attribute_def import AttrDef, AttrImpl
+from ark.reduction import Reduction
 # from ark.specification.types import CDGType, NodeType, EdgeType
 
 class CDGElement:
@@ -27,6 +28,8 @@ def sort_element(elements: list[CDGElement]) -> list[CDGElement]:
 
 class CDGNode(CDGElement):
     """Constrained Dynamic Graph (CDG) node class."""
+
+    reduction: Reduction
 
     def __init__(self, cdg_type: "NodeType", name: str, **attrs) -> None:
         super().__init__(cdg_type, name, **attrs)
@@ -164,7 +167,7 @@ class CDG:
             self._order_to_nodes += [set() for _ in range(order - max_order)]
         self._order_to_nodes[order].add(node)
 
-    def nodes_in_order(self, order: int) -> list:
+    def nodes_in_order(self, order: int) -> list[CDGNode]:
         """Return nodes in the graph based on order sorted by node.name.
 
         If order is -1, return all nodes.
@@ -175,17 +178,17 @@ class CDG:
             return sort_element(list(self._order_to_nodes[order]))
 
     @property
-    def nodes(self) -> list:
+    def nodes(self) -> list[CDGNode]:
         """Return all nodes in the graph sorted by node.name."""
         return sort_element(list(set.union(*self._order_to_nodes)))
 
     @property
-    def edges(self) -> list:
+    def edges(self) -> list[CDGEdge]:
         """Return all edges in the graph."""
         return list(self._edges)
 
     @property
-    def switches(self) -> list:
+    def switches(self) -> list[CDGElement]:
         raise NotImplementedError
 
     @property

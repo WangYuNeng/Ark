@@ -54,13 +54,13 @@ generation_rules = [rule1, rule2, rule3]
 spec = CDGSpec(cdg_types, generation_rules, None)
 compiler = ArkCompiler(rewrite=RewriteGen())
 compiler.compile(cdg=graph, cdg_spec=spec, help_fn=[locking_fn, sin_fn], import_lib={})
-
+compiler.print_prog()
 time_range = [0, 15]
 time_points = np.linspace(*time_range, 1000)
 mapping = compiler.var_mapping
-states = [np.random.rand() * np.pi for _ in range(len(mapping))]
-sol = solve_ivp(compiler.prog(), time_range, states, dense_output=True)
-fig, ax = plt.subplots(nrows=len(states) + 1)
+init_states = compiler.map_init_state({node: np.random.rand() * np.pi for node in mapping.keys()})
+sol = compiler.prog(time_range, init_states=init_states, dense_output=True)
+fig, ax = plt.subplots(nrows=len(init_states) + 1)
 for node, idx in mapping.items():
     ax[-1].plot(time_points,
              node.attrs['osc_fn'](time_points + sol.sol(time_points)[idx].T),

@@ -65,11 +65,9 @@ compiler.compile(cdg=graph, cdg_spec=spec, help_fn=[], import_lib={})
 time_range = [0, 15]
 time_points = np.linspace(*time_range, 1000)
 mapping = compiler.var_mapping
-states = [0 for _ in mapping]
-states[mapping[a]] = 6
-states[mapping[b]] = 2
-states[mapping[c]] = 0
-sol = solve_ivp(compiler.prog(), time_range, states, dense_output=True)
+init_states = compiler.map_init_state({a: 6, b: 2, c: 0, d: 0})
+compiler.print_prog()
+sol = compiler.prog(time_range, init_states=init_states, dense_output=True)
 for node in [a, b, c]:
     idx = mapping[node]
     plt.plot(time_points, sol.sol(time_points)[idx].T, label=node.name)

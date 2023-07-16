@@ -86,7 +86,8 @@ class NodeType(CDGType):
     attrs -- attributes of this node type
     order -- the derivative taken in the dynamical system of this node type
     """
-    def __new__(mcs, name: str, base: Optional[CDGType]=None, attr_def: Optional[list[AttrDef]]=None,
+    def __new__(mcs, name: str, base: Optional[CDGType]=None,
+                attr_def: Optional[list[AttrDef]]=None,
                 order: Optional[int]=0, reduction: Optional[Reduction]=SUM):
 
         if attr_def is None:
@@ -120,12 +121,19 @@ class EdgeType(CDGType):
     parent_type -- parent NodeType of this node type
     attrs -- attributes of this node type
     """
-    def __new__(mcs, name: str, base: Optional[CDGType]=None, attr_def: Optional[list[AttrDef]]=None):
+    def __new__(mcs, name: str, base: Optional[CDGType]=None,
+                attr_def: Optional[list[AttrDef]]=None):
         if base is None:
             bases = (CDGEdge,)
         attr_def = named_list_to_dict(attr_def)
         class_attrs = {'attr_def': attr_def}
         return super().__new__(mcs, name, bases, class_attrs)
+
+    def __call__(cls, switchable: bool=False, **attrs: Mapping[str, Any]) -> CDGElement:
+
+        edge: CDGEdge = super().__call__(**attrs)
+        edge.switchable = switchable
+        return edge
 
     def base_cdg_types(cls) -> "list[EdgeType]":
         base_types = filter(lambda x: isinstance(x, EdgeType), inspect.getmro(cls))

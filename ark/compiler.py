@@ -1,6 +1,6 @@
 """Compiler for CDG to dynamical system simulation"""
 import ast, inspect
-from typing import Optional, Mapping
+from typing import Optional, Mapping, Any
 from types import FunctionType
 import copy
 import numpy as np
@@ -19,6 +19,10 @@ def ddt(name: str, order: int) -> str:
 def rn_attr(name: str, attr: str) -> str:
     """return the variable name of the named attribute"""
     return f'{name}_{attr}'
+
+def switch_attr(name: str) -> str:
+    """return the name of the switch variable"""
+    return rn_attr(name, 'switch')
 
 def mk_var(name: str) -> ast.Name:
     """convert name to an ast.Name"""
@@ -57,10 +61,10 @@ def concat_expr(exprs: ast.expr, operator: ast.BinOp) -> ast.BinOp:
     if len(exprs) == 1:
         return exprs[0].body
     if len(exprs) == 2:
-        return ast.BinOp(left=exprs[0].body, op=operator(), right=exprs[1].body)
-    return ast.BinOp(left=exprs[0].body, op=operator(), right=concat_expr(exprs[1:], operator))
+        return ast.BinOp(left=exprs[0].body, op=operator, right=exprs[1].body)
+    return ast.BinOp(left=exprs[0].body, op=operator, right=concat_expr(exprs[1:], operator))
 
-def apply_gen_rule(rule: GenRule, transformer: RewriteGen) -> ast.AST:
+def apply_gen_rule(rule: GenRule, transformer: RewriteGen) -> ast.expr:
     """Return the rewritten ast from the given rule"""
     gen_ast = copy.deepcopy(rule.fn_ast)
     transformer.visit(gen_ast)
@@ -73,6 +77,7 @@ class ArkCompiler():
     SIM_RAND_EXPT = parse_expr(f'np.random.rand({SIM_SEED})')
     ODE_FN_NAME, ODE_INPUT_VAR = '__ode_fn', '__variables'
     INIT_STATE, TIME_RANGE = 'init_states', 'time_range'
+    SWITCH_VAL = 'switch_vals'
     KWARGS = 'kwargs'
     SIM_SOL = '__sol'
     SOLVE_IVP_EXPR = parse_expr(f'{SIM_SOL} = scipy.integrate.solve_ivp({ODE_FN_NAME}, \
@@ -82,6 +87,7 @@ class ArkCompiler():
     def __init__(self, rewrite: RewriteGen) -> None:
         self._rewrite = rewrite
         self._var_mapping = {}
+        self._switch_mapping = {}
         self._namespace = {'np': np, 'scipy': scipy}
         self._prog_ast = None
 
@@ -96,17 +102,24 @@ class ArkCompiler():
         return f'__tmp_{self.prog_name}__.py'
 
     @property
-    def var_mapping(self) -> dict:
-        """map variable (node.name) to the corresponding index in the state variables"""
+    def var_mapping(self) -> dict[CDGNode, int]:
+        """map CDGNode to the corresponding index in the state variables"""
         return self._var_mapping
 
+    @property
+    def switch_mapping(self) -> dict[CDGEdge, int]:
+        """map CDGEdge to the corresponding for switch variables"""
+        return self._switch_mapping
+
     def prog(self, time_range: tuple[float, float], init_states: list[float],
+             switch_vals: Optional[list[bool]]=None,
              init_seed: Optional[int]=0, sim_seed: Optional[int]=0, **kwargs):
         """execute the compiled program
         
         kwargs: additional arguments for scipy.integrate.solve_ivp
         """
         return self._namespace[self.prog_name](time_range, init_states,
+                                               switch_vals,
                                                init_seed, sim_seed, **kwargs)
 
     def print_prog(self):
@@ -116,12 +129,21 @@ class ArkCompiler():
 
     def map_init_state(self, node_to_val: Mapping[CDGNode, int | float]) -> list[int | float]:
         """map the initial state to the corresponding index in the state variables"""
-        assert self._var_mapping, "Variable mapping is not generated yet!"
-        assert len(node_to_val) == len(self._var_mapping), "Variables mismatch!"
-        init_state = [0 for _ in self.var_mapping]
-        for node, val in node_to_val.items():
-            init_state[self.var_mapping[node]] = val
-        return init_state
+        return self._mapping(node_to_val, self._var_mapping)
+
+    def map_switch_val(self, edge_to_val: Mapping[CDGEdge, bool]) -> list[bool]:
+        """map the switch values to the corresponding index in the switch variables"""
+        return self._mapping(edge_to_val, self._switch_mapping)
+
+    def _mapping(self, ele_to_val: Mapping[object, Any],
+                 ele_to_idx: Mapping[object, int]) -> list[Any]:
+        """map the values to the corresponding index"""
+        assert ele_to_idx is not None, "Mapping is not generated yet!"
+        assert len(ele_to_val) == len(ele_to_idx), "Elements mismatch!"
+        vals = [None for _ in ele_to_idx]
+        for ele, val in ele_to_val.items():
+            vals[ele_to_idx[ele]] = val
+        return vals
 
     def compile(self, cdg: CDG, cdg_spec: CDGSpec, help_fn: list[FunctionType], import_lib: dict):
         '''
@@ -158,6 +180,14 @@ class ArkCompiler():
         if cdg.ds_order != 1:
             raise NotImplementedError('only support first order dynamical system now')
         self._var_mapping = {node: i for i, node in enumerate(cdg.nodes_in_order(1))}
+        self._switch_mapping = {edge: i for i, edge in enumerate(cdg.switches)}
+
+        # Map the input vector to the state variables
+        if cdg.switches:
+            stmts.append(ast.Assign([
+                set_ctx(ast.Tuple([mk_var(switch_attr(edge.name)) for edge in cdg.switches]),
+                        ast.Store)],
+                set_ctx(mk_var(self.SWITCH_VAL), ast.Load)))
 
         for ele in cdg.nodes + cdg.edges:
             vname = ele.name
@@ -206,11 +236,16 @@ class ArkCompiler():
                                                     tgt=node.gen_tgt_type(edge))
                     if gen_rule is not None:
                         self._rewrite.mapping = gen_rule.get_rewrite_mapping(edge=edge)
-                        rhs.append(apply_gen_rule(rule=gen_rule,
-                                                    transformer=self._rewrite))
+                        rhs_expr = apply_gen_rule(rule=gen_rule, transformer=self._rewrite)
+                        if edge.switchable:
+                            body = ast.BinOp(left=rhs_expr.body, op=reduction.ast_switch,
+                                             right=set_ctx(mk_var(switch_attr(edge.name)),
+                                                           ast.Load))
+                            rhs_expr = ast.Expression(body=body)
+                        rhs.append(rhs_expr)
                 if rhs:
                     stmts.append(ast.Assign(targets=[set_ctx(mk_var(vname), ast.Store)],
-                                            value=concat_expr(rhs, reduction.ast_op())))
+                                            value=concat_expr(rhs, reduction.ast_op)))
 
         # Return statement of the ode function
         stmts.append(set_ctx(ast.Return(ast.List([mk_var(ddt(node.name, order=1))
@@ -221,7 +256,7 @@ class ArkCompiler():
         return ast.FunctionDef(ode_fn_name, arguments, stmts, decorator_list=[])
 
     def _compile_solve_ivp(self) -> tuple[ast.Assign, ast.Return]:
-        stmts = [self.SIM_RAND_EXPT, self.SOLVE_IVP_EXPR, 
+        stmts = [self.SIM_RAND_EXPT, self.SOLVE_IVP_EXPR,
                  set_ctx(ast.Return(mk_var(self.SIM_SOL)), ast.Load)]
         return stmts
 
@@ -230,11 +265,13 @@ class ArkCompiler():
         args = [
             mk_arg(self.TIME_RANGE),
             mk_arg(self.INIT_STATE),
+            mk_arg(self.SWITCH_VAL),
             mk_arg(self.INIT_SEED),
             mk_arg(self.SIM_SEED),
         ]
         kwarg = mk_arg(self.KWARGS)
         defaults = [
+            ast.Constant(None),
             ast.Constant(0),
             ast.Constant(0)
         ]

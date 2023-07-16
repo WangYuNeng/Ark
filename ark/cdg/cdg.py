@@ -117,6 +117,15 @@ class CDGEdge(CDGElement):
         """Return the destination node of this edge."""
         return self._dst
 
+    @property
+    def switchable(self) -> bool:
+        """Return whether this edge is also a switch."""
+        return self._switchable
+
+    @switchable.setter
+    def switchable(self, switchable: bool) -> None:
+        self._switchable = switchable
+
 class CDG:
     """
     Constrained Dynamic Graph (CDG) class.
@@ -137,6 +146,8 @@ class CDG:
         self._add_node(src)
         self._add_node(dst)
         self._edges.add(edge)
+        if edge.switchable:
+            self._switches.add(edge)
 
     def delete_node(self, node: CDGNode) -> None:
         """Delete a node from the graph.
@@ -184,12 +195,13 @@ class CDG:
 
     @property
     def edges(self) -> list[CDGEdge]:
-        """Return all edges in the graph."""
-        return list(self._edges)
+        """Return all edges in the graph sorted by node.name."""
+        return sort_element(list(self._edges))
 
     @property
     def switches(self) -> list[CDGElement]:
-        raise NotImplementedError
+        """Return all switches in the graph sorted by node.name."""
+        return sort_element(list(self._switches))
 
     @property
     def ds_order(self) -> int:

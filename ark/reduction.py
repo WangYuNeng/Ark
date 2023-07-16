@@ -2,32 +2,22 @@
 Reduction functions for the dynamical system.
 """
 import ast
+from dataclasses import dataclass
 
+@dataclass
 class Reduction:
     """
     Reduction base class.
+
+    ast_op -- the ast operator corresponding to the reduction
+    ast_switch -- the ast operator corresponding to the switch
+        value switch_op switch_val should give 
+        - the identity element when switch is off 
+        - the value when switch is on
     """
 
-    def ast_op(self) -> ast.operator:
-        """return the ast operato correspond to the reduction"""
-        raise NotImplementedError
+    ast_op: ast.operator
+    ast_switch: ast.operator
 
-class Sum(Reduction):
-    """
-    Summation
-    """
-
-    def ast_op(self) -> ast.operator:
-        return ast.Add
-
-class Product(Reduction):
-    """
-    Product
-    """
-
-    def ast_op(self) -> ast.operator:
-        return ast.Mult
-
-
-SUM = Sum()
-PROD = Product()
+SUM = Reduction(ast_op=ast.Add(), ast_switch=ast.Mult())
+PROD = Reduction(ast_op=ast.Mult(), ast_switch=ast.Pow())

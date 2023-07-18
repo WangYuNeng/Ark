@@ -3,12 +3,15 @@ import ast, inspect
 from typing import Optional, Mapping, Any
 from types import FunctionType
 import copy
+from itertools import product
 import numpy as np
 import scipy
 from ark.rewrite import RewriteGen
 from ark.cdg.cdg import CDG, CDGNode, CDGEdge, CDGElement
 from ark.specification.specification import CDGSpec
-from ark.specification.production_rule import ProdRule, TIME, kw_name
+from ark.specification.cdg_types import NodeType, EdgeType
+from ark.specification.production_rule import ProdRule, ProdRuleId
+from ark.specification.rule_keyword import Target, TIME, kw_name
 from ark.reduction import Reduction
 
 
@@ -70,6 +73,42 @@ def apply_gen_rule(rule: ProdRule, transformer: RewriteGen) -> ast.expr:
     transformer.visit(gen_ast)
     return gen_ast
 
+def match_prod_rule(rule_dict: dict[ProdRuleId, ProdRule], edge: CDGEdge,
+                    src: CDGNode, dst: CDGNode, tgt: Target) -> ProdRule:
+    '''
+    Find the production rule that matches the given edge, source node,
+    destination node, and rule target.
+
+    TODO: Handle multiple matches.
+    '''
+    def check_match(edge_type: EdgeType, src_nt: NodeType, dst_nt: NodeType) -> ProdRule | None:
+        rule_id = ProdRuleId(edge_type, src_nt, dst_nt, tgt)
+        if rule_id in rule_dict:
+            return rule_dict[rule_id]
+        return None
+
+    edge_type: EdgeType = edge.cdg_type
+    src_nt: NodeType = src.cdg_type
+    dst_nt: NodeType = dst.cdg_type
+
+    match = check_match(edge_type, src_nt, dst_nt)
+    if match is not None:
+        return match
+
+    et_base = edge_type.base_cdg_types()
+    src_nt_base = src_nt.base_cdg_types()
+    dst_nt_base = dst_nt.base_cdg_types()
+
+    for edge_type, src_nt, dst_nt in product(et_base, src_nt_base, dst_nt_base):
+        match = check_match(edge_type, src_nt, dst_nt)
+        if match is not None:
+            if edge_type == et_base[-1] and src_nt == src_nt_base[-1] \
+                and dst_nt == dst_nt_base[-1]:
+                return match
+            raise NotImplementedError('Have not implemented match in the heirarchy.')
+
+    return None
+
 class ArkCompiler():
 
     INIT_SEED, SIM_SEED = 'init_seed', 'sim_seed'
@@ -90,6 +129,7 @@ class ArkCompiler():
         self._switch_mapping = {}
         self._namespace = {'np': np, 'scipy': scipy}
         self._prog_ast = None
+        self._gen_rule_dict = {}
 
     @property
     def prog_name(self):
@@ -212,6 +252,7 @@ class ArkCompiler():
         gen_rule: ProdRule
         reduction: Reduction
 
+        rule_dict = cdg_spec.prod_rule_dict
         if cdg.ds_order != 1:
             raise NotImplementedError('only support first order dynamical system now')
 
@@ -232,8 +273,8 @@ class ArkCompiler():
                 rhs = []
                 for edge in node.edges:
                     src, dst = edge.src, edge.dst
-                    gen_rule = cdg_spec.match_gen_rule(edge=edge, src=src, dst=dst,
-                                                    tgt=node.which_tgt(edge))
+                    gen_rule = match_prod_rule(rule_dict=rule_dict, edge=edge,
+                                               src=src, dst=dst,tgt=node.which_tgt(edge))
                     if gen_rule is not None:
                         self._rewrite.mapping = gen_rule.get_rewrite_mapping(edge=edge)
                         rhs_expr = apply_gen_rule(rule=gen_rule, transformer=self._rewrite)

@@ -15,8 +15,7 @@ from ark.specification.attribute_def import Range, AttrDef
 from ark.specification.specification import CDGSpec
 from ark.cdg.cdg import CDG
 from ark.specification.cdg_types import NodeType, EdgeType
-from ark.specification.generation_rule import GenRule, SRC, DST, SELF, EDGE, VAR, TIME
-from ark.reduction import SUM, PROD
+from ark.specification.production_rule import ProdRule, SRC, DST, SELF, EDGE, VAR, TIME
 
 Osc = NodeType(name='Osc', order=1, attr_def=[AttrDef('lock_fn', attr_type=FunctionType),
                                                AttrDef('osc_fn', attr_type=FunctionType)])
@@ -28,9 +27,9 @@ def locking_fn(t, tau=np.pi * 5):
 def sin_fn(x):
     return np.sin(x)
 
-rule1 = GenRule(Coupling, Osc, Osc, SRC, - EDGE.k * SRC.osc_fn(VAR(SRC) - VAR(DST)))
-rule2 = GenRule(Coupling, Osc, Osc, DST, - EDGE.k * DST.osc_fn(VAR(DST) - VAR(SRC)))
-rule3 = GenRule(Coupling, Osc, Osc, SELF, - SELF.lock_fn(TIME) * SELF.osc_fn(VAR(SELF) * 2))
+rule1 = ProdRule(Coupling, Osc, Osc, SRC, - EDGE.k * SRC.osc_fn(VAR(SRC) - VAR(DST)))
+rule2 = ProdRule(Coupling, Osc, Osc, DST, - EDGE.k * DST.osc_fn(VAR(DST) - VAR(SRC)))
+rule3 = ProdRule(Coupling, Osc, Osc, SELF, - SELF.lock_fn(TIME) * SELF.osc_fn(VAR(SELF) * 2))
 
 # MAXCUT Problem
 a, b = Osc(lock_fn=locking_fn, osc_fn=sin_fn), Osc(lock_fn=locking_fn, osc_fn=sin_fn)
@@ -50,8 +49,8 @@ graph.connect(e_self[2], c, c)
 graph.connect(e_self[3], d, d)
 
 cdg_types = [Osc, Coupling]
-generation_rules = [rule1, rule2, rule3]
-spec = CDGSpec(cdg_types, generation_rules, None)
+production_rules = [rule1, rule2, rule3]
+spec = CDGSpec(cdg_types, production_rules, None)
 compiler = ArkCompiler(rewrite=RewriteGen())
 compiler.compile(cdg=graph, cdg_spec=spec, help_fn=[locking_fn, sin_fn], import_lib={})
 compiler.print_prog()

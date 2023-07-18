@@ -1,12 +1,12 @@
 """
-Ark Generation Rule
+Ark production Rule
 """
 import ast
 from typing import List
 from dataclasses import dataclass
 
 class Expression:
-    """Expression for writing generation rules
+    """Expression for writing production rules
     Ref: https://github.com/ncsys-lab/analog-verification/blob/new-modelspec/core/expr.py
     """
 
@@ -137,8 +137,8 @@ class FunctionCall(Expression):
         return f'{self.fn}({", ".join(str(arg) for arg in self.args)})'
 
 @dataclass
-class GenRuleKeyword:
-    """Keyword class for writing generation rules"""
+class ProdRuleKeyword:
+    """Keyword class for writing production rules"""
     name: str
 
     def __getattribute__(self, __name: str) -> Variable:
@@ -153,29 +153,29 @@ class GenRuleKeyword:
     def __repr__(self) -> str:
         return self.name
 
-SRC, DST = GenRuleKeyword('SRC'), GenRuleKeyword('DST'),
-EDGE, SELF = GenRuleKeyword('EDGE'), GenRuleKeyword('SELF')
+SRC, DST = ProdRuleKeyword('SRC'), ProdRuleKeyword('DST'),
+EDGE, SELF = ProdRuleKeyword('EDGE'), ProdRuleKeyword('SELF')
 TIME = Variable('TIME')
 
-def var(gen_rule_keyword: GenRuleKeyword) -> Variable:
-    """Returns a state variable for writing generation rules"""
+def var(gen_rule_keyword: ProdRuleKeyword) -> Variable:
+    """Returns a state variable for writing production rules"""
     name = object.__getattribute__(gen_rule_keyword, 'name')
     return Variable(name)
 
 VAR = var
 
-def kw_name(keyword: GenRuleKeyword):
+def kw_name(keyword: ProdRuleKeyword):
     """Returns the name of the keyword"""
     return object.__getattribute__(keyword, 'name')
 
 @dataclass
-class GenRuleId:
-    """Generation Rule Identifier Class"""
+class ProdRuleId:
+    """Production Rule Identifier Class"""
 
     et: "EdgeType"
     src_nt: "NodeType"
     dst_nt: "NodeType"
-    gen_tgt: GenRuleKeyword
+    gen_tgt: ProdRuleKeyword
 
     def __hash__(self) -> int:
         return repr([self.et.name, self.src_nt.name,
@@ -185,32 +185,32 @@ class GenRuleId:
         return str([self.et.name, self.src_nt.name,
                     self.dst_nt.name, kw_name(self.gen_tgt)])
 
-class GenRule:
-    """Generation Rule Class"""
+class ProdRule:
+    """Production Rule Class"""
 
     def __init__(self, et: "EdgeType", src_nt: "NodeType", dst_nt: "NodeType",
-                 gen_tgt: GenRuleKeyword, fn_exp: Expression) -> None:
+                 gen_tgt: ProdRuleKeyword, fn_exp: Expression) -> None:
         self._et = et
         self._src_nt = src_nt
         self._dst_nt = dst_nt
         self._gen_tgt = gen_tgt
-        self._id = GenRuleId(et, src_nt, dst_nt, gen_tgt)
+        self._id = ProdRuleId(et, src_nt, dst_nt, gen_tgt)
         self._fn_exp = fn_exp
 
     @staticmethod
     def get_identifier(et: "EdgeType", src_nt: "NodeType", dst_nt: "NodeType",
-                       gen_tgt: GenRuleKeyword) -> GenRuleId:
-        """Returns a unique identifier for the generation rule"""
-        return GenRuleId(et.name, src_nt.name, dst_nt.name, kw_name(gen_tgt))
+                       gen_tgt: ProdRuleKeyword) -> ProdRuleId:
+        """Returns a unique identifier for the production rule"""
+        return ProdRuleId(et.name, src_nt.name, dst_nt.name, kw_name(gen_tgt))
 
     @property
-    def identifier(self) -> GenRuleId:
-        """Unique identifier for the generation rule"""
+    def identifier(self) -> ProdRuleId:
+        """Unique identifier for the production rule"""
         return self._id
 
     @property
     def fn_ast(self):
-        """Returns the AST of the generation function 
+        """Returns the AST of the production function 
         TODO: Change to a more pythonic way of doing this, e.g., overload
         the arithmetic operators.
         """
@@ -218,7 +218,7 @@ class GenRule:
 
     def get_rewrite_mapping(self, edge: 'CDGEdge'):
         """
-        Returns a dictionary that maps the keyword in generation rules to the name
+        Returns a dictionary that maps the keyword in production rules to the name
         of the nodes and edges in the CDG.
         """
         src: 'CDGNode'

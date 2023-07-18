@@ -8,7 +8,7 @@ import scipy
 from ark.rewrite import RewriteGen
 from ark.cdg.cdg import CDG, CDGNode, CDGEdge, CDGElement
 from ark.specification.specification import CDGSpec
-from ark.specification.generation_rule import GenRule, TIME, kw_name
+from ark.specification.production_rule import ProdRule, TIME, kw_name
 from ark.reduction import Reduction
 
 
@@ -64,7 +64,7 @@ def concat_expr(exprs: ast.expr, operator: ast.BinOp) -> ast.BinOp:
         return ast.BinOp(left=exprs[0].body, op=operator, right=exprs[1].body)
     return ast.BinOp(left=exprs[0].body, op=operator, right=concat_expr(exprs[1:], operator))
 
-def apply_gen_rule(rule: GenRule, transformer: RewriteGen) -> ast.expr:
+def apply_gen_rule(rule: ProdRule, transformer: RewriteGen) -> ast.expr:
     """Return the rewritten ast from the given rule"""
     gen_ast = copy.deepcopy(rule.fn_ast)
     transformer.visit(gen_ast)
@@ -209,7 +209,7 @@ class ArkCompiler():
         src: CDGNode
         dst: CDGNode
         edge: CDGEdge
-        gen_rule: GenRule
+        gen_rule: ProdRule
         reduction: Reduction
 
         if cdg.ds_order != 1:

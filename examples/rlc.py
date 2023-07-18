@@ -11,8 +11,8 @@ from ark.specification.attribute_def import Range, AttrDef, AttrDefMismatch
 from ark.specification.specification import CDGSpec
 from ark.cdg.cdg import CDG
 from ark.specification.cdg_types import NodeType, EdgeType
-from ark.specification.generation_rule import GenRule, SRC, DST, SELF, EDGE, VAR, TIME
-from ark.reduction import SUM, PROD
+from ark.specification.production_rule import ProdRule, SRC, DST, SELF, EDGE, VAR, TIME
+from ark.reduction import SUM, PRODUCT
 # NodeType
 lc_range, gr_range = Range(min=0.1e-9, max=10e-9), Range(min=0)
 w_range = Range(min=1, max=1)
@@ -22,7 +22,7 @@ V_base = NodeType(name='V_base', order=1,
                          AttrDef('g', attr_type=float, attr_range=gr_range)
                         ])
 I_base = NodeType(name='I_base', order=1,
-                  reduction=PROD,
+                  reduction=PRODUCT,
                   attr_def=[AttrDef('l', attr_type=float, attr_range=lc_range),
                          AttrDef('r', attr_type=float, attr_range=gr_range)
                         ])
@@ -39,12 +39,12 @@ V_derive = NodeType(name='V_derive', base=V_base, attr_def=[AttrDefMismatch('g',
 V_derive2 = NodeType(name='V_derive2', base=V_derive)
 I_derive = NodeType(name='I_derive', base=I_base)
 
-r0 = GenRule(E_base, I_base, V_base, DST, -EDGE.ws*VAR(SRC)/SRC.l)
-r1 = GenRule(E_base, I_base, V_base, SRC, -EDGE.wt*VAR(DST)/SRC.l)
-r2 = GenRule(E_base, I_base, V_derive2, SRC, -EDGE.wt*VAR(DST)/SRC.l)
-r3 = GenRule(E_base, I_derive, V_derive, SRC, -EDGE.wt*VAR(DST)/SRC.l)
-r4 = GenRule(E_base, V_derive, V_derive, SELF, VAR(DST))
-r5 = GenRule(E_base, InpV, V_base, DST, SRC.fn(TIME))
+r0 = ProdRule(E_base, I_base, V_base, DST, -EDGE.ws*VAR(SRC)/SRC.l)
+r1 = ProdRule(E_base, I_base, V_base, SRC, -EDGE.wt*VAR(DST)/SRC.l)
+r2 = ProdRule(E_base, I_base, V_derive2, SRC, -EDGE.wt*VAR(DST)/SRC.l)
+r3 = ProdRule(E_base, I_derive, V_derive, SRC, -EDGE.wt*VAR(DST)/SRC.l)
+r4 = ProdRule(E_base, V_derive, V_derive, SELF, VAR(DST))
+r5 = ProdRule(E_base, InpV, V_base, DST, SRC.fn(TIME))
 print(r5)
 
 def test_input(t):
@@ -75,8 +75,8 @@ graph.connect(e4, v3, v3)
 graph.connect(e5, inp, v3)
 
 cdg_types = [V_base, I_base, E_base, InpV]
-generation_rules = [r0, r1, r2, r3, r4, r5]
-spec = CDGSpec(cdg_types, generation_rules, None)
+production_rules = [r0, r1, r2, r3, r4, r5]
+spec = CDGSpec(cdg_types, production_rules, None)
 print(spec.match_gen_rule(e1, i1, v1, SRC))
 print(spec.match_gen_rule(e1, i1, v3, SRC))
 print(spec.match_gen_rule(e1, i1, v4, SRC))

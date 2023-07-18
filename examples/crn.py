@@ -13,11 +13,11 @@ from ark.specification.specification import CDGSpec
 from ark.cdg.cdg import CDG
 from ark.specification.attribute_def import Range, AttrDef
 from ark.specification.cdg_types import NodeType, EdgeType
-from ark.specification.generation_rule import GenRule, SRC, DST, SELF, EDGE, VAR, TIME
-from ark.reduction import SUM, PROD
+from ark.specification.production_rule import ProdRule, SRC, DST, SELF, EDGE, VAR, TIME
+from ark.reduction import SUM, PRODUCT
 
 Cpd = NodeType(name='Cpd', order=1)
-Rct = NodeType(name='Rct', order=0, reduction=PROD,
+Rct = NodeType(name='Rct', order=0, reduction=PRODUCT,
                attr_def=[AttrDef('k', attr_type=float,
                                     attr_range=Range(min=0.0, max=1.0))
                         ]
@@ -27,9 +27,9 @@ Rct_et = EdgeType(name='Rct_et', attr_def=[AttrDef('nc', attr_type=int),
                                             ]
                   )
 
-rule1 = GenRule(Rct_et, Cpd, Rct, SRC, DST.k * EDGE.nc * VAR(DST))
-rule2 = GenRule(Rct_et, Rct, Cpd, DST, SRC.k * EDGE.nc * VAR(SRC))
-rule3 = GenRule(Rct_et, Cpd, Rct, DST, VAR(SRC) ** EDGE.coeff)
+rule1 = ProdRule(Rct_et, Cpd, Rct, SRC, DST.k * EDGE.nc * VAR(DST))
+rule2 = ProdRule(Rct_et, Rct, Cpd, DST, SRC.k * EDGE.nc * VAR(SRC))
+rule3 = ProdRule(Rct_et, Cpd, Rct, DST, VAR(SRC) ** EDGE.coeff)
 
 # Example: Multiplication C = A * B
 # Compound A, B, C, D
@@ -57,8 +57,8 @@ graph.connect(e_2c, c, r2)
 graph.connect(e_2d, r2, d)
 
 cdg_types = [A, B, C, D, R1, R2]
-generation_rules = [rule1, rule2, rule3]
-spec = CDGSpec(cdg_types, generation_rules, None)
+production_rules = [rule1, rule2, rule3]
+spec = CDGSpec(cdg_types, production_rules, None)
 compiler = ArkCompiler(rewrite=RewriteGen())
 compiler.compile(cdg=graph, cdg_spec=spec, help_fn=[], import_lib={})
 

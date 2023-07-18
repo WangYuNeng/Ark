@@ -1,6 +1,6 @@
 from typing import Mapping
 from ark.globals import Direction
-from ark.specification.generation_rule import SRC, DST, SELF, GenRuleKeyword
+from ark.specification.production_rule import SRC, DST, SELF, ProdRuleKeyword
 from ark.specification.attribute_def import AttrDef, AttrImpl
 from ark.reduction import Reduction
 # from ark.specification.types import CDGType, NodeType, EdgeType
@@ -45,7 +45,7 @@ class CDGNode(CDGElement):
     def remove_edge(self, e):
         self.edges.remove(e)
 
-    def gen_tgt_type(self, edge: "CDGEdge") -> GenRuleKeyword:
+    def gen_tgt_type(self, edge: "CDGEdge") -> ProdRuleKeyword:
         """Return whether this node is src/dst/self of the edge."""
         if edge.src == edge.dst:
             return SELF

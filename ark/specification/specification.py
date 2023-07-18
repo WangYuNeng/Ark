@@ -1,16 +1,16 @@
 from itertools import product
 from ark.specification.cdg_types import EdgeType, NodeType
-from ark.specification.generation_rule import GenRule, GenRuleKeyword, GenRuleId
+from ark.specification.production_rule import ProdRule, ProdRuleKeyword, ProdRuleId
 from ark.specification.validation_rule import ValRule
 from ark.cdg.cdg import CDGEdge, CDGNode
 
 class CDGSpec:
 
-    def __init__(self, cdg_types: list[NodeType], generation_rules: list[GenRule], validation_rules: list[ValRule]):
+    def __init__(self, cdg_types: list[NodeType], production_rules: list[ProdRule], validation_rules: list[ValRule]):
         self._cdg_types = cdg_types
-        self._generation_rules = generation_rules
+        self._production_rules = production_rules
         self._gen_rule_dict = self._collect_gen_identifier()
-        self._gen_rule_class = self._check_class(generation_rules)
+        self._gen_rule_class = self._check_class(production_rules)
         if validation_rules is not None:
             self._validation_rules = validation_rules
             self._val_rule_dict = self._collect_val_identifier()
@@ -22,18 +22,18 @@ class CDGSpec:
         return self._cdg_types
 
     @property
-    def generation_rules(self) -> list[GenRule]:
-        """Access generation rules in the spec."""
-        return self._generation_rules
+    def production_rules(self) -> list[ProdRule]:
+        """Access production rules in the spec."""
+        return self._production_rules
 
     @property
-    def gen_rule_dict(self) -> dict[GenRuleId, GenRule]:
-        """Access mapping from generation rule identifier to generation rule."""
+    def gen_rule_dict(self) -> dict[ProdRuleId, ProdRule]:
+        """Access mapping from production rule identifier to production rule."""
         return self._gen_rule_dict
 
     @property
-    def gen_rule_class(self) -> GenRule:
-        """Access the class of generation rules.
+    def gen_rule_class(self) -> ProdRule:
+        """Access the class of production rules.
         
         TODO: Do we need this?"""
         return self._gen_rule_class
@@ -55,14 +55,14 @@ class CDGSpec:
         TODO: Do we need this?"""
         return self._val_rule_class 
 
-    def match_gen_rule(self, edge: CDGEdge, src: CDGNode, dst: CDGNode, tgt: GenRuleKeyword) -> GenRule:
+    def match_gen_rule(self, edge: CDGEdge, src: CDGNode, dst: CDGNode, tgt: ProdRuleKeyword) -> ProdRule:
         '''
-        Find the generation rule that matches the given edge, source node, destination node, and rule target.
+        Find the production rule that matches the given edge, source node, destination node, and rule target.
 
         TODO: Handle multiple matches.
         '''
-        def check_match(et: EdgeType, src_nt: NodeType, dst_nt: NodeType) -> GenRule | None:
-            rule_id = GenRuleId(et, src_nt, dst_nt, tgt)
+        def check_match(et: EdgeType, src_nt: NodeType, dst_nt: NodeType) -> ProdRule | None:
+            rule_id = ProdRuleId(et, src_nt, dst_nt, tgt)
             if rule_id in self._gen_rule_dict:
                 return self._gen_rule_dict[rule_id]
             return None
@@ -99,15 +99,15 @@ class CDGSpec:
                 val_type_dict[type_name] = [rule]
         return val_type_dict
 
-    def _collect_gen_identifier(self) -> dict[GenRuleId, GenRule]:
+    def _collect_gen_identifier(self) -> dict[ProdRuleId, ProdRule]:
 
-        rules = self.generation_rules
+        rules = self.production_rules
         genid_dict = {
             rule.identifier: rule for rule in rules
         }
         return genid_dict
 
-    def _check_class(self, instances: list) -> GenRule:
+    def _check_class(self, instances: list) -> ProdRule:
 
         class_obj = instances[0].__class__
         for instance in instances[1:]:

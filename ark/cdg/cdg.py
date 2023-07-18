@@ -1,6 +1,5 @@
 from typing import Mapping
-from ark.globals import Direction
-from ark.specification.production_rule import SRC, DST, SELF, ProdRuleKeyword
+from ark.specification.rule_keyword import SRC, DST, SELF, Target
 from ark.specification.attribute_def import AttrDef, AttrImpl
 from ark.reduction import Reduction
 # from ark.specification.types import CDGType, NodeType, EdgeType
@@ -45,13 +44,13 @@ class CDGNode(CDGElement):
     def remove_edge(self, e):
         self.edges.remove(e)
 
-    def gen_tgt_type(self, edge: "CDGEdge") -> ProdRuleKeyword:
+    def which_tgt(self, edge: "CDGEdge") -> Target:
         """Return whether this node is src/dst/self of the edge."""
         if edge.src == edge.dst:
             return SELF
-        elif edge.src == self:
+        elif self.is_src(edge):
             return SRC
-        elif edge.dst == self:
+        elif self.is_dst(edge):
             return DST
 
     def is_src(self, edge: "CDGEdge") -> bool:
@@ -66,16 +65,6 @@ class CDGNode(CDGElement):
                 return True
 
         return False
-
-    def get_direction(self, edge: "CDGEdge") -> int:
-        if self.is_src(edge) and self.is_dst(edge):
-            return Direction.SELF
-        elif self.is_src(edge):
-            return Direction.OUT
-        elif self.is_dst(edge):
-            return Direction.IN
-        else:
-            assert False, f'{self} does not connect to {edge}'
 
     def get_neighbor(self, edge: 'CDGEdge'):
         if self.is_src(edge):

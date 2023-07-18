@@ -1,6 +1,7 @@
 from itertools import product
 from ark.specification.cdg_types import EdgeType, NodeType
-from ark.specification.production_rule import ProdRule, ProdRuleKeyword, ProdRuleId
+from ark.specification.production_rule import ProdRule, ProdRuleId
+from ark.specification.rule_keyword import RuleKeyword
 from ark.specification.validation_rule import ValRule
 from ark.cdg.cdg import CDGEdge, CDGNode
 
@@ -55,7 +56,7 @@ class CDGSpec:
         TODO: Do we need this?"""
         return self._val_rule_class 
 
-    def match_gen_rule(self, edge: CDGEdge, src: CDGNode, dst: CDGNode, tgt: ProdRuleKeyword) -> ProdRule:
+    def match_gen_rule(self, edge: CDGEdge, src: CDGNode, dst: CDGNode, tgt: RuleKeyword) -> ProdRule:
         '''
         Find the production rule that matches the given edge, source node, destination node, and rule target.
 

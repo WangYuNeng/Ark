@@ -233,7 +233,7 @@ class ArkCompiler():
                 for edge in node.edges:
                     src, dst = edge.src, edge.dst
                     gen_rule = cdg_spec.match_gen_rule(edge=edge, src=src, dst=dst,
-                                                    tgt=node.gen_tgt_type(edge))
+                                                    tgt=node.which_tgt(edge))
                     if gen_rule is not None:
                         self._rewrite.mapping = gen_rule.get_rewrite_mapping(edge=edge)
                         rhs_expr = apply_gen_rule(rule=gen_rule, transformer=self._rewrite)

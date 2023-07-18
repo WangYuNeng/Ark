@@ -1,17 +1,12 @@
 """
 Attribute class for CDGType.
 """
-from dataclasses import dataclass
 from typing import NewType, Union
 from types import FunctionType
+from ark.specification.range import Range
 
 AttrImpl = NewType('AttrImpl', Union[int, float, FunctionType]) # why pylint error?
 
-@dataclass
-class Range:
-    """Class for keeping track of the valid range of a node or edge attribute."""
-    min: float = None
-    max: float = None
 
 class AttrDef:
     """Ａttribute Definition for a CDGType."""
@@ -40,8 +35,7 @@ class AttrDef:
             raise TypeError(f'Expected type {self.type}, got {type(val)}')
         if self.valid_range is None:
             return True
-        if self.valid_range.min is not None and val < self.valid_range.min or \
-            self.valid_range.max is not None and val > self.valid_range.max:
+        if not self.valid_range.check_in_range(val):
             raise ValueError(f'Expected value in range {self.valid_range}, got {val}')
         return True
 

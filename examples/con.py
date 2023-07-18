@@ -3,19 +3,19 @@ Example: Coupled Oscillator Network
 https://www.nature.com/articles/s41598-019-49699-5
 """
 
-import numpy as np
 from types import FunctionType
-from scipy.integrate import solve_ivp
+import numpy as np
 import matplotlib.pyplot as plt
 from ark.compiler import ArkCompiler
 from ark.rewrite import RewriteGen
 # from ark.solver import SMTSolver
 # from ark.validator import ArkValidator
-from ark.specification.attribute_def import Range, AttrDef
+from ark.specification.attribute_def import AttrDef
 from ark.specification.specification import CDGSpec
 from ark.cdg.cdg import CDG
 from ark.specification.cdg_types import NodeType, EdgeType
-from ark.specification.production_rule import ProdRule, SRC, DST, SELF, EDGE, VAR, TIME
+from ark.specification.production_rule import ProdRule
+from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME
 
 Osc = NodeType(name='Osc', order=1, attr_def=[AttrDef('lock_fn', attr_type=FunctionType),
                                                AttrDef('osc_fn', attr_type=FunctionType)])

@@ -7,26 +7,29 @@ from ark.compiler import ArkCompiler
 from ark.rewrite import RewriteGen
 # from ark.solver import SMTSolver
 # from ark.validator import ArkValidator
-from ark.specification.attribute_def import Range, AttrDef, AttrDefMismatch
+from ark.specification.attribute_def import AttrDef, AttrDefMismatch
+from ark.specification.range import Range
 from ark.specification.specification import CDGSpec
 from ark.cdg.cdg import CDG
 from ark.specification.cdg_types import NodeType, EdgeType
-from ark.specification.production_rule import ProdRule, SRC, DST, SELF, EDGE, VAR, TIME
-from ark.reduction import SUM, PRODUCT
+from ark.specification.production_rule import ProdRule
+from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME
+from ark.specification.validation_rule import ValRule
+from ark.reduction import SUM
 # NodeType
 lc_range, gr_range = Range(min=0.1e-9, max=10e-9), Range(min=0)
-w_range = Range(min=1, max=1)
-V_base = NodeType(name='V_base', order=1,
+w_range = Range(exact=1.0)
+Vt = NodeType(name='Vt', order=1,
                   reduction=SUM,
                   attr_def=[AttrDef('c', attr_type=float,attr_range=lc_range),
                          AttrDef('g', attr_type=float, attr_range=gr_range)
                         ])
-I_base = NodeType(name='I_base', order=1,
-                  reduction=PRODUCT,
+It = NodeType(name='It', order=1,
+                  reduction=SUM,
                   attr_def=[AttrDef('l', attr_type=float, attr_range=lc_range),
                          AttrDef('r', attr_type=float, attr_range=gr_range)
                         ])
-E_base = EdgeType(name='E_base',
+Et = EdgeType(name='Et',
                   attr_def=[AttrDef('ws', attr_type=float,attr_range=w_range),
                          AttrDef('wt', attr_type=float,attr_range=w_range)
                         ])
@@ -34,38 +37,43 @@ InpV = NodeType(name='InpV',
                 attr_def=[AttrDef('fn', attr_type=FunctionType),
                        AttrDef('r', attr_type=float, attr_range=gr_range)
                        ])
+InpI = NodeType(name='InpI',
+                attr_def=[AttrDef('fn', attr_type=FunctionType),
+                          AttrDef('g', attr_type=float, attr_range=gr_range)
+                          ])
+_v2i = ProdRule(Et, Vt, It, SRC, -EDGE.ws*VAR(DST)/SRC.c)
+v2_i = ProdRule(Et, Vt, It, DST, EDGE.wt*VAR(SRC)/DST.l)
+_i2v = ProdRule(Et, It, Vt, SRC, -EDGE.ws*VAR(DST)/SRC.l)
+i2_v = ProdRule(Et, It, Vt, DST, EDGE.wt*VAR(SRC)/DST.c)
+vself = ProdRule(Et, Vt, Vt, SELF, -VAR(SRC)*SRC.g/SRC.c)
+iself = ProdRule(Et, It, It, SELF, -VAR(SRC)*SRC.r/SRC.l)
+inpv2_v = ProdRule(Et, InpV, Vt, DST, EDGE.wt*(SRC.fn(TIME)-VAR(DST))/DST.c/SRC.r)
+inpv2_i = ProdRule(Et, InpV, It, DST, EDGE.wt*(SRC.fn(TIME)-VAR(DST)*SRC.r)/DST.l)
+inpi2_v = ProdRule(Et, InpI, Vt, DST, EDGE.wt*(SRC.fn(TIME)-VAR(DST)*SRC.g)/DST.c)
+inpi2_i = ProdRule(Et, InpI, It, DST, EDGE.wt*(SRC.fn(TIME)-VAR(DST))/DST.l/SRC.g)
+prod_rules = [_v2i, v2_i, _i2v, i2_v, vself, iself, inpv2_v, inpv2_i, inpi2_v, inpi2_i]
 
-V_derive = NodeType(name='V_derive', base=V_base, attr_def=[AttrDefMismatch('g', attr_type=float, attr_range=gr_range, rstd=0.1)])
-V_derive2 = NodeType(name='V_derive2', base=V_derive)
-I_derive = NodeType(name='I_derive', base=I_base)
 
-r0 = ProdRule(E_base, I_base, V_base, DST, -EDGE.ws*VAR(SRC)/SRC.l)
-r1 = ProdRule(E_base, I_base, V_base, SRC, -EDGE.wt*VAR(DST)/SRC.l)
-r2 = ProdRule(E_base, I_base, V_derive2, SRC, -EDGE.wt*VAR(DST)/SRC.l)
-r3 = ProdRule(E_base, I_derive, V_derive, SRC, -EDGE.wt*VAR(DST)/SRC.l)
-r4 = ProdRule(E_base, V_derive, V_derive, SELF, VAR(DST))
-r5 = ProdRule(E_base, InpV, V_base, DST, SRC.fn(TIME))
-print(r5)
 
 def test_input(t):
     return 10 * t
 
-v1 = V_base(c=1e-9, g=0.0)
-v2 = V_base(c=1e-9, g=0.0)
-i1 = I_base(l=1e-9, r=0.0)
-e1 = E_base(ws=1.0, wt=1.0)
-e2 = E_base(ws=1.0, wt=1.0)
-e3 = E_base(ws=1.0, wt=1.0)
-e4 = E_base(ws=1.0, wt=1.0)
-e5 = E_base(ws=1.0, wt=1.0)
+v1 = Vt(c=1e-9, g=0.0)
+v2 = Vt(c=1e-9, g=0.0)
+i1 = It(l=1e-9, r=0.0)
+e1 = Et(ws=1.0, wt=1.0)
+e2 = Et(ws=1.0, wt=1.0)
+e3 = Et(ws=1.0, wt=1.0)
+e4 = Et(ws=1.0, wt=1.0)
+e5 = Et(ws=1.0, wt=1.0)
 inp = InpV(fn=test_input, r=0.0)
 print(test_input.__name__)
 sig = inspect.signature(test_input)
 print(inspect.signature(test_input))
 
-i2 = I_derive(l=1e-9, r=0.0)
-v3 = V_derive(c=1e-9, g=0.0)
-v4 = V_derive2(c=1e-9, g=0.0)
+i2 = It(l=1e-9, r=0.0)
+v3 = Vt(c=1e-9, g=0.0)
+v4 = Vt(c=1e-9, g=0.0)
 
 graph = CDG()
 graph.connect(e1, i1, v1)
@@ -74,14 +82,9 @@ graph.connect(e3, i2, v1)
 graph.connect(e4, v3, v3)
 graph.connect(e5, inp, v3)
 
-cdg_types = [V_base, I_base, E_base, InpV]
-production_rules = [r0, r1, r2, r3, r4, r5]
-spec = CDGSpec(cdg_types, production_rules, None)
-print(spec.match_gen_rule(e1, i1, v1, SRC))
-print(spec.match_gen_rule(e1, i1, v3, SRC))
-print(spec.match_gen_rule(e1, i1, v4, SRC))
-print(spec.match_gen_rule(e1, i2, v3, SRC))
-# print(spec.match_gen_rule(e1, i2, v4, SRC))
+cdg_types = [Vt, It, Et, InpV, InpI]
+spec = CDGSpec(cdg_types, prod_rules, None)
 
 compiler = ArkCompiler(rewrite=RewriteGen())
 compiler.compile(cdg=graph, cdg_spec=spec, help_fn=[test_input], import_lib={})
+compiler.print_prog()

@@ -11,9 +11,11 @@ from ark.rewrite import RewriteGen
 # from ark.validator import ArkValidator
 from ark.specification.specification import CDGSpec
 from ark.cdg.cdg import CDG
-from ark.specification.attribute_def import Range, AttrDef
+from ark.specification.attribute_def import AttrDef
+from ark.specification.range import Range
 from ark.specification.cdg_types import NodeType, EdgeType
-from ark.specification.production_rule import ProdRule, SRC, DST, SELF, EDGE, VAR, TIME
+from ark.specification.production_rule import ProdRule
+from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME
 from ark.reduction import SUM, PRODUCT
 
 Cpd = NodeType(name='Cpd', order=1)

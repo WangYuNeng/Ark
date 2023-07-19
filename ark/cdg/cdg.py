@@ -28,6 +28,7 @@ def sort_element(elements: list[CDGElement]) -> list[CDGElement]:
 class CDGNode(CDGElement):
     """Constrained Dynamic Graph (CDG) node class."""
 
+    edges: set["CDGEdge"]
     reduction: Reduction
 
     def __init__(self, cdg_type: "NodeType", name: str, **attrs) -> None:
@@ -36,13 +37,28 @@ class CDGNode(CDGElement):
 
     @property
     def degree(self) -> int:
+        """Return the degree of the node."""
         return len(self.edges)
 
-    def add_edge(self, e):
-        self.edges.add(e)
-    
-    def remove_edge(self, e):
-        self.edges.remove(e)
+    def get_non_switchable(self) -> set["CDGEdge"]:
+        """return all the non-switchable edges"""
+        for edge in self.edges:
+            if not edge.switchable:
+                yield edge
+
+    def get_switchable(self) -> set["CDGEdge"]:
+        """return all the switchable edges"""
+        for edge in self.edges:
+            if edge.switchable:
+                yield edge
+
+    def add_edge(self, edge: "CDGEdge"):
+        """Add the edge to the node."""
+        self.edges.add(edge)
+
+    def remove_edge(self, edge: "CDGEdge"):
+        """Remove the edge from the node."""
+        self.edges.remove(edge)
 
     def which_tgt(self, edge: "CDGEdge") -> Target:
         """Return whether this node is src/dst/self of the edge."""
@@ -54,12 +70,15 @@ class CDGNode(CDGElement):
             return DST
 
     def is_src(self, edge: "CDGEdge") -> bool:
+        """Return whether this node is the source of the edge."""
         return edge.src == self
 
     def is_dst(self, edge: "CDGEdge") -> bool:
+        """Return whether this node is the destination of the edge."""
         return edge.dst == self
 
     def is_neighbor(self, node: "CDGNode") -> bool:
+        """Return whether the node is a neighbor of this node."""
         for edge in self.edges:
             if self.get_neighbor(edge=edge) == node:
                 return True
@@ -67,6 +86,7 @@ class CDGNode(CDGElement):
         return False
 
     def get_neighbor(self, edge: 'CDGEdge'):
+        """Return the neighbor of this node."""
         if self.is_src(edge):
             return edge.dst
         elif self.is_dst(edge):
@@ -75,6 +95,7 @@ class CDGNode(CDGElement):
             assert False, f'{self} does not connect to {edge}'
 
     def print_local(self):
+        """Print the local view of this node."""
         print(self.name)
         for edge in self.edges:
             if self.is_src(edge=edge):

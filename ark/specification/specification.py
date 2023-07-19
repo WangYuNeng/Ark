@@ -36,7 +36,7 @@ class CDGSpec:
         return self._validation_rules
 
     @property
-    def val_rule_dict(self) -> dict[str, ValRule]:
+    def val_rule_dict(self) -> dict[NodeType, ValRule]:
         """Access mapping from validation rule identifier to validation rule."""
         return self._val_rule_dict
 

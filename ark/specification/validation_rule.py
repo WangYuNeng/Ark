@@ -1,6 +1,7 @@
 from dataclasses import dataclass
+from itertools import product
 from typing import Callable, Optional
-from ark.cdg.cdg import CDGNode
+from ark.cdg.cdg import CDGNode, CDGEdge
 from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.range import Range
 from ark.specification.rule_keyword import Target, kw_name
@@ -14,7 +15,7 @@ class ValRuleId:
     node_type: NodeType
 
     def __hash__(self) -> int:
-        return repr(kw_name(self.val_tgt), self.edge_type.name, self.node_type.name).__hash__()
+        return repr([kw_name(self.val_tgt), self.edge_type.name, self.node_type.name]).__hash__()
 
     def __str__(self) -> str:
         return str([kw_name(self.val_tgt), self.edge_type.name, self.node_type.name])
@@ -30,29 +31,32 @@ class ValPattern:
     """
 
     def __init__(self, target: Target, edge_type: EdgeType,
-                 node_types: list[NodeType], deg_range: Range) -> None:
+                 node_types: NodeType | list[NodeType], deg_range: Range) -> None:
         self._target = target
         self._edge_type = edge_type
-        self._node_types = node_types
+        if isinstance(node_types, NodeType):
+            self._node_types = [node_types]
+        else:
+            self._node_types = node_types
         self._deg_range = deg_range
 
     @property
-    def edge_type(self):
+    def edge_type(self) -> EdgeType:
         """The type of the edge."""
         return self._edge_type
 
     @property
-    def target(self):
+    def target(self) -> Target:
         """Which side of the edge that the node under validation is on."""
         return self._target
 
     @property
-    def deg_range(self):
+    def deg_range(self) -> Range:
         """The range of acceptable degrees of this pattern."""
         return self._deg_range
 
     @property
-    def node_types(self):
+    def node_types(self) -> list[NodeType]:
         """The list of acceptable node types."""
         return self._node_types
 
@@ -69,9 +73,27 @@ class ValPattern:
         return ids
 
     @staticmethod
-    def get_identifier(target, edge_type, node_type) -> ValRuleId:
+    def get_identifier(target: Target, edge_type: EdgeType, node_type: NodeType) -> ValRuleId:
         """Returns a unique identifier for the pattern"""
         return ValRuleId(target, edge_type, node_type)
+
+    def check_match(self, tgt: Target, edge: CDGEdge, node: CDGNode) -> bool:
+        """check if the edge and node match the pattern
+        
+        Will check all the base types of the edge and node against the pattern."""
+        edge_type: EdgeType = edge.cdg_type
+        node_type: NodeType = node.cdg_type
+
+        if tgt != self.target:
+            return False
+
+        et_base = edge_type.base_cdg_types()
+        nt_base = node_type.base_cdg_types()
+
+        for edge_type, node_type in product(et_base, nt_base):
+            if self.get_identifier(tgt, edge_type, node_type) in self.identifiers:
+                return True
+        return False
 
     def __repr__(self) -> str:
         return f'{self.__class__.__name__}({kw_name(self.target)} \
@@ -81,14 +103,14 @@ class ValRule:
     """Validation rule for a CDGNode."""
 
     def __init__(self, tgt_node_type: NodeType,
-                 ac_pats: Optional[list[ValPattern]]=None,
+                 acc_pats: Optional[list[ValPattern]]=None,
                  rej_pats: Optional[list[ValPattern]]=None,
                  checking_fns: Optional[list[Callable[[CDGNode], bool]]]=None
                  ) -> None:
         self._tgt_node_type = tgt_node_type
-        if ac_pats is None:
-            ac_pats = []
-        self._ac_pats = ac_pats
+        if acc_pats is None:
+            acc_pats = []
+        self._acc_pats = acc_pats
 
         if rej_pats is None:
             rej_pats = []
@@ -99,25 +121,25 @@ class ValRule:
         self._checking_fns = checking_fns
 
     @property
-    def tgt_node_type(self):
+    def tgt_node_type(self) -> NodeType:
         """The target node type of this validation rule."""
         return self._tgt_node_type
 
     @property
-    def ac_pats(self):
+    def acc_pats(self) -> list[ValPattern]:
         """The accepted patterns of this validation rule."""
-        return self._ac_pats
+        return self._acc_pats
 
     @property
-    def rej_pats(self):
+    def rej_pats(self) -> list[ValPattern]:
         """The rejected patterns of this validation rule."""
         return self._rej_pats
 
     @property
-    def checking_fns(self):
+    def checking_fns(self) -> list[Callable[[CDGNode], bool]]:
         """The custonchecking functions of this validation rule."""
         return self._checking_fns
 
     def __repr__(self) -> str:
         return f'{self.__class__.__name__}({self.tgt_node_type} \
-            {self.ac_pats} {self.rej_pats} {self.checking_fns})'
+            {self.acc_pats} {self.rej_pats} {self.checking_fns})'

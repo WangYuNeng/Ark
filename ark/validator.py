@@ -1,19 +1,28 @@
-from itertools import product
+"""
+Ark Validator
+TODO: Write testbench
+"""
+from typing import Optional
 from ark.solver import Solver
 from ark.cdg.cdg import CDG, CDGNode, CDGEdge
-from ark.specification.cdg_types import NodeType, EdgeType
+from ark.specification.cdg_types import NodeType
 from ark.specification.specification import CDGSpec
-from ark.specification.validation_rule import ValRule, ValPattern
-from ark.specification.rule_keyword import Target
+from ark.specification.validation_rule import ValPattern
 
 Connection = list[CDGEdge]
+VALID, NOT_ACC, REJ, FAILED_CHECK = 0, 1, 2, 3
 
 class ArkValidator:
+    """Validator for the CDG against the specification.
+    
+    Args:
+        solver: The solver to use for validation, e.g. SMTSolver"""
 
     def __init__(self, solver: Solver) -> None:
         self._solver = solver
 
-    def validate(self, cdg: CDG, cdg_spec: CDGSpec) -> bool:
+    def validate(self, cdg: CDG, cdg_spec: CDGSpec) \
+        -> tuple[bool, Optional[tuple[CDGNode, Connection, Optional[ValPattern | callable]]]]:
         """
         Every possible connection of the node in the cdg should:
 
@@ -49,19 +58,16 @@ class ArkValidator:
                         rej_sat = self._check_satisfy(patterns=rej_pats, node=node, conns=conns)
 
                         if rej_sat:
-                            raise SyntaxError(f'Node {node}: Connection {conns}\
-                                            satisfies a rejected pattern {rej_pats}')
+                            return REJ, [node, conns, rej_pats]
 
                     for check_fn in check_fns:
                         if not check_fn(node):
-                            raise SyntaxError(f'Node {node}: Connection {conns}\
-                                              does not satisfy {check_fn.__name__}')
+                            return FAILED_CHECK, [node, conns, check_fn]
 
                 if not accepted:
-                    raise SyntaxError(f'Node {node}: Connection {conns}\
-                                      does not satisfy any of the accepted patterns')
+                    return NOT_ACC, [node, conns]
 
-        return True
+        return VALID, []
 
     def _enumerate_switch_branches(self, node: CDGNode)-> list[list[CDGEdge]]:
         """Return all the possible connection for the node.

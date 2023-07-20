@@ -2,7 +2,7 @@
 Ark Validator
 TODO: Write testbench
 """
-from typing import Optional
+from typing import Optional, Callable
 from ark.solver import Solver
 from ark.cdg.cdg import CDG, CDGNode, CDGEdge
 from ark.specification.cdg_types import NodeType
@@ -22,7 +22,7 @@ class ArkValidator:
         self._solver = solver
 
     def validate(self, cdg: CDG, cdg_spec: CDGSpec) \
-        -> tuple[bool, Optional[tuple[CDGNode, Connection, Optional[ValPattern | callable]]]]:
+        -> tuple[bool, Optional[tuple[CDGNode, Connection, Optional[ValPattern | Callable]]]]:
         """
         Every possible connection of the node in the cdg should:
 

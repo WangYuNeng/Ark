@@ -123,10 +123,14 @@ class EdgeType(CDGType):
     """
     def __new__(mcs, name: str, base: Optional[CDGType]=None,
                 attr_def: Optional[list[AttrDef]]=None):
-        if base is None:
-            bases = (CDGEdge,)
         attr_def = named_list_to_dict(attr_def)
+        if base is None:
+            base = CDGEdge
+        else:
+            attr_def = base.attr_def.copy()
+            attr_def.update(attr_def)
         class_attrs = {'attr_def': attr_def}
+        bases = (base,)
         return super().__new__(mcs, name, bases, class_attrs)
 
     def __call__(cls, switchable: bool=False, **attrs: Mapping[str, Any]) -> CDGElement:

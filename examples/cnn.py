@@ -3,11 +3,13 @@ Cellular Nonlinear Network (CNN) example.
 The template performs linear diffusion for filtering.
 - Shows how random mismatch affects the convergence
 ref: https://onlinelibrary.wiley.com/doi/abs/10.1002/cta.564
+     https://github.com/ankitaggarwal011/PyCNN
 """
 
 from types import FunctionType
 import numpy as np
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 from ark.compiler import ArkCompiler
 from ark.rewrite import RewriteGen
 from ark.solver import SMTSolver
@@ -103,16 +105,60 @@ def create_cnn(nrows: int, ncols: int,
                         continue
                     if col_id + col_offset < 0 or col_id + col_offset >= ncols:
                         continue
-                    graph.connect(FlowE(g=B_mat[row_offset + 1, col_offset + 1]),
+                    graph.connect(flow_et(g=B_mat[row_offset + 1, col_offset + 1]),
                                   inp, vs[row_id + row_offset][col_id + col_offset])
-                    graph.connect(FlowE(g=A_mat[row_offset + 1, col_offset + 1]),
+                    graph.connect(flow_et(g=A_mat[row_offset + 1, col_offset + 1]),
                                   out, vs[row_id + row_offset][col_id + col_offset])
     return vs, inps, outs, graph
 
-if __name__ == '__main__':
-    A_mat, B_mat = np.random.random((3, 3)), np.zeros((3, 3))
-    vs, inps, outs, graph = create_cnn(96, 96, IdealV, FlowE, A_mat, B_mat, 0.0)
+def rgb_to_gray(rgb):
+    """Convert rgb image to grayscale"""
+    return np.round(np.dot(rgb[...,:3], [0.299, 0.587, 0.114])).astype(np.uint8)
+
+def get_input_mapping(inps, image) -> dict[CDGNode, float]:
+    """Set the input mapping for the input nodes"""
+    nrows, ncols = image.shape
+    mapping = {}
+    for row_id in range(nrows):
+        for col_id in range(ncols):
+            mapping[inps[row_id][col_id]] = image[row_id, col_id]
+    return mapping
+
+def read_out(nodes, sol, node_2_idx) -> np.array:
+    """Read out the solution"""
+    nrows, ncols = len(nodes), len(nodes[0])
+    traj = np.round(saturation(sol.y.T)).astype(np.uint8)
+    imgs = np.zeros((len(traj), nrows, ncols))
+    for row_id in tqdm(range(nrows), desc='Read out'):
+        for col_id in range(ncols):
+            imgs[:, row_id, col_id] = traj[:, node_2_idx[nodes[row_id][col_id]]]
+    return imgs
+
+
+def grayscale_edge_detection(file_name: str):
+    """Perform grayscale edge detection on a 96x96 image with cnn"""
+    A_mat = np.array([[0.0, 0.0, 0.0],
+                      [0.0, 2.0, 0.0],
+                      [0.0, 0.0, 0.0]])
+    B_mat = np.array([[-1.0, -1.0, -1.0],
+                      [-1.0, 8.0, -1.0],
+                      [-1.0, -1.0, -1.0]])
+    bias = -0.5
+    image = rgb_to_gray(plt.imread(file_name))[::4, ::4]
+    nrows, ncols = image.shape
+    vs, inps, outs, graph = create_cnn(nrows, ncols, IdealV, FlowE, A_mat, B_mat, bias)
+    node_mapping = {v: 0 for row in vs for v in row}
     validator.validate(cdg=graph, cdg_spec=spec)
     compiler.compile(graph, spec, help_fn=help_fn, import_lib={}, inline_attr=True, verbose=True)
-    print('Finish compilation')
-    compiler.prog([0, 1], init_states=[0 for _ in compiler.var_mapping])
+    node_mapping.update(get_input_mapping(inps, image))
+    init_states = compiler.map_init_state(node_mapping)
+    sol = compiler.prog([0, 1], init_states=init_states)
+    imgs = read_out(vs, sol, compiler.var_mapping)
+    plt.imshow(image, cmap='gray')
+    plt.show()
+    plt.imshow(imgs[-1], cmap='gray')
+    plt.show()
+
+
+if __name__ == '__main__':
+    grayscale_edge_detection('examples/cnn_images/input1.bmp')

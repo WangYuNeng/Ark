@@ -123,7 +123,11 @@ class EdgeType(CDGType):
     """
     def __new__(mcs, name: str, base: Optional[CDGType]=None,
                 attr_def: Optional[list[AttrDef]]=None):
+        
+        if attr_def is None:
+            attr_def = []
         attr_def = named_list_to_dict(attr_def)
+        
         if base is None:
             base = CDGEdge
         else:

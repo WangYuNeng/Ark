@@ -1,10 +1,12 @@
 """Compiler for CDG to dynamical system simulation"""
-import ast, inspect
+import ast
+import inspect
 from typing import Optional, Mapping, Any
 from types import FunctionType
 import copy
 from itertools import product
 import numpy as np
+from tqdm import tqdm
 import scipy
 from ark.rewrite import RewriteGen
 from ark.cdg.cdg import CDG, CDGNode, CDGEdge, CDGElement
@@ -110,6 +112,11 @@ def match_prod_rule(rule_dict: dict[ProdRuleId, ProdRule], edge: CDGEdge,
     return None
 
 class ArkCompiler():
+    """Ark compiler for CDG to dynamical system simulation
+    
+    Args:
+    RewriteGen: ast rewrite class
+    """
 
     INIT_SEED, SIM_SEED = 'init_seed', 'sim_seed'
     INIT_RAND_EXPT = parse_expr(f'np.random.rand({INIT_SEED})')
@@ -125,11 +132,13 @@ class ArkCompiler():
 
     def __init__(self, rewrite: RewriteGen) -> None:
         self._rewrite = rewrite
+        self._rewrite.set_attr_rn_fn(rn_attr)
         self._var_mapping = {}
         self._switch_mapping = {}
         self._namespace = {'np': np, 'scipy': scipy}
         self._prog_ast = None
         self._gen_rule_dict = {}
+        self._verbose = 0
 
     @property
     def prog_name(self):
@@ -167,6 +176,12 @@ class ArkCompiler():
         assert self._prog_ast is not None, "Program is not compiled yet!"
         print(ast.unparse(self._prog_ast))
 
+    def dump_prog(self, file_name: str):
+        """dump the compiled program to the given file"""
+        assert self._prog_ast is not None, "Program is not compiled yet!"
+        with open(file_name, 'w') as f:
+            f.write(ast.unparse(self._prog_ast))
+
     def map_init_state(self, node_to_val: Mapping[CDGNode, int | float]) -> list[int | float]:
         """map the initial state to the corresponding index in the state variables"""
         return self._mapping(node_to_val, self._var_mapping)
@@ -185,15 +200,21 @@ class ArkCompiler():
             vals[ele_to_idx[ele]] = val
         return vals
 
-    def compile(self, cdg: CDG, cdg_spec: CDGSpec, help_fn: list[FunctionType], import_lib: dict):
+    def compile(self, cdg: CDG, cdg_spec: CDGSpec, help_fn: list[FunctionType], import_lib: dict,
+                verbose: int = 0, inline_attr: bool = False):
         '''
         Compile the cdg to a function for dynamical system simulation
         help_fn: list of non-built-in function written in attributes, e.g., [sin, trapezoidal]
         import_lib: additional libraries, e.g., {'np': np}
+        verbose: 0: no verbose, 1: print the compilation progress
+        inline_attr: inline the attribute definitions into dynamical system function. 
+                    Note that this will cause bug if the attributes are random variable.
         '''
 
+        self._verbose = verbose
         user_def_fns = self._compile_user_def_fn(help_fn)
-        attr_var_def = self._compile_attribute_var(cdg)
+        attr_var_def, attr_mapping = self._compile_attribute_var(cdg, inline=inline_attr)
+        self._rewrite.attr_mapping = attr_mapping
         ode_fn = self._compile_ode_fn(cdg, cdg_spec)
         solv_ivp_stmts = self._compile_solve_ivp()
 
@@ -203,15 +224,21 @@ class ArkCompiler():
         module = ast.Module([top_stmt], type_ignores=[])
         module = ast.fix_missing_locations(module)
         self._prog_ast = module
+
+        if verbose:
+            print('Compiling the program...')
         code = compile(source=module, filename=self.tmp_file_name, mode='exec')
         self._namespace.update(import_lib)
         exec(code, self._namespace)
+
+        if verbose:
+            print('Compilation finished')
 
     def _compile_user_def_fn(self, funcs: list[FunctionType]) -> list[ast.FunctionDef]:
         """Compile user defined functions to ast.FunctionDef"""
         return [ast.parse(inspect.getsource(fn)).body[0] for fn in funcs]
 
-    def _compile_attribute_var(self, cdg: CDG) -> list[ast.Assign]:
+    def _compile_attribute_var(self, cdg: CDG, inline: bool) -> list[ast.Assign]:
         """Compile the attributes of nodes and edges to variables"""
 
         ele: CDGElement
@@ -229,18 +256,32 @@ class ArkCompiler():
                         ast.Store)],
                 set_ctx(mk_var(self.SWITCH_VAL), ast.Load)))
 
-        for ele in cdg.nodes + cdg.edges:
+        attr_to_ast_node = {}
+        if self._verbose:
+            eles = tqdm(cdg.nodes + cdg.edges, desc='Compiling attributes')
+        else:
+            eles = cdg.nodes + cdg.edges
+
+        for ele in eles:
             vname = ele.name
             lhs, rhs = [], []
             if ele.attrs.items():
                 for attr_name in ele.attrs.keys():
-                    lhs.append(mk_var(rn_attr(vname, attr_name)))
-                    val_str = ele.get_attr_str(attr_name)
-                    rhs.append(parse_expr(val_str).value)
-                stmts.append(ast.Assign([
-                    set_ctx(ast.Tuple(lhs), ast.Store)],
-                    set_ctx(ast.Tuple(rhs), ast.Load)))
-        return stmts
+                    renamed_attr = rn_attr(vname, attr_name)
+                    attr_expr_str = ele.get_attr_str(attr_name)
+                    attr_expr = parse_expr(attr_expr_str).value
+                    if inline:
+                        attr_to_ast_node[renamed_attr] = attr_expr
+                    else:
+                        attr_var = mk_var(renamed_attr)
+                        lhs.append(attr_var)
+                        rhs.append(attr_expr)
+                        attr_to_ast_node[renamed_attr] = mk_var(renamed_attr)
+                if lhs and rhs:
+                    stmts.append(ast.Assign([
+                        set_ctx(ast.Tuple(lhs), ast.Store)],
+                        set_ctx(ast.Tuple(rhs), ast.Load)))
+        return stmts, attr_to_ast_node
 
     def _compile_ode_fn(self, cdg: CDG, cdg_spec: CDGSpec) -> ast.FunctionDef:
         """Compile the cdg to the ode function for scipy.integrate.solve_ivp simulation"""
@@ -267,7 +308,12 @@ class ArkCompiler():
 
         # Generate the ddt_var = f(var) statements
         for order in range(cdg.ds_order + 1):
-            for node in  cdg.nodes_in_order(order):
+            if self._verbose:
+                nodes = tqdm(cdg.nodes_in_order(order), desc=f'Compiling order {order} nodes')
+            else:
+                nodes = cdg.nodes_in_order(order)
+
+            for node in  nodes:
                 vname = ddt(node.name, order=order)
                 reduction = node.reduction
                 rhs = []

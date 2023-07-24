@@ -76,8 +76,6 @@ out_val = ValRule(Out, [ValPattern(SRC, FlowE, IdealV, Range(min=4, max=9)),
 inp_val = ValRule(Inp, [ValPattern(SRC, FlowE, IdealV, Range(min=4, max=9))])
 val_rules = [v_val, out_val, inp_val]
 
-# Nonideal implementation with 10% random variation
-
 cdg_types = [IdealV, Out, Inp, MapE, FlowE, MmV, MmFlowE_1p, MmFlowE_10p]
 help_fn = [saturation]
 spec = CDGSpec(cdg_types, prod_rules, val_rules)

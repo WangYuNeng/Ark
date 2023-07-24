@@ -129,12 +129,13 @@ def create_tline(v_nt: NodeType, i_nt: NodeType,
 if __name__ == '__main__':
 
     LINE_LEN = 20
-    N_RAND_SIM = 10
+    N_RAND_SIM = 100
     TIME_RANGE = [0, 40e-9]
-    fig, ax = plt.subplots(nrows=3)
-    for row_num, (vt, it, et, title) in enumerate([(IdealV, IdealI, IdealE, 'Ideal'),
-                                            (MmV, MmI, IdealE, 'Mismatch LC'),
-                                            (IdealV, IdealI, MmE, 'Mismatch Gain')]):
+    fig, ax = plt.subplots(nrows=2)
+    for color_idx, (vt, it, et, title) in enumerate([(IdealV, IdealI, MmE, 'Mismatch Gain'),
+                                                     (MmV, MmI, IdealE, 'Mismatch LC'),
+                                                     (IdealV, IdealI, IdealE, 'Ideal')
+                                                    ]):
         graph, v_nodes, i_nodes = create_tline(vt, it, et, LINE_LEN)
         validator.validate(cdg=graph, cdg_spec=spec)
         compiler.compile(cdg=graph, cdg_spec=spec, help_fn=help_fn, import_lib={})
@@ -145,18 +146,26 @@ if __name__ == '__main__':
             sol = compiler.prog(TIME_RANGE, init_states=init_states, init_seed=seed, max_step=1e-10)
             time_points = sol.t
             trajs = sol.y
-            for color_idx, idx in enumerate([0, LINE_LEN]):
+            for row_num, idx in enumerate([0, LINE_LEN]):
                 traj_idx = mapping[v_nodes[idx]]
+                if color_idx == 2:
+                    alpha = 1.0
+                else:
+                    alpha = 0.5
                 if seed == 0:
                     ax[row_num].plot(time_points * 1e9, trajs[traj_idx],
-                                     color=f'C{color_idx + 1}', label=f'V @ node{idx}')
+                                     color=f'C{color_idx}', alpha=alpha, label=f'{title}')
                 else:
                     ax[row_num].plot(time_points * 1e9, trajs[traj_idx],
-                                     color=f'C{color_idx + 1}')
-        ax[row_num].plot(time_points * 1e9, [pulse(t) for t in time_points], label='Input')
-        ax[row_num].legend()
-        ax[row_num].set_xlabel('Time (ns)')
-        ax[row_num].set_ylabel('Amplitude (V)')
-        ax[row_num].set_title(f'{title}')
+                                     color=f'C{color_idx}', alpha=alpha)
+    ax[0].legend()
+    ax[1].legend()
+    ax[0].set_xlabel('Time (ns)')
+    ax[0].set_ylabel('Amplitude (V)')
+    ax[0].set_title('Voltage @ 1st node')
+    ax[1].set_xlabel('Time (ns)')
+    ax[1].set_ylabel('Amplitude (V)')
+    ax[1].set_title('Voltage @ last node')
     plt.tight_layout()
+    plt.savefig('examples/tln.png')
     plt.show()

@@ -1,6 +1,11 @@
 """
 Example: Coupled Oscillator Network
 https://www.nature.com/articles/s41598-019-49699-5
+
+Problem: Lots of nonidealities are transient noise which is
+probably not a good target for python simulation.
+Idea: Could try model the coupling strength as mismatched or 
+function of distance.
 """
 
 from types import FunctionType
@@ -59,17 +64,20 @@ time_points = np.linspace(*time_range, 1000)
 mapping = compiler.var_mapping
 init_states = compiler.map_init_state({node: np.random.rand() * np.pi for node in mapping.keys()})
 sol = compiler.prog(time_range, init_states=init_states, dense_output=True)
-fig, ax = plt.subplots(nrows=len(init_states) + 1)
+fig, ax = plt.subplots(nrows=2)
 for node, idx in mapping.items():
-    ax[-1].plot(time_points,
+    ax[1].plot(time_points,
              node.attrs['osc_fn'](time_points + sol.sol(time_points)[idx].T),
              label=node.name)
-    ax[idx].plot(time_points, sol.sol(time_points)[idx].T, label=node.name)
-    ax[idx].legend()
+    ax[0].plot(time_points, sol.sol(time_points)[idx].T, label=node.name)
 # plt.xlabel('time')
 # plt.ylabel('Value')
 # plt.grid()
 # plt.legend()
+ax[0].set_title('phase (phi)')
+ax[1].set_title('sin(t + phi)')
+ax[0].legend(), ax[1].legend()
 ax[-1].set_xlabel('time')
 plt.tight_layout()
+plt.savefig('con.png')
 plt.show()

@@ -40,6 +40,15 @@ MapE = EdgeType(name='MapE')
 FlowE = EdgeType(name='FlowE',
                   attr_def=[AttrDef('g', attr_type=float)])
 
+# Nonideal implementation
+MmV = NodeType(name='MmV', base=IdealV,
+               attr_def=[AttrDefMismatch('mm', attr_type=float, rstd=0.1)])
+MmFlowE_1p = EdgeType(name='MmFlowE_1p', base=FlowE,
+                   attr_def=[AttrDefMismatch('g', attr_type=float, rstd=0.01)])
+MmFlowE_10p = EdgeType(name='MmFlowE_10p', base=FlowE,
+                   attr_def=[AttrDefMismatch('g', attr_type=float, rstd=0.1)])
+
+
 def saturation(sig):
     """Saturate the value at 1"""
     return 0.5 * (abs(sig + 1) - abs(sig - 1))
@@ -50,7 +59,13 @@ Dummy = ProdRule(FlowE, Inp, IdealV, SRC, 0) # Dummy rule to make sure Inp is no
 ReadOut = ProdRule(MapE, IdealV, Out, DST, DST.fn(VAR(SRC)))
 SelfFeedback = ProdRule(MapE, IdealV, IdealV, SELF, -VAR(SELF) + SELF.z)
 Amat = ProdRule(FlowE, Out, IdealV, DST, EDGE.g * VAR(SRC))
-prod_rules = [Bmat, Dummy, ReadOut, SelfFeedback, Amat]
+
+# Production rules for msimatch v
+Bmat_mm = ProdRule(FlowE, Inp, MmV, DST, DST.mm * EDGE.g * VAR(SRC))
+SelfFeedback_mm = ProdRule(MapE, MmV, MmV, SELF, SELF.mm * (-VAR(SELF) + SELF.z))
+Amat_mm = ProdRule(FlowE, Out, MmV, DST, DST.mm * EDGE.g * VAR(SRC))
+
+prod_rules = [Bmat, Dummy, ReadOut, SelfFeedback, Amat, Bmat_mm, SelfFeedback_mm, Amat_mm]
 
 # Validation rules
 v_val = ValRule(IdealV, [ValPattern(SRC, MapE, Out, Range(exact=1)),
@@ -63,7 +78,7 @@ val_rules = [v_val, out_val, inp_val]
 
 # Nonideal implementation with 10% random variation
 
-cdg_types = [IdealV, Out, Inp, MapE, FlowE]
+cdg_types = [IdealV, Out, Inp, MapE, FlowE, MmV, MmFlowE_1p, MmFlowE_10p]
 help_fn = [saturation]
 spec = CDGSpec(cdg_types, prod_rules, val_rules)
 
@@ -82,7 +97,10 @@ def create_cnn(nrows: int, ncols: int,
 
     graph = CDG()
     # Create nodes
-    vs = [[v_nt(z=bias) for _ in range(ncols)] for _ in range(nrows)]
+    if v_nt == IdealV:
+        vs = [[v_nt(z=bias) for _ in range(ncols)] for _ in range(nrows)]
+    elif v_nt == MmV:
+        vs = [[v_nt(z=bias, mm=1.0) for _ in range(ncols)] for _ in range(nrows)]
     inps = [[Inp() for _ in range(ncols)] for _ in range(nrows)]
     outs = [[Out(fn=saturation) for _ in range(ncols)] for _ in range(nrows)]
 
@@ -124,10 +142,10 @@ def get_input_mapping(inps, image) -> dict[CDGNode, float]:
             mapping[inps[row_id][col_id]] = image[row_id, col_id]
     return mapping
 
-def read_out(nodes, sol, node_2_idx) -> np.array:
+def read_out(nodes, sol, node_2_idx, time_points) -> np.array:
     """Read out the solution"""
     nrows, ncols = len(nodes), len(nodes[0])
-    traj = np.round(saturation(sol.y.T)).astype(np.uint8)
+    traj = np.round(saturation(sol.sol(time_points).T)).astype(np.uint8)
     imgs = np.zeros((len(traj), nrows, ncols))
     for row_id in tqdm(range(nrows), desc='Read out'):
         for col_id in range(ncols):
@@ -146,18 +164,39 @@ def grayscale_edge_detection(file_name: str):
     bias = -0.5
     image = rgb_to_gray(plt.imread(file_name))[::4, ::4]
     nrows, ncols = image.shape
-    vs, inps, outs, graph = create_cnn(nrows, ncols, IdealV, FlowE, A_mat, B_mat, bias)
-    node_mapping = {v: 0 for row in vs for v in row}
-    validator.validate(cdg=graph, cdg_spec=spec)
-    compiler.compile(graph, spec, help_fn=help_fn, import_lib={}, inline_attr=True, verbose=True)
-    node_mapping.update(get_input_mapping(inps, image))
-    init_states = compiler.map_init_state(node_mapping)
-    sol = compiler.prog([0, 1], init_states=init_states)
-    imgs = read_out(vs, sol, compiler.var_mapping)
-    plt.imshow(image, cmap='gray')
-    plt.show()
-    plt.imshow(imgs[-1], cmap='gray')
-    plt.show()
+
+    TIME_RANGE = [0, 1]
+    time_points = np.linspace(*TIME_RANGE, 9)[1:]
+
+    nt_list = [MmV, IdealV, IdealV, IdealV]
+    et_list = [FlowE, FlowE, MmFlowE_1p, MmFlowE_10p]
+    for v_nt, flow_et in zip(nt_list, et_list):
+        vs, inps, outs, graph = create_cnn(nrows, ncols, v_nt, flow_et, A_mat, B_mat, bias)
+        node_mapping = {v: 0 for row in vs for v in row}
+        validator.validate(cdg=graph, cdg_spec=spec)
+        if flow_et == FlowE and v_nt == IdealV:
+            compiler.compile(graph, spec, help_fn=help_fn, import_lib={},
+                             inline_attr=True, verbose=True)
+        else:
+            compiler.compile(graph, spec, help_fn=help_fn, import_lib={},
+                             inline_attr=False, verbose=True)
+        node_mapping.update(get_input_mapping(inps, image))
+        init_states = compiler.map_init_state(node_mapping)
+        sol = compiler.prog([0, 1], init_states=init_states, dense_output=True)
+        imgs = read_out(vs, sol, compiler.var_mapping, time_points)
+
+        fig, axs = plt.subplots(3, 3)
+        axs[0, 0].imshow(image, cmap='gray')
+        axs[0, 0].set_title('Input img')
+        for i, (time, img) in enumerate(zip(time_points, imgs)):
+            ax = axs[(i + 1) // 3, (i + 1) % 3]
+            ax.imshow(img, cmap='gray')
+            ax.set_title(f'time: {time}')
+        title = f'{v_nt.name}_{flow_et.name}'
+        plt.suptitle(title)
+        plt.savefig(f'examples/cnn_images/{title}.png')
+        plt.tight_layout()
+        plt.show()
 
 
 if __name__ == '__main__':

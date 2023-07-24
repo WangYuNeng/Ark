@@ -1,7 +1,7 @@
 """
 Attribute class for CDGType.
 """
-from typing import NewType, Union
+from typing import NewType, Union, Optional
 from types import FunctionType
 from ark.specification.range import Range
 
@@ -10,7 +10,7 @@ AttrImpl = NewType('AttrImpl', Union[int, float, FunctionType]) # why pylint err
 
 class AttrDef:
     """Ａttribute Definition for a CDGType."""
-    def __init__(self, name: str, attr_type: type, attr_range: Range=None):
+    def __init__(self, name: str, attr_type: type, attr_range: Optional[Range]=None):
         self.name = name
         self.type = attr_type
         self.valid_range = attr_range
@@ -49,7 +49,7 @@ class AttrDefMismatch(AttrDef):
     The check() method only check whether the nominal value is in range
     and does not check the random value.
     """
-    def __init__(self, name: str, attr_type: type, attr_range: Range, rstd: float):
+    def __init__(self, name: str, attr_type: type, rstd: float, attr_range: Optional[Range]=None):
         self.rstd = rstd
         super().__init__(name, attr_type, attr_range)
 
@@ -57,4 +57,4 @@ class AttrDefMismatch(AttrDef):
         if not self.type == float:
             raise NotImplementedError(f'AST expression for a mismatched attribute \
                                       should be float, not {self.type}')
-        return f'np.random.normal({val}, {val} * {self.rstd})'
+        return f'np.random.normal({val}, np.abs({val} * {self.rstd}))'

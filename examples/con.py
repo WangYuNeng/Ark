@@ -1,6 +1,7 @@
 """
 Example: Coupled Oscillator Network
-https://www.nature.com/articles/s41598-019-49699-5
+[1] https://www.nature.com/articles/s41598-019-49699-5
+[2] https://ieeexplore.ieee.org/document/9531734
 
 Problem: Lots of nonidealities are transient noise which is
 probably not a good target for python simulation.
@@ -22,62 +23,107 @@ from ark.specification.cdg_types import NodeType, EdgeType
 from ark.specification.production_rule import ProdRule
 from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME
 
+F_1 = 50e3
+T_1 = 1 / F_1
+A0, TAU = 1e6, 5 * T_1
+
+F_2 = 795.8e6
+T_2 = 1 / F_2
+
 Osc = NodeType(name='Osc', order=1, attr_def=[AttrDef('lock_fn', attr_type=FunctionType),
                                                AttrDef('osc_fn', attr_type=FunctionType)])
 Coupling = EdgeType(name='Coupling', attr_def=[AttrDef('k', attr_type=float)])
 
-def locking_fn(t, tau=np.pi * 5):
-    return np.exp(-t / tau)
+Osc1 = NodeType(name='Osc1', base=Osc)
+Osc2 = NodeType(name='Osc2', base=Osc)
 
-def sin_fn(x):
+def locking_fn_1(t, x, a0, tau):
+    """Injection locking function from [1]"""
+    return a0 * np.exp(-t / tau) * np.sin(2 * x)
+
+def locking_fn_2(x):
+    """Injection locking function from [2]"""
+    return 2 * 795.8e6 * np.sin(2 * np.pi * x)
+
+def coupling_fn_1(x):
+    """Coupling function from [1]"""
     return np.sin(x)
 
-rule1 = ProdRule(Coupling, Osc, Osc, SRC, - EDGE.k * SRC.osc_fn(VAR(SRC) - VAR(DST)))
-rule2 = ProdRule(Coupling, Osc, Osc, DST, - EDGE.k * DST.osc_fn(VAR(DST) - VAR(SRC)))
-rule3 = ProdRule(Coupling, Osc, Osc, SELF, - SELF.lock_fn(TIME) * SELF.osc_fn(VAR(SELF) * 2))
+def coupling_fn_2(x):
+    """Coupling function from [2]"""
+    return 2 * 795.8e6 * np.sin(np.pi * x)
 
-# MAXCUT Problem
-a, b = Osc(lock_fn=locking_fn, osc_fn=sin_fn), Osc(lock_fn=locking_fn, osc_fn=sin_fn)
-c, d = Osc(lock_fn=locking_fn, osc_fn=sin_fn), Osc(lock_fn=locking_fn, osc_fn=sin_fn)
-e1 = Coupling(k=-1.0)
-e2 = Coupling(k=-1.0)
-e3 = Coupling(k=-1.0)
-e_self = [Coupling(k=1.0) for _ in range(4)]
+r_cp_src = ProdRule(Coupling, Osc, Osc, SRC, - EDGE.k * SRC.osc_fn(VAR(SRC) - VAR(DST)))
+r_cp_dst = ProdRule(Coupling, Osc, Osc, DST, - EDGE.k * DST.osc_fn(VAR(DST) - VAR(SRC)))
+r_lock_1 = ProdRule(Coupling, Osc1, Osc1, SELF, - SELF.lock_fn(TIME, VAR(SELF), A0, TAU))
+r_lock_2 = ProdRule(Coupling, Osc2, Osc2, SELF, - SELF.lock_fn(VAR(SELF)))
 
-graph = CDG()
-graph.connect(e1, a, b)
-graph.connect(e2, a, c)
-graph.connect(e3, a, d)
-graph.connect(e_self[0], a, a)
-graph.connect(e_self[1], b, b)
-graph.connect(e_self[2], c, c)
-graph.connect(e_self[3], d, d)
 
-cdg_types = [Osc, Coupling]
-production_rules = [rule1, rule2, rule3]
-spec = CDGSpec(cdg_types, production_rules, None)
-compiler = ArkCompiler(rewrite=RewriteGen())
-compiler.compile(cdg=graph, cdg_spec=spec, help_fn=[locking_fn, sin_fn], import_lib={})
-compiler.print_prog()
-time_range = [0, 15]
-time_points = np.linspace(*time_range, 1000)
-mapping = compiler.var_mapping
-init_states = compiler.map_init_state({node: np.random.rand() * np.pi for node in mapping.keys()})
-sol = compiler.prog(time_range, init_states=init_states, dense_output=True)
-fig, ax = plt.subplots(nrows=2)
-for node, idx in mapping.items():
-    ax[1].plot(time_points,
-             node.attrs['osc_fn'](time_points + sol.sol(time_points)[idx].T),
-             label=node.name)
-    ax[0].plot(time_points, sol.sol(time_points)[idx].T, label=node.name)
-# plt.xlabel('time')
-# plt.ylabel('Value')
-# plt.grid()
-# plt.legend()
-ax[0].set_title('phase (phi)')
-ax[1].set_title('sin(t + phi)')
-ax[0].legend(), ax[1].legend()
-ax[-1].set_xlabel('time')
-plt.tight_layout()
-plt.savefig('con.png')
-plt.show()
+cdg_types = [Osc, Coupling, Osc1, Osc2]
+production_rules = [r_cp_src, r_cp_dst, r_lock_1, r_lock_2]
+help_fn = [locking_fn_1, locking_fn_2, coupling_fn_1, coupling_fn_2]
+
+def create_max_cut_con(osc_nt: NodeType):
+    """Create a CDG of con for solving MAXCUT of this graph
+    A - B
+    | \
+    C   D
+    """
+    if osc_nt == Osc1:
+        locking_fn = locking_fn_1
+        cp_fn = coupling_fn_1
+    elif osc_nt == Osc2:
+        locking_fn = locking_fn_2
+        cp_fn = coupling_fn_2
+    a, b = osc_nt(lock_fn=locking_fn, osc_fn=cp_fn), osc_nt(lock_fn=locking_fn, osc_fn=cp_fn)
+    c, d = osc_nt(lock_fn=locking_fn, osc_fn=cp_fn), osc_nt(lock_fn=locking_fn, osc_fn=cp_fn)
+    e1 = Coupling(k=-1.0)
+    e2 = Coupling(k=-1.0)
+    e3 = Coupling(k=-1.0)
+    e_self = [Coupling(k=1.0) for _ in range(4)]
+
+    graph = CDG()
+    graph.connect(e1, a, b)
+    graph.connect(e2, a, c)
+    graph.connect(e3, a, d)
+    graph.connect(e_self[0], a, a)
+    graph.connect(e_self[1], b, b)
+    graph.connect(e_self[2], c, c)
+    graph.connect(e_self[3], d, d)
+
+    return graph
+
+for osc_nodetype in [Osc1, Osc2]:
+    if osc_nodetype == Osc1:
+        cycle = T_1
+        omega = 2 * np.pi * F_1
+        scaling = 1
+    elif osc_nodetype == Osc2:
+        cycle = T_2
+        omega = 2 * np.pi * F_2
+        scaling = np.pi
+    graph = create_max_cut_con(osc_nodetype)
+    spec = CDGSpec(cdg_types, production_rules, None)
+    compiler = ArkCompiler(rewrite=RewriteGen())
+    compiler.compile(cdg=graph, cdg_spec=spec, help_fn=help_fn, import_lib={})
+    compiler.print_prog()
+    time_range = [0, 5 * cycle]
+    time_points = np.linspace(*time_range, 1000)
+    mapping = compiler.var_mapping
+    init_states = compiler.map_init_state({node: np.random.rand() * np.pi / scaling
+                                           for node in mapping.keys()})
+    sol = compiler.prog(time_range, init_states=init_states, dense_output=True)
+    fig, ax = plt.subplots(nrows=2)
+    for node, idx in mapping.items():
+        phi = sol.sol(time_points)[idx].T * scaling
+        ax[1].plot(time_points,
+                np.sin(omega * time_points + phi),
+                label=node.name)
+        ax[0].plot(time_points, phi)
+    ax[0].set_title('phase (phi)')
+    ax[1].set_title('sin(wt + phi)')
+    ax[0].legend(), ax[1].legend()
+    ax[-1].set_xlabel('time')
+    plt.tight_layout()
+    plt.savefig('con.png')
+    plt.show()

@@ -53,6 +53,11 @@ def saturation(sig):
     """Saturate the value at 1"""
     return 0.5 * (abs(sig + 1) - abs(sig - 1))
 
+def saturation_diffpair(sig):
+    """Saturation function for diffpair implementation"""
+    sat_sig = saturation(sig)
+    return sat_sig / 0.707107 * np.sqrt(1 - np.square(sat_sig / 2 / 0.707107))
+
 # Production rules
 Bmat = ProdRule(FlowE, Inp, IdealV, DST, EDGE.g * VAR(SRC))
 Dummy = ProdRule(FlowE, Inp, IdealV, SRC, 0) # Dummy rule to make sure Inp is not used
@@ -77,7 +82,7 @@ inp_val = ValRule(Inp, [ValPattern(SRC, FlowE, IdealV, Range(min=4, max=9))])
 val_rules = [v_val, out_val, inp_val]
 
 cdg_types = [IdealV, Out, Inp, MapE, FlowE, MmV, MmFlowE_1p, MmFlowE_10p]
-help_fn = [saturation]
+help_fn = [saturation, saturation_diffpair]
 spec = CDGSpec(cdg_types, prod_rules, val_rules)
 
 validator = ArkValidator(solver=SMTSolver())
@@ -86,7 +91,7 @@ compiler = ArkCompiler(rewrite=RewriteGen())
 def create_cnn(nrows: int, ncols: int,
                v_nt: NodeType, flow_et: EdgeType,
                A_mat: np.array, B_mat: np.array,
-               bias: int) -> CDG:
+               bias: int, saturation_fn: FunctionType) -> CDG:
     """Create a CNN with nrows * ncols nodes
     
     A_mat, B_mat: 3x3 matrices
@@ -100,7 +105,7 @@ def create_cnn(nrows: int, ncols: int,
     elif v_nt == MmV:
         vs = [[v_nt(z=bias, mm=1.0) for _ in range(ncols)] for _ in range(nrows)]
     inps = [[Inp() for _ in range(ncols)] for _ in range(nrows)]
-    outs = [[Out(fn=saturation) for _ in range(ncols)] for _ in range(nrows)]
+    outs = [[Out(fn=saturation_fn) for _ in range(ncols)] for _ in range(nrows)]
 
     # Create edges
     # All v nodes connect from self, and connect to output
@@ -140,10 +145,10 @@ def get_input_mapping(inps, image) -> dict[CDGNode, float]:
             mapping[inps[row_id][col_id]] = image[row_id, col_id]
     return mapping
 
-def read_out(nodes, sol, node_2_idx, time_points) -> np.array:
+def read_out(nodes, sol, node_2_idx, time_points, saturation_fn) -> np.array:
     """Read out the solution"""
     nrows, ncols = len(nodes), len(nodes[0])
-    traj = np.round(saturation(sol.sol(time_points).T)).astype(np.uint8)
+    traj = np.round(saturation_fn(sol.sol(time_points).T)).astype(np.uint8)
     imgs = np.zeros((len(traj), nrows, ncols))
     for row_id in tqdm(range(nrows), desc='Read out'):
         for col_id in range(ncols):
@@ -168,33 +173,35 @@ def grayscale_edge_detection(file_name: str):
 
     nt_list = [MmV, IdealV, IdealV, IdealV]
     et_list = [FlowE, FlowE, MmFlowE_1p, MmFlowE_10p]
-    for v_nt, flow_et in zip(nt_list, et_list):
-        vs, inps, outs, graph = create_cnn(nrows, ncols, v_nt, flow_et, A_mat, B_mat, bias)
-        node_mapping = {v: 0 for row in vs for v in row}
-        validator.validate(cdg=graph, cdg_spec=spec)
-        if flow_et == FlowE and v_nt == IdealV:
-            compiler.compile(graph, spec, help_fn=help_fn, import_lib={},
-                             inline_attr=True, verbose=True)
-        else:
-            compiler.compile(graph, spec, help_fn=help_fn, import_lib={},
-                             inline_attr=False, verbose=True)
-        node_mapping.update(get_input_mapping(inps, image))
-        init_states = compiler.map_init_state(node_mapping)
-        sol = compiler.prog([0, 1], init_states=init_states, dense_output=True)
-        imgs = read_out(vs, sol, compiler.var_mapping, time_points)
+    for saturation_fn in [saturation, saturation_diffpair]:
+        for v_nt, flow_et in zip(nt_list, et_list):
+            vs, inps, outs, graph = create_cnn(nrows, ncols, v_nt, flow_et,
+                                               A_mat, B_mat, bias, saturation_fn)
+            node_mapping = {v: 0 for row in vs for v in row}
+            validator.validate(cdg=graph, cdg_spec=spec)
+            if flow_et == FlowE and v_nt == IdealV:
+                compiler.compile(graph, spec, help_fn=help_fn, import_lib={},
+                                inline_attr=True, verbose=True)
+            else:
+                compiler.compile(graph, spec, help_fn=help_fn, import_lib={},
+                                inline_attr=False, verbose=True)
+            node_mapping.update(get_input_mapping(inps, image))
+            init_states = compiler.map_init_state(node_mapping)
+            sol = compiler.prog([0, 1], init_states=init_states, dense_output=True)
+            imgs = read_out(vs, sol, compiler.var_mapping,
+                            time_points, saturation_fn)
 
-        fig, axs = plt.subplots(3, 3)
-        axs[0, 0].imshow(image, cmap='gray')
-        axs[0, 0].set_title('Input img')
-        for i, (time, img) in enumerate(zip(time_points, imgs)):
-            ax = axs[(i + 1) // 3, (i + 1) % 3]
-            ax.imshow(img, cmap='gray')
-            ax.set_title(f'time: {time}')
-        title = f'{v_nt.name}_{flow_et.name}'
-        plt.suptitle(title)
-        plt.savefig(f'examples/cnn_images/{title}.png')
-        plt.tight_layout()
-        plt.show()
+            fig, axs = plt.subplots(3, 3)
+            axs[0, 0].imshow(image, cmap='gray')
+            axs[0, 0].set_title('Input img')
+            for i, (time, img) in enumerate(zip(time_points, imgs)):
+                ax = axs[(i + 1) // 3, (i + 1) % 3]
+                ax.imshow(img, cmap='gray')
+                ax.set_title(f'time: {time}')
+            title = f'{v_nt.name}_{flow_et.name}'
+            plt.suptitle(title)
+            plt.tight_layout()
+            plt.savefig(f'examples/cnn_images/{saturation_fn.__name__}_{title}.png')
 
 
 if __name__ == '__main__':

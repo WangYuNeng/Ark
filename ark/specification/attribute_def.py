@@ -49,12 +49,22 @@ class AttrDefMismatch(AttrDef):
     The check() method only check whether the nominal value is in range
     and does not check the random value.
     """
-    def __init__(self, name: str, attr_type: type, rstd: float, attr_range: Optional[Range]=None):
+    def __init__(self, name: str, attr_type: type,
+                 rstd: Optional[float]=None, std: Optional[float]=None,
+                 attr_range: Optional[Range]=None):
+        if rstd and std:
+            raise ValueError('Cannot specify both rstd and std')
+        if not rstd and not std:
+            raise ValueError('Must specify either rstd or std')
         self.rstd = rstd
+        self.std = std
         super().__init__(name, attr_type, attr_range)
 
     def attr_str(self, val: AttrImpl) -> str:
         if not self.type == float:
             raise NotImplementedError(f'AST expression for a mismatched attribute \
                                       should be float, not {self.type}')
-        return f'np.random.normal({val}, np.abs({val} * {self.rstd}))'
+        if self.rstd:
+            return f'np.random.normal({val}, {val} * {self.rstd})'
+        else:
+            return f'np.random.normal({val}, {self.std})'

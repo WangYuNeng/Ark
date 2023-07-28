@@ -132,8 +132,8 @@ if __name__ == '__main__':
     N_RAND_SIM = 100
     TIME_RANGE = [0, 40e-9]
     fig, ax = plt.subplots(nrows=2)
-    for color_idx, (vt, it, et, title) in enumerate([(IdealV, IdealI, MmE, 'Mismatch Gain'),
-                                                     (MmV, MmI, IdealE, 'Mismatch LC'),
+    for color_idx, (vt, it, et, title) in enumerate([(IdealV, IdealI, MmE, '10% Mismatched XXX'),
+                                                     (MmV, MmI, IdealE, '10 Mismatched LC'),
                                                      (IdealV, IdealI, IdealE, 'Ideal')
                                                     ]):
         graph, v_nodes, i_nodes = create_tline(vt, it, et, LINE_LEN)

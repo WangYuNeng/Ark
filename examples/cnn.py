@@ -239,31 +239,44 @@ def grayscale_edge_detection(file_name: str):
 
 def paper_plot():
     """Generate the plots for the paper"""
-    row_title = ['Ideal', 'Tpl-1%-Mm', 'Tpl-10%-Mm', 'Nl-Act-Fn']
-    components = [[FlowE, saturation], [MmFlowE_1p, saturation],
-                  [MmFlowE_10p, saturation], [FlowE, saturation_diffpair]]
+    col_titles = ['(A)', '(B)', '(C)', '(D)', '(E)']
+
+    # plot saturation and saturation_diffpair in [-1.5, 1.5] in the same figure
+    x = np.linspace(-1.5, 1.5, 100)
+    plt.plot(x, saturation(x), label='saturation-ideal')
+    plt.plot(x, saturation_diffpair(x), label='saturation-nonideal')
+    plt.legend(fontsize=15)
+    plt.xlabel('input', fontsize=15)
+    plt.ylabel('output', fontsize=15)
+    plt.grid()
+    plt.savefig('examples/cnn_images/saturation_cmp.png')
+    plt.close()
+
+
+    components = [[IdealV, FlowE, saturation], [MmV, FlowE, saturation],
+                  [IdealV, MmFlowE_1p, saturation], [IdealV, MmFlowE_10p, saturation],
+                  [IdealV, FlowE, saturation_diffpair]]
 
     A_mat, B_mat, bias = prepare_tpl()
     image = rgb_to_gray(plt.imread('examples/cnn_images/cnn_input.png'))
-    N_COL = 5
+    N_ROW = 5
     TIME_RANGE = [0, 1]
-    time_points = np.linspace(*TIME_RANGE, N_COL)
-    fig, axs = plt.subplots(len(components), N_COL)
-    fig.subplots_adjust(wspace=0, hspace=0.1)
-    for i, (row_title, (flow_et, saturation_fn)) in enumerate(zip(row_title, components)):
-        v_nt = IdealV
+    time_points = np.linspace(*TIME_RANGE,N_ROW)
+    fig, axs = plt.subplots(N_ROW, len(components))
+    fig.subplots_adjust(wspace=0, hspace=0)
+    for j, (col_title, (v_nt, flow_et, saturation_fn)) in enumerate(zip(col_titles, components)):
         imgs = sim_cnn(image, A_mat, B_mat, bias, time_points,
                         v_nt, flow_et, saturation_fn)
-        for j, (time, img) in enumerate(zip(time_points, imgs)):
+        for i, (time, img) in enumerate(zip(time_points, imgs)):
             ax = axs[i, j]
             # remove axis ticks but keep the labels
             ax.tick_params(axis='both', which='both', bottom=False, top=False,
                             labelbottom=False, right=False, left=False, labelleft=False)
             ax.imshow(img, cmap='gray')
             if i == 0:
-                ax.set_title(f't={time:.2f}')
+                ax.set_title(col_title)
             if j == 0:
-                ax.set_ylabel(row_title)
+                ax.set_ylabel(f't={time:.2f}', rotation=0, labelpad=20)
 
     # put rows in plt closer together
     plt.savefig('examples/cnn_images/cnn_output.png')

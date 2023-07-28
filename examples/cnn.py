@@ -7,6 +7,8 @@ ref: https://onlinelibrary.wiley.com/doi/abs/10.1002/cta.564
 """
 
 from types import FunctionType
+import os
+from argparse import ArgumentParser
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
@@ -23,6 +25,22 @@ from ark.specification.production_rule import ProdRule
 from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME
 from ark.specification.validation_rule import ValRule, ValPattern
 from ark.reduction import SUM
+
+parser = ArgumentParser()
+parser.add_argument('-i', '--input', type=str,
+                    help='Input image')
+parser.add_argument('-o', '--output', type=str,
+                    help='Output folder')
+parser.add_argument('-p', '--paper', action='store_true',
+                    help='Generate figures for the paper')
+parser.add_argument('-s', '--seed', type=int, default=428,
+                    help='Random seed')
+
+args = parser.parse_args()
+input_file = args.input
+output_folder = args.output
+plot_paper = args.paper
+seed = args.seed
 
 
 # Ark specification
@@ -155,9 +173,8 @@ def read_out(nodes, sol, node_2_idx, time_points, saturation_fn) -> np.array:
             imgs[:, row_id, col_id] = traj[:, node_2_idx[nodes[row_id][col_id]]]
     return imgs
 
-
-def grayscale_edge_detection(file_name: str):
-    """Perform grayscale edge detection on a 96x96 image with cnn"""
+def prepare_tpl():
+    """Edge detection template"""
     A_mat = np.array([[0.0, 0.0, 0.0],
                       [0.0, 2.0, 0.0],
                       [0.0, 0.0, 0.0]])
@@ -165,7 +182,36 @@ def grayscale_edge_detection(file_name: str):
                       [-1.0, 8.0, -1.0],
                       [-1.0, -1.0, -1.0]])
     bias = -0.5
-    image = rgb_to_gray(plt.imread(file_name))[::4, ::4]
+    return A_mat, B_mat, bias
+
+def sim_cnn(image: np.array,
+            A_mat: np.array, B_mat: np.array, bias: int,
+            time_points: np.array,
+            v_nt: NodeType, flow_et: EdgeType,
+            saturation_fn: FunctionType):
+    """Simulate the cnn with ARK"""
+    nrows, ncols = image.shape
+    vs, inps, outs, graph = create_cnn(nrows, ncols, v_nt, flow_et,
+                                               A_mat, B_mat, bias, saturation_fn)
+    node_mapping = {v: 0 for row in vs for v in row}
+    validator.validate(cdg=graph, cdg_spec=spec)
+    if flow_et == FlowE and v_nt == IdealV:
+        compiler.compile(graph, spec, help_fn=help_fn, import_lib={},
+                        inline_attr=True, verbose=True)
+    else:
+        compiler.compile(graph, spec, help_fn=help_fn, import_lib={},
+                        inline_attr=False, verbose=True)
+    node_mapping.update(get_input_mapping(inps, image))
+    init_states = compiler.map_init_state(node_mapping)
+    sol = compiler.prog([0, 1], init_states=init_states, dense_output=True)
+    imgs = read_out(vs, sol, compiler.var_mapping,
+                            time_points, saturation_fn)
+    return imgs
+
+def grayscale_edge_detection(file_name: str):
+    """Perform grayscale edge detection on a image with cnn"""
+    A_mat, B_mat, bias = prepare_tpl()
+    image = rgb_to_gray(plt.imread(file_name))
     nrows, ncols = image.shape
 
     TIME_RANGE = [0, 1]
@@ -175,21 +221,8 @@ def grayscale_edge_detection(file_name: str):
     et_list = [FlowE, FlowE, MmFlowE_1p, MmFlowE_10p]
     for saturation_fn in [saturation, saturation_diffpair]:
         for v_nt, flow_et in zip(nt_list, et_list):
-            vs, inps, outs, graph = create_cnn(nrows, ncols, v_nt, flow_et,
-                                               A_mat, B_mat, bias, saturation_fn)
-            node_mapping = {v: 0 for row in vs for v in row}
-            validator.validate(cdg=graph, cdg_spec=spec)
-            if flow_et == FlowE and v_nt == IdealV:
-                compiler.compile(graph, spec, help_fn=help_fn, import_lib={},
-                                inline_attr=True, verbose=True)
-            else:
-                compiler.compile(graph, spec, help_fn=help_fn, import_lib={},
-                                inline_attr=False, verbose=True)
-            node_mapping.update(get_input_mapping(inps, image))
-            init_states = compiler.map_init_state(node_mapping)
-            sol = compiler.prog([0, 1], init_states=init_states, dense_output=True)
-            imgs = read_out(vs, sol, compiler.var_mapping,
-                            time_points, saturation_fn)
+            imgs = sim_cnn(image, A_mat, B_mat, bias, time_points,
+                            v_nt, flow_et, saturation_fn)
 
             fig, axs = plt.subplots(3, 3)
             axs[0, 0].imshow(image, cmap='gray')
@@ -201,8 +234,45 @@ def grayscale_edge_detection(file_name: str):
             title = f'{v_nt.name}_{flow_et.name}'
             plt.suptitle(title)
             plt.tight_layout()
-            plt.savefig(f'examples/cnn_images/{saturation_fn.__name__}_{title}.png')
+            save_path = os.path.join(output_folder, f'{saturation_fn.__name__}_{title}.png')
+            plt.savefig(save_path)
+
+def paper_plot():
+    """Generate the plots for the paper"""
+    row_title = ['Ideal', 'Tpl-1%-Mm', 'Tpl-10%-Mm', 'Nl-Act-Fn']
+    components = [[FlowE, saturation], [MmFlowE_1p, saturation],
+                  [MmFlowE_10p, saturation], [FlowE, saturation_diffpair]]
+
+    A_mat, B_mat, bias = prepare_tpl()
+    image = rgb_to_gray(plt.imread('examples/cnn_images/cnn_input.png'))
+    N_COL = 5
+    TIME_RANGE = [0, 1]
+    time_points = np.linspace(*TIME_RANGE, N_COL)
+    fig, axs = plt.subplots(len(components), N_COL)
+    fig.subplots_adjust(wspace=0, hspace=0.1)
+    for i, (row_title, (flow_et, saturation_fn)) in enumerate(zip(row_title, components)):
+        v_nt = IdealV
+        imgs = sim_cnn(image, A_mat, B_mat, bias, time_points,
+                        v_nt, flow_et, saturation_fn)
+        for j, (time, img) in enumerate(zip(time_points, imgs)):
+            ax = axs[i, j]
+            # remove axis ticks but keep the labels
+            ax.tick_params(axis='both', which='both', bottom=False, top=False,
+                            labelbottom=False, right=False, left=False, labelleft=False)
+            ax.imshow(img, cmap='gray')
+            if i == 0:
+                ax.set_title(f't={time:.2f}')
+            if j == 0:
+                ax.set_ylabel(row_title)
+
+    # put rows in plt closer together
+    plt.savefig('examples/cnn_images/cnn_output.png')
+    plt.show()
 
 
 if __name__ == '__main__':
-    grayscale_edge_detection('examples/cnn_images/input1.bmp')
+    np.random.seed(seed)
+    if not plot_paper:
+        grayscale_edge_detection(input_file)
+    else:
+        paper_plot()

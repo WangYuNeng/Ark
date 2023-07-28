@@ -158,14 +158,16 @@ if __name__ == '__main__':
                 else:
                     ax[row_num].plot(time_points * 1e9, trajs[traj_idx],
                                      color=f'C{color_idx}', alpha=alpha)
-    ax[0].legend()
-    ax[1].legend()
+    handles, labels = ax[0].get_legend_handles_labels()
+    ax[0].legend(reversed(handles), reversed(labels),loc='upper center', bbox_to_anchor=(0.5, 1.5),
+          fancybox=True, shadow=True, ncol=3)
+
     ax[0].set_xlabel('Time (ns)')
     ax[0].set_ylabel('Amplitude (V)')
-    ax[0].set_title('Voltage @ 1st node')
+    ax[0].set_title('Source waveform')
     ax[1].set_xlabel('Time (ns)')
     ax[1].set_ylabel('Amplitude (V)')
-    ax[1].set_title('Voltage @ last node')
+    ax[1].set_title('Terminal waveform')
     plt.tight_layout()
     plt.savefig('examples/tln.png')
     plt.show()

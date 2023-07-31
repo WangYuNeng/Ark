@@ -3,6 +3,7 @@ Ark production Rule
 """
 import ast
 from dataclasses import dataclass
+import sympy
 from ark.specification.rule_keyword import Expression, kw_name, SRC, DST, SELF, EDGE, TIME, Target
 from ark.specification.cdg_types import EdgeType, NodeType
 from ark.cdg.cdg import CDGEdge, CDGNode
@@ -48,12 +49,17 @@ class ProdRule:
         return self._id
 
     @property
-    def fn_ast(self):
+    def fn_ast(self) -> ast.Expr:
         """Returns the AST of the production function 
         TODO: Change to a more pythonic way of doing this, e.g., overload
         the arithmetic operators.
         """
         return ast.parse(str(self._fn_exp), mode='eval')
+
+    @property
+    def fn_sympy(self) -> sympy.Expr:
+        """Returns the sympy expression of the production function"""
+        return self._fn_exp.sympy
 
     def get_rewrite_mapping(self, edge: CDGEdge):
         """

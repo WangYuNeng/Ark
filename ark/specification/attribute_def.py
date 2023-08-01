@@ -65,6 +65,6 @@ class AttrDefMismatch(AttrDef):
             raise NotImplementedError(f'AST expression for a mismatched attribute \
                                       should be float, not {self.type}')
         if self.rstd:
-            return f'np.random.normal({val}, {val} * {self.rstd})'
+            return f'np.random.normal({val}, np.abs({val} * {self.rstd}))'
         else:
             return f'np.random.normal({val}, {self.std})'

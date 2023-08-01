@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import NewType
+import sympy
 
 class Expression:
     """Expression for writing production rules
@@ -54,6 +54,11 @@ class Expression:
             converted_args.append(arg)
         return FunctionCall(self, converted_args)
 
+    @property
+    def sympy(self) -> sympy.Expr:
+        """Convert to sympy expression"""
+        raise NotImplementedError
+
 @dataclass
 class Variable(Expression):
     """Variable expression"""
@@ -62,6 +67,10 @@ class Variable(Expression):
     def __str__(self) -> str:
         return self.name
 
+    @property
+    def sympy(self) -> sympy.Expr:
+        return sympy.Symbol(self.name, real=True)
+
 @dataclass
 class Constant(Expression):
     """Constant expression"""
@@ -69,6 +78,10 @@ class Constant(Expression):
 
     def __str__(self) -> str:
         return str(self.value)
+
+    @property
+    def sympy(self) -> sympy.Expr:
+        return sympy.RealNumber(self.value)
 
 @dataclass
 class Sum(Expression):
@@ -79,6 +92,10 @@ class Sum(Expression):
     def __str__(self) -> str:
         return f'({self.left} + {self.right})'
 
+    @property
+    def sympy(self) -> sympy.Expr:
+        return self.left.sympy + self.right.sympy
+
 @dataclass
 class Difference(Expression):
     """Difference expression"""
@@ -87,6 +104,10 @@ class Difference(Expression):
 
     def __str__(self) -> str:
         return f'({self.left} - {self.right})'
+
+    @property
+    def sympy(self) -> sympy.Expr:
+        return self.left.sympy - self.right.sympy
 
 @dataclass
 class Product(Expression):
@@ -97,6 +118,10 @@ class Product(Expression):
     def __str__(self) -> str:
         return f'({self.left} * {self.right})'
 
+    @property
+    def sympy(self) -> sympy.Expr:
+        return self.left.sympy * self.right.sympy
+
 @dataclass
 class Quotient(Expression):
     """Quotient expression"""
@@ -106,6 +131,10 @@ class Quotient(Expression):
     def __str__(self) -> str:
         return f'({self.left} / {self.right})'
 
+    @property
+    def sympy(self) -> sympy.Expr:
+        return self.left.sympy / self.right.sympy
+
 @dataclass
 class Negation(Expression):
     """Negation expression"""
@@ -113,6 +142,10 @@ class Negation(Expression):
 
     def __str__(self) -> str:
         return f'(-{self.expr})'
+
+    @property
+    def sympy(self) -> sympy.Expr:
+        return -self.expr.sympy
 
 @dataclass
 class Power(Expression):
@@ -123,6 +156,10 @@ class Power(Expression):
     def __str__(self) -> str:
         return f'({self.base} ** {self.exp})'
 
+    @property
+    def sympy(self) -> sympy.Expr:
+        return self.base.sympy ** self.exp.sympy
+
 @dataclass
 class FunctionCall(Expression):
     """Function call expression"""
@@ -131,6 +168,11 @@ class FunctionCall(Expression):
 
     def __str__(self) -> str:
         return f'{self.fn}({", ".join(str(arg) for arg in self.args)})'
+
+    @property
+    def sympy(self) -> sympy.Expr:
+        sympy_fn = sympy.Function(self.fn.sympy, real=True)
+        return sympy_fn(*[arg.sympy for arg in self.args])  
 
 @dataclass
 class RuleKeyword:

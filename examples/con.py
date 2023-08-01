@@ -88,6 +88,7 @@ parser.add_argument('--osc_type', type=int, default=2)
 parser.add_argument('--baseline', action='store_true')
 parser.add_argument('-p', '--plot', action='store_true')
 parser.add_argument('-n', '--n_trial', type=int, default=1000)
+parser.add_argument('--n_cycle', type=int, default=5, help='Number of cycles to run the simulation')
 parser.add_argument('--atol', type=float, default=1e-2)
 parser.add_argument('--rtol', type=float, default=1e-2)
 parser.add_argument('--noise', type=bool, default=False)
@@ -98,7 +99,8 @@ parser.add_argument('--offset_rstd', type=float, default=None,
 parser.add_argument('--scale_rstd', type=float, default=None,
                     help='Standard deviation of the scaling relative to the coupling function. \
                           The disctibution is N(1, scale_rstd) * coupling_fn.')
-parser.add_argument('--initialize', type=int, default=None)
+parser.add_argument('--initialize', type=float, default=None)
+parser.add_argument('--w_n_bits', type=int, default=1, help='Number of bits for cut weights')
 sim_args = parser.parse_args()
 
 F_1 = 50e3
@@ -114,6 +116,7 @@ SIM_DISTORTED = False
 
 OSC_TYPE = sim_args.osc_type
 BASELINE = sim_args.baseline
+N_CYCLE = sim_args.n_cycle
 PLOT = sim_args.plot
 N_TIRAL = sim_args.n_trial
 ATOL, RTOL = sim_args.atol, sim_args.rtol
@@ -121,6 +124,7 @@ NOISE = sim_args.noise
 OFFSET_RSTD = sim_args.offset_rstd
 SCALE_RSTD = sim_args.scale_rstd
 INITIALIZE = sim_args.initialize
+W_N_BITS = sim_args.w_n_bits
 
 if OSC_TYPE == 1 and (OFFSET_RSTD or SCALE_RSTD):
     raise ValueError('Osc1 does not support OFFSET or SCALE')
@@ -155,7 +159,7 @@ elif SCALE_RSTD:
 
 def locking_fn_1(t, x, a0, tau):
     """Injection locking function from [1]"""
-    return a0 * np.exp(-t / tau) * np.sin(2 * x)
+    return a0 * (1 - np.exp(-t / tau)) * np.sin(2 * x)
 
 def locking_fn_2(x):
     """Injection locking function from [2]"""
@@ -216,6 +220,7 @@ def create_max_cut_con(connection_mat, osc_nt: NodeType, cp_et: EdgeType, noise_
     for i, row in enumerate(connection_mat):
         for j, val in enumerate(row):
             if val:
+                args['k'] = float(-val)
                 graph.connect(cp_et(**args), nodes[i], nodes[j])
     for i in range(4):
         graph.connect(Coupling(k=1.0), nodes[i], nodes[i])
@@ -232,19 +237,21 @@ def calc_cut_size(connection_mat, cut):
                 cut_val += connection_mat[i][i + 1 + j]
     return cut_val
 
-def gen_max_cut_prob(seed):
+def gen_max_cut_prob(seed, w_n_bits=W_N_BITS):
     """Generate a max cut problem"""
     np.random.seed(seed)
-    connection_mat = np.random.randint(0, 2, size=(4, 4))
+    connection_mat = np.random.randint(0, 2 ** w_n_bits, size=(4, 4))
     # set diagonal and lower triangle to 0
     connection_mat = np.triu(connection_mat, 1)
 
     cut_enumeration = [[a, b, c, 0] for a, b, c in product([0, 1], repeat=3)]
-    max_cut = 0
+    max_cut, max_cut_size = [0 for _ in range(4)], 0
     for cut in cut_enumeration:
         cut_val = calc_cut_size(connection_mat, cut)
-        max_cut = max(max_cut, cut_val)
-    return connection_mat, max_cut
+        if cut_val > max_cut_size:
+            max_cut, max_cut_size = cut, cut_val
+    return connection_mat, max_cut_size, max_cut
+
 
 def plot_oscillation(time_points, sol, mapping, omega, scaling, title=None):
     """Plot the oscillation of the oscillator"""
@@ -314,16 +321,15 @@ def main():
     for seed, prob in tqdm(enumerate(problems),
                             desc=f'{osc_nodetype.name}, {cp_et.name}, {noise_fn.__name__}',
                             total=N_TIRAL):
-        connection_mat, max_cut = prob
+        connection_mat, max_cut_size, max_cut = prob
         nodes, graph = create_max_cut_con(connection_mat, osc_nodetype, cp_et, noise_fn)
         spec = CDGSpec(cdg_types, production_rules, None)
         compiler = ArkCompiler(rewrite=RewriteGen())
         compiler.compile(cdg=graph, cdg_spec=spec, help_fn=help_fn, import_lib={})
-        compiler.dump_prog(f'{osc_nodetype.name}{cp_et.name}{noise_fn.__name__}.py')
-        time_range = [0, 5 * cycle]
+        time_range = [0, N_CYCLE * cycle]
         time_points = np.linspace(*time_range, 1000)
         mapping = compiler.var_mapping
-        if INITIALIZE:
+        if INITIALIZE is not None:
             init_states = compiler.map_init_state({node: INITIALIZE for node in mapping.keys()})
         else:
             np.random.seed(seed)
@@ -347,7 +353,7 @@ def main():
         sync_success += 1
         assigments = [node_to_assignment[node] for node in nodes]
         cut_size = calc_cut_size(connection_mat, assigments)
-        if cut_size == max_cut:
+        if cut_size == max_cut_size:
             correct += 1
     print(f'Sync success rate = {sync_success / N_TIRAL * 100}%')
     print(f'Correct rate = {correct / N_TIRAL * 100}%')

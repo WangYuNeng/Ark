@@ -127,8 +127,7 @@ INITIALIZE = sim_args.initialize
 if OSC_TYPE == 1 and (OFFSET_RSTD or SCALE_RSTD):
     raise ValueError('Osc1 does not support OFFSET or SCALE')
 
-obc_lang = CDGLang("OBC")
-hw_obc_lang = CDGLang("AnalogOBC", inherits=obc_lang)
+obc_lang = CDGLang("obc")
 
 Osc = NodeType(name='Osc', order=1, attr_def=[AttrDef('lock_fn', attr_type=FunctionType),
                                                AttrDef('osc_fn', attr_type=FunctionType),
@@ -139,6 +138,7 @@ Osc1 = NodeType(name='Osc1', base=Osc)
 Osc2 = NodeType(name='Osc2', base=Osc)
 
 obc_lang.add_types(Osc,Coupling,Osc1,Osc2)
+latexlib.type_spec_to_latex(obc_lang)
 
 Coupling_distorted = None
 if OFFSET_RSTD and SCALE_RSTD:
@@ -159,11 +159,13 @@ elif SCALE_RSTD:
                                   attr_def=[AttrDef('offset', attr_type=float),
                                             AttrDefMismatch('scale', attr_type=float,
                                                             rstd=SCALE_RSTD)])
+                                                        
 if not Coupling_distorted is None:
+    hw_obc_lang = CDGLang("hwobc-%f-%f" % (OFFSET_RSTD,SCALE_RSTD), inherits=obc_lang)
     hw_obc_lang.add_types(Coupling_distorted)
+    latexlib.type_spec_to_latex(hw_obc_lang)
 
 
-latexlib.type_spec_to_latex(obc_lang)
 
 def locking_fn_1(t, x, a0, tau):
     """Injection locking function from [1]"""
@@ -214,8 +216,11 @@ if Coupling_distorted:
     production_rules += [r_cp_src_distorted, r_cp_dst_distorted]
     hw_obc_lang.add_production_rules(r_cp_src_distorted, r_cp_dst_distorted)
 
+
 latexlib.production_rules_to_latex(obc_lang)
-latexlib.production_rules_to_latex(hw_obc_lang)
+if not Coupling_distorted is None:
+    latexlib.production_rules_to_latex(hw_obc_lang)
+
 
 def create_max_cut_con(connection_mat, osc_nt: NodeType, cp_et: EdgeType, noise_fn: FunctionType):
     """Create a CDG of con for solving MAXCUT of the graph described by connection_mat"""

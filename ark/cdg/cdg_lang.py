@@ -24,6 +24,12 @@ class CDGLang:
         for n in self._edge_order:
             yield self._edge_types[n]
 
+    def validation_rules(self):
+        for valid in self._validation_rules.values():
+            for rule in valid:
+                yield rule
+
+
     def production_rules(self):
         for prod in self._production_rules.values():
             yield prod 
@@ -62,7 +68,10 @@ class CDGLang:
 
     def add_validation_rules(self,*args):
         for arg in args:
-            self._validation_rules[arg.tgt_node_type] = arg
+            if not arg.tgt_node_type  in self._validation_rules:
+                self._validation_rules[arg.tgt_node_type] = []
+
+            self._validation_rules[arg.tgt_node_type].append(arg)
 
 
     def add_production_rules(self,*args):

@@ -8,6 +8,24 @@ class Range:
     max: int | float = None
     exact: int | float = None
 
+    def is_interval_bound(self):
+        return self.is_range() and not self.min is None and not self.max is None
+ 
+    def is_lower_bound(self):
+        return self.is_range() and self.max is None and not self.min is None
+ 
+    def is_upper_bound(self):
+        return self.is_range() and  self.min is None and not self.max is None
+ 
+    def is_unbounded(self):
+        return self.is_range() and self.min is None and self.max is None
+
+    def is_range(self):
+        return self.exact is None
+ 
+    def is_exact(self):
+        return not self.exact is None
+
     def check_in_range(self, val):
         """Check if val is in the valid range."""
         if self.exact is not None and val != self.exact or \

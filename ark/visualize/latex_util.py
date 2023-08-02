@@ -73,7 +73,29 @@ class LatexPrettyPrinter:
         return result 
 
     @classmethod
+    def fmt_integer(cls,integer):
+        return cls.fmt(None,str(integer))
+       
+    @classmethod
+    def fmt_decimal(cls,decimal):
+        return cls.fmt(None,str(decimal))
+  
+    @classmethod
+    def fmt_number(cls,number):
+        if isinstance(number, int):
+            return cls.fmt_integer(number)
+        else:
+            return cls.fmt_decimal(number)
+
+    @classmethod
+    def fmt_percent(cls, frac):
+        x = cls.fmt_number(frac*100.0)
+        x += cls.fmt(None,"%")
+        return x
+
+    @classmethod
     def fmt(cls,type_,text_):
+        assert(isinstance(text_,str)) 
         text = LatexPrettyPrinter.esc(text_)
         if type_ in LatexPrettyPrinter.STYLES:
             text = LatexPrettyPrinter.STYLES[type_].formatted(text_)
@@ -130,6 +152,12 @@ class LatexTabular:
         assert(self.rowbuf <= self.ncols)
         return text
 
+
+    def fill_and_end(self):
+        n_empty = self.ncols - len(self.rowbuf)
+        for _ in range(n_empty):
+            self.add_cell("")
+        self.end()
 
     def end(self):
         assert(len(self.rowbuf) == self.ncols)

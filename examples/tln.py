@@ -23,9 +23,17 @@ from ark.specification.validation_rule import ValRule, ValPattern
 from ark.reduction import SUM
 
 
+# visualization scripts
+from ark.cdg.cdg_lang import CDGLang
+import ark.visualize.latex_gen as latexlib
+import ark.visualize.graphviz_gen as graphvizlib
+
+
 # Ark specification
 lc_range, gr_range = Range(min=0.1e-9, max=10e-9), Range(min=0)
 w_range = Range(exact=1.0)
+
+tln_lang = CDGLang("tln")
 
 # Ideal implementation
 IdealV = NodeType(name='IdealV', order=1,
@@ -52,6 +60,9 @@ InpI = NodeType(name='InpI',
                 attr_def=[AttrDef('fn', attr_type=FunctionType),
                           AttrDef('g', attr_type=float, attr_range=gr_range)
                           ])
+tln_lang.add_types(IdealV, IdealI, IdealE, InpV, InpI)
+latexlib.type_spec_to_latex(tln_lang)
+
 # Example input function
 def pulse(t, amplitude=1, delay=0, rise_time=5e-9, fall_time=5e-9, pulse_width=10e-9, period=1):
     """Trapezoidal pulse function"""
@@ -78,6 +89,9 @@ inpi2_v = ProdRule(IdealE, InpI, IdealV, DST, EDGE.wt*(SRC.fn(TIME)-VAR(DST)*SRC
 inpi2_i = ProdRule(IdealE, InpI, IdealI, DST, EDGE.wt*(SRC.fn(TIME)-VAR(DST))/DST.l/SRC.g)
 prod_rules = [_v2i, v2_i, _i2v, i2_v, vself, iself, inpv2_v, inpv2_i, inpi2_v, inpi2_i]
 
+tln_lang.add_production_rules(*prod_rules)
+latexlib.production_rules_to_latex(tln_lang)
+
 # Validation rules
 v_val = ValRule(IdealV, [ValPattern(SRC, IdealE, IdealI, Range(min=0)),
                      ValPattern(DST, IdealE, IdealI, Range(min=0)),
@@ -92,7 +106,10 @@ inpv_val = ValRule(InpV, [ValPattern(SRC, IdealE, IdealV, Range(min=0, max=1)),
 inpi_val = ValRule(InpI, [ValPattern(SRC, IdealE, IdealV, Range(min=0, max=1)),
                           ValPattern(SRC, IdealE, IdealI, Range(min=0, max=1))])
 val_rules = [v_val, i_val, inpv_val, inpi_val]
+tln_lang.add_validation_rules(*val_rules)
+latexlib.validation_rules_to_latex(tln_lang)
 
+hw_tln_lang = CDGLang("hwtln",inherits=tln_lang)
 # Nonideal implementation with 10% random variation
 MmV = NodeType(name='MmV', base=IdealV,
                attr_def=[AttrDefMismatch('c', attr_type=float, attr_range=lc_range, rstd=0.1)])
@@ -100,6 +117,8 @@ MmI = NodeType(name='MmI', base=IdealI,
                attr_def=[AttrDefMismatch('l', attr_type=float, attr_range=lc_range, rstd=0.1)])
 MmE = EdgeType(name='MmE', base=IdealE,
                attr_def=[AttrDefMismatch('ws', attr_type=float, attr_range=w_range, rstd=0.1)])
+hw_tln_lang.add_types(MmV, MmI, MmE)
+latexlib.type_spec_to_latex(hw_tln_lang)
 
 cdg_types = [IdealV, IdealI, IdealE, InpV, InpI, MmV, MmI, MmE]
 help_fn = [pulse]
@@ -132,11 +151,16 @@ if __name__ == '__main__':
     N_RAND_SIM = 100
     TIME_RANGE = [0, 40e-9]
     fig, ax = plt.subplots(nrows=2)
-    for color_idx, (vt, it, et, title) in enumerate([(IdealV, IdealI, MmE, '10% Mismatched XXX'),
-                                                     (MmV, MmI, IdealE, '10 Mismatched LC'),
-                                                     (IdealV, IdealI, IdealE, 'Ideal')
+    for color_idx, (vt, it, et, title,handle) in enumerate([(IdealV, IdealI, MmE, '10% Mismatched XXX',"mmG"),
+                                                     (MmV, MmI, IdealE, '10 Mismatched LC',"mmLC"),
+                                                     (IdealV, IdealI, IdealE, 'Ideal',"ideal")
                                                     ]):
         graph, v_nodes, i_nodes = create_tline(vt, it, et, LINE_LEN)
+
+        name = "tline_%s" % handle
+        graphvizlib.cdg_to_graphviz("tln",name,hw_tln_lang,graph,inherited=False)
+        graphvizlib.cdg_to_graphviz("tln",name+"_inh",hw_tln_lang,graph,inherited=True)
+
         validator.validate(cdg=graph, cdg_spec=spec)
         compiler.compile(cdg=graph, cdg_spec=spec, help_fn=help_fn, import_lib={})
         mapping = compiler.var_mapping

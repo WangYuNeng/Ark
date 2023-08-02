@@ -82,8 +82,11 @@ from ark.cdg.cdg import CDG
 from ark.specification.cdg_types import NodeType, EdgeType
 from ark.specification.production_rule import ProdRule
 from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME
-import ark.visualize.latex_gen as latexlib
+
+# visualization scripts
 from ark.cdg.cdg_lang import CDGLang
+import ark.visualize.latex_gen as latexlib
+import ark.visualize.graphviz_gen as graphvizlib
 
 parser = ArgumentParser()
 parser.add_argument('--osc_type', type=int, default=2)
@@ -340,6 +343,11 @@ def main():
                             total=N_TIRAL):
         connection_mat, max_cut = prob
         nodes, graph = create_max_cut_con(connection_mat, osc_nodetype, cp_et, noise_fn)
+
+        lang = obc_lang if Coupling_distorted is None else hw_obc_lang
+        graphvizlib.cdg_to_graphviz("con", "con_%d_inh" % seed, lang,graph,inherited=True)
+        graphvizlib.cdg_to_graphviz("con", "con_%d" % seed, lang,graph,inherited=False)
+        
         spec = CDGSpec(cdg_types, production_rules, None)
         compiler = ArkCompiler(rewrite=RewriteGen())
         compiler.compile(cdg=graph, cdg_spec=spec, help_fn=help_fn, import_lib={})

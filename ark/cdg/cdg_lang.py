@@ -16,6 +16,11 @@ class CDGLang:
         self._validation_rules = {}
 
     def edge_types(self):
+        if not self.inherits is None:
+            for n in self.inherits.edge_types():
+                yield n
+
+
         for n in self._edge_order:
             yield self._edge_types[n]
 
@@ -23,7 +28,20 @@ class CDGLang:
         for prod in self._production_rules.values():
             yield prod 
 
+    def is_inherited(self,val):
+        if val in self.inherits.node_types():
+            return True
+        
+        if val in self.inherits.edge_types():
+            return True
+
+        return False
+
     def node_types(self):
+        if not self.inherits is None:
+            for n in self.inherits.node_types():
+                yield n
+
         for n in self._node_order:
             yield self._node_types[n]
 
@@ -41,6 +59,11 @@ class CDGLang:
 
             else:
                 raise Exception("unknown type: %s" % arg)
+
+    def add_validation_rules(self,*args):
+        for arg in args:
+            self._validation_rules[arg.tgt_node_type] = arg
+
 
     def add_production_rules(self,*args):
         for arg in args:

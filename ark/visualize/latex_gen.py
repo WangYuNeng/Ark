@@ -166,3 +166,6 @@ def production_rules_to_latex(cdglang):
     print("---- relations [%s] ----" % cdglang.name)
     print(latex_text)
     write_file(cdglang.filename("relations","tex"),latex_text)
+
+def validation_rules_to_latex(cdglang):
+    raise Exception("not implemented")

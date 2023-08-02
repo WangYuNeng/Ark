@@ -164,7 +164,6 @@ if not Coupling_distorted is None:
 
 
 latexlib.type_spec_to_latex(obc_lang)
-latexlib.production_rules_to_latex(obc_lang)
 
 def locking_fn_1(t, x, a0, tau):
     """Injection locking function from [1]"""
@@ -192,13 +191,13 @@ def zero_noise(_):
 
 r_cp_src = ProdRule(Coupling, Osc, Osc, SRC, - EDGE.k * SRC.osc_fn(VAR(SRC) - VAR(DST)))
 r_cp_dst = ProdRule(Coupling, Osc, Osc, DST, - EDGE.k * DST.osc_fn(VAR(DST) - VAR(SRC)))
-obc_lang.add_rules([r_cp_src,r_cp_dst])
+obc_lang.add_production_rules(r_cp_src,r_cp_dst)
 
 r_lock_1 = ProdRule(Coupling, Osc1, Osc1, SELF,
                     - SELF.lock_fn(TIME, VAR(SELF), A0, TAU) - SELF.noise_fn(NOIS_STD))
 r_lock_2 = ProdRule(Coupling, Osc2, Osc2, SELF,
                     - SELF.lock_fn(VAR(SELF)) - SELF.noise_fn(NOIS_STD))
-obc_lang.add_rules(r_cp_src,r_cp_dst,r_lock_1,r_lock_2)
+obc_lang.add_production_rules(r_cp_src,r_cp_dst,r_lock_1,r_lock_2)
 
 cdg_types = [Osc, Coupling, Osc1, Osc2]
 production_rules = [r_cp_src, r_cp_dst, r_lock_1, r_lock_2]
@@ -213,7 +212,10 @@ if Coupling_distorted:
                               - EDGE.k * (EDGE.scale * SRC.osc_fn(VAR(DST) - VAR(SRC)) \
                                           + EDGE.offset))
     production_rules += [r_cp_src_distorted, r_cp_dst_distorted]
-    hw_obc_lang.add_rules(r_cp_src_distorted, r_cp_dst_distorted)
+    hw_obc_lang.add_production_rules(r_cp_src_distorted, r_cp_dst_distorted)
+
+latexlib.production_rules_to_latex(obc_lang)
+latexlib.production_rules_to_latex(hw_obc_lang)
 
 def create_max_cut_con(connection_mat, osc_nt: NodeType, cp_et: EdgeType, noise_fn: FunctionType):
     """Create a CDG of con for solving MAXCUT of the graph described by connection_mat"""

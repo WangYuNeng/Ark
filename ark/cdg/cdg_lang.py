@@ -12,13 +12,16 @@ class CDGLang:
         self._edge_types = {}
         self._edge_order = []
 
-        self._relations = {}
+        self._production_rules= {}
         self._validation_rules = {}
 
     def edge_types(self):
         for n in self._edge_order:
             yield self._edge_types[n]
 
+    def production_rules(self):
+        for prod in self._production_rules.values():
+            yield prod 
 
     def node_types(self):
         for n in self._node_order:
@@ -28,15 +31,28 @@ class CDGLang:
         for arg in args:
             if isinstance(arg, EdgeType):
                 assert(not arg.name in self._edge_types)
-                self._edge_types[arg.name] = arg
-                self._edge_order.append(arg.name)
+                self._edge_types[arg] = arg
+                self._edge_order.append(arg)
 
             elif isinstance(arg, NodeType):
                 assert(not arg.name in self._node_types)
-                self._node_types[arg.name] = arg
-                self._node_order.append(arg.name)
+                self._node_types[arg] = arg
+                self._node_order.append(arg)
 
             else:
                 raise Exception("unknown type: %s" % arg)
 
+    def add_production_rules(self,*args):
+        for arg in args:
+            self._production_rules[arg.identifier] = arg
+
+    def filename(self,suffix,extension):
+        def format_filename(text):
+            text = text.lower()
+            return "-".join(text.split(" "))
+
+        prefix = format_filename(self.name)
+        suffix = format_filename(suffix)
+        filename = "lang_%s_%s.%s" % (prefix, suffix, extension)
+        return filename
 

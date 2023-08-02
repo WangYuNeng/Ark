@@ -83,6 +83,11 @@ from ark.specification.cdg_types import NodeType, EdgeType
 from ark.specification.production_rule import ProdRule
 from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME
 
+# visualization scripts
+from ark.cdg.cdg_lang import CDGLang
+import ark.visualize.latex_gen as latexlib
+import ark.visualize.graphviz_gen as graphvizlib
+
 parser = ArgumentParser()
 parser.add_argument('--osc_type', type=int, default=2)
 parser.add_argument('--baseline', action='store_true')
@@ -129,6 +134,8 @@ W_N_BITS = sim_args.w_n_bits
 if OSC_TYPE == 1 and (OFFSET_RSTD or SCALE_RSTD):
     raise ValueError('Osc1 does not support OFFSET or SCALE')
 
+obc_lang = CDGLang("obc")
+
 Osc = NodeType(name='Osc', order=1, attr_def=[AttrDef('lock_fn', attr_type=FunctionType),
                                                AttrDef('osc_fn', attr_type=FunctionType),
                                                AttrDef('noise_fn', attr_type=FunctionType)])
@@ -136,6 +143,9 @@ Coupling = EdgeType(name='Coupling', attr_def=[AttrDef('k', attr_type=float)])
 
 Osc1 = NodeType(name='Osc1', base=Osc)
 Osc2 = NodeType(name='Osc2', base=Osc)
+
+obc_lang.add_types(Osc,Coupling,Osc1,Osc2)
+latexlib.type_spec_to_latex(obc_lang)
 
 Coupling_distorted = None
 if OFFSET_RSTD and SCALE_RSTD:
@@ -156,6 +166,13 @@ elif SCALE_RSTD:
                                   attr_def=[AttrDef('offset', attr_type=float),
                                             AttrDefMismatch('scale', attr_type=float,
                                                             rstd=SCALE_RSTD)])
+                                                        
+if not Coupling_distorted is None:
+    hw_obc_lang = CDGLang("hwobc-%f-%f" % (OFFSET_RSTD,SCALE_RSTD), inherits=obc_lang)
+    hw_obc_lang.add_types(Coupling_distorted)
+    latexlib.type_spec_to_latex(hw_obc_lang)
+
+
 
 def locking_fn_1(t, x, a0, tau):
     """Injection locking function from [1]"""
@@ -183,10 +200,13 @@ def zero_noise(_):
 
 r_cp_src = ProdRule(Coupling, Osc, Osc, SRC, - EDGE.k * SRC.osc_fn(VAR(SRC) - VAR(DST)))
 r_cp_dst = ProdRule(Coupling, Osc, Osc, DST, - EDGE.k * DST.osc_fn(VAR(DST) - VAR(SRC)))
+obc_lang.add_production_rules(r_cp_src,r_cp_dst)
+
 r_lock_1 = ProdRule(Coupling, Osc1, Osc1, SELF,
                     - SELF.lock_fn(TIME, VAR(SELF), A0, TAU) - SELF.noise_fn(NOIS_STD))
 r_lock_2 = ProdRule(Coupling, Osc2, Osc2, SELF,
                     - SELF.lock_fn(VAR(SELF)) - SELF.noise_fn(NOIS_STD))
+obc_lang.add_production_rules(r_cp_src,r_cp_dst,r_lock_1,r_lock_2)
 
 cdg_types = [Osc, Coupling, Osc1, Osc2]
 production_rules = [r_cp_src, r_cp_dst, r_lock_1, r_lock_2]
@@ -201,6 +221,13 @@ if Coupling_distorted:
                               - EDGE.k * (EDGE.scale * SRC.osc_fn(VAR(DST) - VAR(SRC)) \
                                           + EDGE.offset))
     production_rules += [r_cp_src_distorted, r_cp_dst_distorted]
+    hw_obc_lang.add_production_rules(r_cp_src_distorted, r_cp_dst_distorted)
+
+
+latexlib.production_rules_to_latex(obc_lang)
+if not Coupling_distorted is None:
+    latexlib.production_rules_to_latex(hw_obc_lang)
+
 
 def create_max_cut_con(connection_mat, osc_nt: NodeType, cp_et: EdgeType, noise_fn: FunctionType):
     """Create a CDG of con for solving MAXCUT of the graph described by connection_mat"""
@@ -323,6 +350,11 @@ def main():
                             total=N_TIRAL):
         connection_mat, max_cut_size, max_cut = prob
         nodes, graph = create_max_cut_con(connection_mat, osc_nodetype, cp_et, noise_fn)
+
+        lang = obc_lang if Coupling_distorted is None else hw_obc_lang
+        graphvizlib.cdg_to_graphviz("con", "con_%d_inh" % seed, lang,graph,inherited=True)
+        graphvizlib.cdg_to_graphviz("con", "con_%d" % seed, lang,graph,inherited=False)
+        
         spec = CDGSpec(cdg_types, production_rules, None)
         compiler = ArkCompiler(rewrite=RewriteGen())
         compiler.compile(cdg=graph, cdg_spec=spec, help_fn=help_fn, import_lib={})

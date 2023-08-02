@@ -18,6 +18,7 @@ class Reduction:
 
     ast_op: ast.operator
     ast_switch: ast.operator
+    name: str
 
-SUM = Reduction(ast_op=ast.Add(), ast_switch=ast.Mult())
-PRODUCT = Reduction(ast_op=ast.Mult(), ast_switch=ast.Pow())
+SUM = Reduction(name="+",ast_op=ast.Add(), ast_switch=ast.Mult())
+PRODUCT = Reduction(name="*",ast_op=ast.Mult(), ast_switch=ast.Pow())

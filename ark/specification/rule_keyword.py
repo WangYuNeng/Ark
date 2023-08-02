@@ -192,11 +192,18 @@ class RuleKeyword:
         return self.name
 
     def __str__(self) -> str:
-        return self.name
+        return str(self.name)
 
 class Target(RuleKeyword):
     """Target keyword denoting the posistion of a node in the edge"""
 
+    def is_source(self):
+        return self.name == "SRC"
+
+    def is_dest(self):
+        return self.name == "DST"
+
+    
 def var(rule_keyword: RuleKeyword) -> Variable:
     """Returns a state variable for writing production rules"""
     name = object.__getattribute__(rule_keyword, 'name')

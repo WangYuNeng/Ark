@@ -26,6 +26,12 @@ from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME
 from ark.specification.validation_rule import ValRule, ValPattern
 from ark.reduction import SUM
 
+# visualization scripts
+from ark.cdg.cdg_lang import CDGLang
+import ark.visualize.latex_gen as latexlib
+import ark.visualize.graphviz_gen as graphvizlib
+
+
 parser = ArgumentParser()
 parser.add_argument('-i', '--input', type=str,
                     help='Input image')
@@ -43,6 +49,8 @@ plot_paper = args.paper
 seed = args.seed
 
 
+cnn_lang = CDGLang("cnn")
+hw_cnn_lang = CDGLang("hwcnn", inherits=cnn_lang)
 # Ark specification
 lc_range, gr_range = Range(min=0.1e-9, max=10e-9), Range(min=0)
 positive = Range(min=0)
@@ -57,6 +65,10 @@ Inp = NodeType(name='Inp', order=1)
 MapE = EdgeType(name='MapE')
 FlowE = EdgeType(name='FlowE',
                   attr_def=[AttrDef('g', attr_type=float)])
+cnn_lang.add_types(IdealV, Out, Inp)
+cnn_lang.add_types(MapE, FlowE)
+latexlib.type_spec_to_latex(cnn_lang)
+
 
 # Nonideal implementation
 MmV = NodeType(name='MmV', base=IdealV,
@@ -65,6 +77,10 @@ MmFlowE_1p = EdgeType(name='MmFlowE_1p', base=FlowE,
                    attr_def=[AttrDefMismatch('g', attr_type=float, rstd=0.01)])
 MmFlowE_10p = EdgeType(name='MmFlowE_10p', base=FlowE,
                    attr_def=[AttrDefMismatch('g', attr_type=float, rstd=0.1)])
+hw_cnn_lang.add_types(MmV)
+hw_cnn_lang.add_types(MmFlowE_1p, MmFlowE_10p)
+latexlib.type_spec_to_latex(hw_cnn_lang)
+
 
 
 def saturation(sig):
@@ -82,6 +98,8 @@ Dummy = ProdRule(FlowE, Inp, IdealV, SRC, 0) # Dummy rule to make sure Inp is no
 ReadOut = ProdRule(MapE, IdealV, Out, DST, DST.fn(VAR(SRC)))
 SelfFeedback = ProdRule(MapE, IdealV, IdealV, SELF, -VAR(SELF) + SELF.z)
 Amat = ProdRule(FlowE, Out, IdealV, DST, EDGE.g * VAR(SRC))
+cnn_lang.add_production_rules(Bmat, Dummy, ReadOut, SelfFeedback, Amat)
+
 
 # Production rules for msimatch v
 Bmat_mm = ProdRule(FlowE, Inp, MmV, DST, DST.mm * EDGE.g * VAR(SRC))
@@ -89,6 +107,7 @@ SelfFeedback_mm = ProdRule(MapE, MmV, MmV, SELF, SELF.mm * (-VAR(SELF) + SELF.z)
 Amat_mm = ProdRule(FlowE, Out, MmV, DST, DST.mm * EDGE.g * VAR(SRC))
 
 prod_rules = [Bmat, Dummy, ReadOut, SelfFeedback, Amat, Bmat_mm, SelfFeedback_mm, Amat_mm]
+hw_cnn_lang.add_production_rules(Bmat_mm, SelfFeedback_mm, Amat_mm)
 
 # Validation rules
 v_val = ValRule(IdealV, [ValPattern(SRC, MapE, Out, Range(exact=1)),
@@ -98,9 +117,12 @@ out_val = ValRule(Out, [ValPattern(SRC, FlowE, IdealV, Range(min=4, max=9)),
                         ValPattern(DST, MapE, IdealV, Range(exact=1))])
 inp_val = ValRule(Inp, [ValPattern(SRC, FlowE, IdealV, Range(min=4, max=9))])
 val_rules = [v_val, out_val, inp_val]
+cnn_lang.add_validation_rules(v_val, out_val, inp_val)
+latexlib.validation_rules_to_latex(cnn_lang)
 
 cdg_types = [IdealV, Out, Inp, MapE, FlowE, MmV, MmFlowE_1p, MmFlowE_10p]
 help_fn = [saturation, saturation_diffpair]
+
 spec = CDGSpec(cdg_types, prod_rules, val_rules)
 
 validator = ArkValidator(solver=SMTSolver())

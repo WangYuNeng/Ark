@@ -207,18 +207,29 @@ def prepare_tpl():
     bias = -0.5
     return A_mat, B_mat, bias
 
+def layout_dense_graph(graph):
+    graph.graph.graph_attr["layout"] = "neato"
+    graph.graph.graph_attr["sep"] = "+7"
+    graph.graph.graph_attr["overlap"] = "false"
+    graph.graph.graph_attr["splines"] = "true"
+
+
 def sim_cnn(image: np.array,
             A_mat: np.array, B_mat: np.array, bias: int,
             time_points: np.array,
             v_nt: NodeType, flow_et: EdgeType,
-            saturation_fn: FunctionType):
+            saturation_fn: FunctionType, index=0):
     """Simulate the cnn with ARK"""
     nrows, ncols = image.shape
     vs, inps, outs, graph = create_cnn(nrows, ncols, v_nt, flow_et,
                                                A_mat, B_mat, bias, saturation_fn)
 
-    graphvizlib.cdg_to_graphviz("cnn", "cnn_inh" % seed, lang,graph,inherited=True)
-    graphvizlib.cdg_to_graphviz("cnn", "cnn" % seed, lang,graph,inherited=False)
+    _, _, _, small_graph = create_cnn(3, 3, v_nt, flow_et,
+                                               A_mat, B_mat, bias, saturation_fn)
+
+    print("index = %d" % index)
+    graphvizlib.cdg_to_graphviz("cnn", "cnn_inh_%d" % index , hw_cnn_lang,small_graph,inherited=True, post_layout_hook=layout_dense_graph)
+    graphvizlib.cdg_to_graphviz("cnn", "cnn_%d" % index , hw_cnn_lang,small_graph,inherited=False,post_layout_hook=layout_dense_graph)
 
     node_mapping = {v: 0 for row in vs for v in row}
     validator.validate(cdg=graph, cdg_spec=spec)
@@ -246,10 +257,11 @@ def grayscale_edge_detection(file_name: str):
 
     nt_list = [MmV, IdealV, IdealV, IdealV]
     et_list = [FlowE, FlowE, MmFlowE_1p, MmFlowE_10p]
+    idx = 0
     for saturation_fn in [saturation, saturation_diffpair]:
         for v_nt, flow_et in zip(nt_list, et_list):
             imgs = sim_cnn(image, A_mat, B_mat, bias, time_points,
-                            v_nt, flow_et, saturation_fn)
+                            v_nt, flow_et, saturation_fn, index=idx)
 
             fig, axs = plt.subplots(3, 3)
             axs[0, 0].imshow(image, cmap='gray')
@@ -263,6 +275,7 @@ def grayscale_edge_detection(file_name: str):
             plt.tight_layout()
             save_path = os.path.join(output_folder, f'{saturation_fn.__name__}_{title}.png')
             plt.savefig(save_path)
+            idx += 1
 
 def paper_plot():
     """Generate the plots for the paper"""

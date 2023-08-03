@@ -13,7 +13,7 @@ python examples/tln_example.py
 echo "tln"
 python examples/tln.py
 echo "cnn"
-python examples/cnn.py
+python examples/cnn.py -p
 echo "con mm1"
 python examples/con.py --initialize 1 --atol 0.1 --rtol 0.1
 echo "con mm2"

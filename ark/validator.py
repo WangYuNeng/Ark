@@ -22,7 +22,7 @@ class ArkValidator:
         self._solver = solver
 
     def validate(self, cdg: CDG, cdg_spec: CDGSpec) \
-        -> tuple[bool, Optional[tuple[CDGNode, Connection, Optional[ValPattern | Callable]]]]:
+        -> tuple[int, Optional[tuple[CDGNode, Connection, Optional[ValPattern | Callable]]]]:
         """
         Every possible connection of the node in the cdg should:
 

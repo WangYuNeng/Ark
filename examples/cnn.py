@@ -216,6 +216,10 @@ def sim_cnn(image: np.array,
     nrows, ncols = image.shape
     vs, inps, outs, graph = create_cnn(nrows, ncols, v_nt, flow_et,
                                                A_mat, B_mat, bias, saturation_fn)
+
+    graphvizlib.cdg_to_graphviz("cnn", "cnn_inh" % seed, lang,graph,inherited=True)
+    graphvizlib.cdg_to_graphviz("cnn", "cnn" % seed, lang,graph,inherited=False)
+
     node_mapping = {v: 0 for row in vs for v in row}
     validator.validate(cdg=graph, cdg_spec=spec)
     if flow_et == FlowE and v_nt == IdealV:

@@ -167,14 +167,17 @@ def build_line(graph,e_nt, v_nt,i_nt,length,term_g=1.0,start_i=False):
     return v_nodes, i_nodes
 
 
-def create_tline_branch(v_nt: NodeType, i_nt: NodeType, e_nt: EdgeType,  line_len: int=5, \
-                branch_len: int=2, branches_per_node: int=2, branch_offset: int=0, branch_stride: int=1):
+def create_tline_branch(v_nt: NodeType, i_nt: NodeType, e_nt: EdgeType,  e_nt_mm: EdgeType = None,
+        mismatch_strategy = None,
+        line_len: int=5, branch_len: int=2, branches_per_node: int=2, 
+        branch_offset: int=0, branch_stride: int=1):
     graph = CDG()
     current_in = InpI(fn=pulse, g=0.0)
     meas = Meas()
     v_nodes = []
-    i_nodes = [] 
-    v_nodes_line,i_nodes_line = build_line(graph,e_nt,v_nt, i_nt, line_len,term_g=0.0)
+    i_nodes = []
+    e_targ_nt = e_nt_mm if mismatch_strategy == "line-only"  and not e_nt_mm is None else e_nt 
+    v_nodes_line,i_nodes_line = build_line(graph,e_targ_nt,v_nt, i_nt, line_len,term_g=0.1)
     v_nodes += v_nodes_line
     i_nodes += i_nodes_line
 
@@ -182,7 +185,8 @@ def create_tline_branch(v_nt: NodeType, i_nt: NodeType, e_nt: EdgeType,  line_le
     total_branches =  branches_per_node*int(line_len/branch_stride)
     branches = {}
     for i in range(total_branches):
-        v_nodes_branches,i_nodes_branches = build_line(graph,e_nt,v_nt,i_nt,branch_len,start_i=True,term_g=0.0)
+        e_targ_nt = e_nt_mm if mismatch_strategy == "branch-only" and not e_nt_mm is None else e_nt 
+        v_nodes_branches,i_nodes_branches = build_line(graph,e_targ_nt,v_nt,i_nt,branch_len,start_i=True,term_g=0.0)
         branches[i] = (v_nodes_branches,i_nodes_branches)
         v_nodes += v_nodes_branches
         i_nodes += i_nodes_branches
@@ -247,14 +251,52 @@ def nominal_simulation(cdg,time_range,name,post_process_hook=None):
 
     fig, ax = plt.subplots(1, 1, sharex=True)
 
-    plt.plot(time_points,trajs[in_traj_idx])
-    plt.plot(time_points,trajs[out_traj_idx])
+    linecolor = "black"
+    plt.plot(time_points,trajs[out_traj_idx], color=linecolor)
     if not post_process_hook is None:
         post_process_hook(fig,ax)
 
     filename = "gviz-output/tln-example/%s_plot.pdf" % name
     plt.savefig(filename)
     plt.clf()
+
+def mismatch_simulation(cdg,time_range,name,post_process_hook=None):
+    N_RAND_SIM = 100
+
+    validator.validate(cdg=cdg, cdg_spec=spec)
+    compiler.compile(cdg=cdg, cdg_spec=spec, help_fn=help_fn, import_lib={})
+    mapping = compiler.var_mapping
+
+    fig, ax = plt.subplots(1, 1, sharex=True)
+
+
+    init_states = compiler.map_init_state({node: 0 for node in mapping.keys()})
+    in_node = list(filter(lambda n: n.name == "IN_V", cdg.nodes))[0]
+    out_node = list(filter(lambda n: n.name == "OUT_V", cdg.nodes))[0]
+    in_traj_idx = mapping[in_node]
+    out_traj_idx = mapping[out_node]
+
+    alpha = 0.5
+    linecolor = "black"
+    for seed in range(N_RAND_SIM):
+        sol = compiler.prog(TIME_RANGE, init_states=init_states, init_seed=seed, max_step=1e-10)
+        time_points = sol.t
+        trajs = sol.y
+        if seed == 0:
+            ax.plot(time_points * 1e9, trajs[out_traj_idx], alpha=alpha, color=linecolor)
+        else:
+            ax.plot(time_points * 1e9, trajs[out_traj_idx], alpha=alpha, color=linecolor)
+
+
+    
+    
+    if not post_process_hook is None:
+        post_process_hook(fig,ax)
+
+    filename = "gviz-output/tln-example/%s_plot.pdf" % name
+    plt.savefig(filename)
+    plt.clf()
+
 
 def highlight_refl(fig,ax):
     WINDOW_SIZE = 40e-9
@@ -284,64 +326,39 @@ if __name__ == '__main__':
                 horizontal=True,save_legend=False, show_node_labels=False)
     br_opts = {"nominal":True,"name":"idl_tline_branch", "post_process_hook":highlight_refl}
 
-    WINDOWS = 2
-    TIME_RANGE = [0, 40e-9*WINDOWS]
-    for options, cdg_prog in [(lin_opts,itl_linear), (br_opts,itl_branch)]:
-        if options["nominal"]:
-            nominal_simulation(cdg_prog,TIME_RANGE,options["name"],post_process_hook=options["post_process_hook"])            
+    node_mm_branch, _, _ = create_tline_branch(MmV, MmI, IdealE,  **branch_args)
+    graphvizlib.cdg_to_graphviz("tln-example","mmnode_tline_branch",hw_tln_lang,node_mm_branch,inherited=True, \
+                horizontal=True,save_legend=False, show_node_labels=False)
+    nodemm_br_opts = {"nominal":False,"name":"mmnode_tline_branch", "post_process_hook":None}
+
+    edge_mm_branch, _, _ = create_tline_branch(IdealV, IdealI, MmE,  **branch_args)
+    graphvizlib.cdg_to_graphviz("tln-example","mmedge_tline_branch",hw_tln_lang,edge_mm_branch,inherited=True, \
+                horizontal=True,save_legend=False, show_node_labels=False)
+    edgemm_br_opts = {"nominal":False,"name":"mmedge_tline_branch", "post_process_hook":None}
+
+    
+    edge_mmbranches_branch, _, _ = create_tline_branch(IdealV, IdealI, IdealE, e_nt_mm=MmE, mismatch_strategy="branch-only",  **branch_args)
+    graphvizlib.cdg_to_graphviz("tln-example","mmeBranches_tline_branch",hw_tln_lang,edge_mmbranches_branch,inherited=True, \
+                horizontal=True,save_legend=False, show_node_labels=False)
+    emmbranch_opts = {"nominal":False,"name":"mmeBranches_tline_branch", "post_process_hook":None}
 
  
+    edge_mmline_branch, _, _ = create_tline_branch(IdealV, IdealI, IdealE, e_nt_mm=MmE, mismatch_strategy="line-only",  **branch_args)
+    graphvizlib.cdg_to_graphviz("tln-example","mmeLine_tline_branch",hw_tln_lang,edge_mmline_branch,inherited=True, \
+                horizontal=True,save_legend=False, show_node_labels=False)
+    emmline_opts = {"nominal":False,"name":"mmeLine_tline_branch", "post_process_hook":None}
 
-    sys.exit(0)
-    mmn_tline, mmn_vs, mmn= create_tline(MmV, MmI, IdealE)
-    name = "tline_%s" % handle
-    mmn_tline, mme_vs ,mmn_is = create_tline(MmV, MmI, IdealE)
 
-    LINE_LEN = 20
-    N_RAND_SIM = 100
-    TIME_RANGE = [0, 40e-9*10]
-    fig, ax = plt.subplots(nrows=2)
-    for color_idx, (vt, it, et, title,handle) in enumerate([(IdealV, IdealI, MmE, '10% Mismatched XXX',"mmG"),
-                                                     (MmV, MmI, IdealE, '10 Mismatched LC',"mmLC"),
-                                                     (IdealV, IdealI, IdealE, 'Ideal',"ideal")
-                                                    ]):
-        graph, v_nodes, i_nodes = create_tline(vt, it, et, LINE_LEN)
 
-        name = "tline_%s" % handle
-        graphvizlib.cdg_to_graphviz("tln",name,hw_tln_lang,graph,inherited=False)
-        graphvizlib.cdg_to_graphviz("tln",name+"_inh",hw_tln_lang,graph,inherited=True)
 
-        validator.validate(cdg=graph, cdg_spec=spec)
-        compiler.compile(cdg=graph, cdg_spec=spec, help_fn=help_fn, import_lib={})
-        mapping = compiler.var_mapping
-        init_states = compiler.map_init_state({node: 0 for node in mapping.keys()})
+    WINDOWS = 2
+    TIME_RANGE = [0, 40e-9*WINDOWS]
+    for options, cdg_prog in [(lin_opts,itl_linear), (br_opts,itl_branch), \
+                                (nodemm_br_opts,node_mm_branch), (edgemm_br_opts,edge_mm_branch), 
+                                (emmbranch_opts, edge_mmbranches_branch), (emmline_opts, edge_mmline_branch)]:
+        if options["nominal"]:
+            nominal_simulation(cdg_prog,TIME_RANGE,options["name"],post_process_hook=options["post_process_hook"])            
+        else:
+            mismatch_simulation(cdg_prog,TIME_RANGE,options["name"],post_process_hook=options["post_process_hook"])            
 
-        for seed in range(N_RAND_SIM):
-            sol = compiler.prog(TIME_RANGE, init_states=init_states, init_seed=seed, max_step=1e-10)
-            time_points = sol.t
-            trajs = sol.y
-            for row_num, idx in enumerate([0, LINE_LEN]):
-                traj_idx = mapping[v_nodes[idx]]
-                if color_idx == 2:
-                    alpha = 1.0
-                else:
-                    alpha = 0.5
-                if seed == 0:
-                    ax[row_num].plot(time_points * 1e9, trajs[traj_idx],
-                                     color=f'C{color_idx}', alpha=alpha, label=f'{title}')
-                else:
-                    ax[row_num].plot(time_points * 1e9, trajs[traj_idx],
-                                     color=f'C{color_idx}', alpha=alpha)
-    handles, labels = ax[0].get_legend_handles_labels()
-    ax[0].legend(reversed(handles), reversed(labels),loc='upper center', bbox_to_anchor=(0.5, 1.5),
-          fancybox=True, shadow=True, ncol=3)
-
-    ax[0].set_xlabel('Time (ns)')
-    ax[0].set_ylabel('Amplitude (V)')
-    ax[0].set_title('Source waveform')
-    ax[1].set_xlabel('Time (ns)')
-    ax[1].set_ylabel('Amplitude (V)')
-    ax[1].set_title('Terminal waveform')
-    plt.tight_layout()
-    plt.savefig('examples/tln.png')
-    plt.show()
+ 

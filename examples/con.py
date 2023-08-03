@@ -352,8 +352,9 @@ def main():
         nodes, graph = create_max_cut_con(connection_mat, osc_nodetype, cp_et, noise_fn)
 
         lang = obc_lang if Coupling_distorted is None else hw_obc_lang
-        graphvizlib.cdg_to_graphviz("con", "con_%d_inh" % seed, lang,graph,inherited=True)
-        graphvizlib.cdg_to_graphviz("con", "con_%d" % seed, lang,graph,inherited=False)
+        if seed == 0:
+            graphvizlib.cdg_to_graphviz("con", "con_%d_inh" % seed, lang,graph,inherited=True)
+            graphvizlib.cdg_to_graphviz("con", "con_%d" % seed, lang,graph,inherited=False)
         
         spec = CDGSpec(cdg_types, production_rules, None)
         compiler = ArkCompiler(rewrite=RewriteGen())

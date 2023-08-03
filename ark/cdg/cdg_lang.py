@@ -35,6 +35,9 @@ class CDGLang:
             yield prod 
 
     def is_inherited(self,val):
+        if self.inherits is None:
+            return False
+
         if val in self.inherits.node_types():
             return True
         

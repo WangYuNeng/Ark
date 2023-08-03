@@ -4,6 +4,8 @@ from typing import *
 import graphviz
 from enum import Enum
 import os
+import matplotlib.pyplot as plt
+
 
 class NodeShading(Enum):
     SOLID = "solid"
@@ -57,18 +59,21 @@ class GraphVizFormatter:
     def add_edge_style(cls,style):
         cls.EDGE_STYLES.append(style)
 
+options = list(EdgeShading)
 for (r,g,b) in palettable.cartocolors.qualitative.Bold_10.colors:
     GraphVizFormatter.add_node_style(NodeStyle(color=(r,g,b,255),shading=NodeShading.SOLID))
 
-options = list(EdgeShading)
+for idx,(r,g,b) in enumerate(palettable.cartocolors.qualitative.Prism_10.colors):
+    if (r+g+b)/3 > 160:
+        continue
+
+    GraphVizFormatter.add_edge_style(EdgeStyle(color=(r,g,b,255),shading=options[idx%len(options)]))
+
 for idx,(r,g,b) in enumerate(palettable.cmocean.sequential.Gray_10.colors):
     v = (r+g+b)/3.0
     val = int(v/255*60+128)
     GraphVizFormatter.add_inherited_node_style(NodeStyle(color=(val,val,val,255),shading=NodeShading.SOLID))
     GraphVizFormatter.add_inherited_edge_style(EdgeStyle(color=(val,val,val,255),shading=options[idx%len(options)]))
-
-for idx,(r,g,b) in enumerate(palettable.cartocolors.qualitative.Prism_10.colors):
-    GraphVizFormatter.add_edge_style(EdgeStyle(color=(r,g,b,255),shading=options[idx%len(options)]))
 
 class GraphStyleRegistry:
 
@@ -87,14 +92,20 @@ class GraphStyleRegistry:
 
 class RenderableGraph:
 
-    def __init__(self,name, inherited=False):
+    def __init__(self,name, inherited=False,horizontal=False,show_node_labels=True,show_edge_labels=False,save_legend=False):
         
         self.edge_types = {}
         self.node_types = {}
         self.inherited = inherited
+        self.show_node_labels = show_node_labels
+        self.show_edge_labels = show_edge_labels
+        self._save_legend = save_legend
 
-        options = GraphStyleRegistry.get_graph_style()
+        options = dict(GraphStyleRegistry.get_graph_style())
         self.graph = graphviz.Digraph(name,format="pdf",**options)
+        if horizontal:
+            self.graph.graph_attr["rankdir"] = "LR"
+
 
     def load_cdg_lang(self,lang):
         self.lang = lang
@@ -118,8 +129,11 @@ class RenderableGraph:
         style_args.update(default_style)
         if self.lang.is_inherited(node.cdg_type):
             style_args["color"] = style_args["fillcolor"] 
-        print(style_args)
-        self.graph.node(node.name, label=node.name, **style_args)
+
+        if self.show_node_labels:
+            self.graph.node(node.name, label=node.name, **style_args)
+        else:
+            self.graph.node(node.name, label="", **style_args)
 
     def add_edge(self,edge):
         style = self.edge_types[edge.cdg_type]
@@ -128,22 +142,34 @@ class RenderableGraph:
         style_args.update(default_style)
         src_node = edge.src.name
         dst_node = edge.dst.name
-        self.graph.edge(src_node, dst_node, **style_args)
+        if self.show_edge_labels:
+            self.graph.edge(src_node, dst_node,label=edge.name,**style_args)
+        else:
+            self.graph.edge(src_node, dst_node,label="",**style_args)
+
+    def save_legend(self,subdir):
+        pass
 
     def save(self,subdir):
         graph_path = "gviz-output/%s/" % subdir
         if not os.path.exists(graph_path):
             os.makedirs(graph_path)
 
+        if self._save_legend:
+            self.save_legend(graph_path)
+
         self.graph.render(directory=graph_path)
 
-def cdg_to_graphviz(subdir,name,cdg_lang,cdg,inherited=False):
-    graph = RenderableGraph(name,inherited=inherited)
+def cdg_to_graphviz(subdir,name,cdg_lang,cdg,inherited=False,save_legend=False,horizontal=False,show_node_labels=True,show_edge_labels=False,post_layout_hook=None):
+    graph = RenderableGraph(name,inherited=inherited,horizontal=horizontal,save_legend=save_legend,show_node_labels=show_node_labels,show_edge_labels=show_edge_labels)
     graph.load_cdg_lang(cdg_lang)
     for node in cdg.nodes:
         graph.add_node(node)
 
     for edge in cdg.edges:
         graph.add_edge(edge)
+    
+    if not post_layout_hook is None:
+        post_layout_hook(graph)
 
     graph.save(subdir)

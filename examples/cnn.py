@@ -108,6 +108,7 @@ Amat_mm = ProdRule(FlowE, Out, MmV, DST, DST.mm * EDGE.g * VAR(SRC))
 
 prod_rules = [Bmat, Dummy, ReadOut, SelfFeedback, Amat, Bmat_mm, SelfFeedback_mm, Amat_mm]
 hw_cnn_lang.add_production_rules(Bmat_mm, SelfFeedback_mm, Amat_mm)
+latexlib.production_rules_to_latex(cnn_lang)
 
 # Validation rules
 v_val = ValRule(IdealV, [ValPattern(SRC, MapE, Out, Range(exact=1)),

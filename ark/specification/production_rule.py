@@ -59,7 +59,10 @@ class ProdRule:
     @property
     def fn_sympy(self) -> sympy.Expr:
         """Returns the sympy expression of the production function"""
-        return self._fn_exp.sympy
+        if type(self._fn_exp) is int:
+            return sympy.Float(self._fn_exp)
+        else: 
+            return self._fn_exp.sympy
 
     def get_rewrite_mapping(self, edge: CDGEdge):
         """

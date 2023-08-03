@@ -252,13 +252,13 @@ if __name__ == '__main__':
     line_len = 12
     itl_linear, _, _ = create_linear_tline(IdealV, IdealI, MmE,line_len=10)
     graphvizlib.cdg_to_graphviz("tln-example","idl_tline_linear",hw_tln_lang,itl_linear,inherited=False, \
-                horizontal=True,save_legend=True, show_labels=False)
+                horizontal=True,save_legend=True, show_node_labels=False)
     opts = {"nominal":True,"name":"idl_tline_linear"}
 
     branch_args = {"line_len":line_len, "branch_stride":4,"branches_per_node":1,"branch_len":7}
     itl_branch, _, _ = create_tline_branch(IdealV, IdealI, MmE,  **branch_args)
     graphvizlib.cdg_to_graphviz("tln-example","idl_tline_branch",hw_tln_lang,itl_branch,inherited=False, \
-                horizontal=True,save_legend=False, show_labels=False)
+                horizontal=True,save_legend=False, show_node_labels=False)
     opts = {"nominal":True,"name":"idl_tline_branch"}
 
     TIME_RANGE = [0, 40e-9]

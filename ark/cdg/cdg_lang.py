@@ -88,6 +88,6 @@ class CDGLang:
 
         prefix = format_filename(self.name)
         suffix = format_filename(suffix)
-        filename = "lang_%s_%s.%s" % (prefix, suffix, extension)
+        filename = "lang-%s-%s.%s" % (prefix, suffix, extension)
         return filename
 

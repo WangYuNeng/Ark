@@ -23,6 +23,8 @@ from ark.specification.validation_rule import ValRule, ValPattern
 from ark.reduction import SUM
 import sys
 
+import numpy as np
+
 # visualization scripts
 from ark.cdg.cdg_lang import CDGLang
 import ark.visualize.latex_gen as latexlib
@@ -111,6 +113,9 @@ inpv_val = ValRule(InpV, [ValPattern(SRC, IdealE, IdealV, Range(min=0, max=1)),
                           ValPattern(SRC, IdealE, IdealI, Range(min=0, max=1))])
 inpi_val = ValRule(InpI, [ValPattern(SRC, IdealE, IdealV, Range(min=0, max=1)),
                           ValPattern(SRC, IdealE, IdealI, Range(min=0, max=1))])
+inpv_val = ValRule(InpV, [ValPattern(SRC, IdealE, IdealV, Range(min=0, max=1)),
+                          ValPattern(SRC, IdealE, IdealI, Range(min=0, max=1))])
+
 val_rules = [v_val, i_val, inpv_val, inpi_val]
 tln_lang.add_validation_rules(*val_rules)
 latexlib.validation_rules_to_latex(tln_lang)
@@ -133,10 +138,10 @@ spec = CDGSpec(cdg_types, prod_rules, val_rules)
 validator = ArkValidator(solver=SMTSolver())
 compiler = ArkCompiler(rewrite=RewriteGen())
 
-def build_line(graph,e_nt, v_nt,i_nt,length,start_i=False):
+def build_line(graph,e_nt, v_nt,i_nt,length,term_g=1.0,start_i=False):
     tc = 1e-9
     if start_i:
-        v_nodes = [v_nt(c=tc, g=0.0) for _ in range(length)] +  [v_nt(c=tc, g=1.0)]
+        v_nodes = [v_nt(c=tc, g=0.0) for _ in range(length)] +  [v_nt(c=tc, g=term_g)]
         i_nodes = [i_nt(l=tc, r=0.0) for _ in range(length+1)] 
         for i in range(length):
             graph.connect(e_nt(ws=1.0, wt=1.0), i_nodes[i], v_nodes[i])
@@ -149,7 +154,7 @@ def build_line(graph,e_nt, v_nt,i_nt,length,start_i=False):
 
 
     else:
-        v_nodes = [v_nt(c=tc, g=0.0) for _ in range(length)] + [v_nt(c=tc, g=1.0)]
+        v_nodes = [v_nt(c=tc, g=0.0) for _ in range(length)] + [v_nt(c=tc, g=term_g)]
         i_nodes = [i_nt(l=tc, r=0.0) for _ in range(length)]
         for i in range(length):
             graph.connect(e_nt(ws=1.0, wt=1.0), v_nodes[i], i_nodes[i])
@@ -163,13 +168,13 @@ def build_line(graph,e_nt, v_nt,i_nt,length,start_i=False):
 
 
 def create_tline_branch(v_nt: NodeType, i_nt: NodeType, e_nt: EdgeType,  line_len: int=5, \
-                branch_len: int=2, branches_per_node: int=2, branch_stride: int=1):
+                branch_len: int=2, branches_per_node: int=2, branch_offset: int=0, branch_stride: int=1):
     graph = CDG()
     current_in = InpI(fn=pulse, g=0.0)
     meas = Meas()
     v_nodes = []
     i_nodes = [] 
-    v_nodes_line,i_nodes_line = build_line(graph,e_nt,v_nt, i_nt, line_len)
+    v_nodes_line,i_nodes_line = build_line(graph,e_nt,v_nt, i_nt, line_len,term_g=0.0)
     v_nodes += v_nodes_line
     i_nodes += i_nodes_line
 
@@ -177,14 +182,14 @@ def create_tline_branch(v_nt: NodeType, i_nt: NodeType, e_nt: EdgeType,  line_le
     total_branches =  branches_per_node*int(line_len/branch_stride)
     branches = {}
     for i in range(total_branches):
-        v_nodes_branches,i_nodes_branches = build_line(graph,e_nt,v_nt,i_nt,branch_len,start_i=True)
+        v_nodes_branches,i_nodes_branches = build_line(graph,e_nt,v_nt,i_nt,branch_len,start_i=True,term_g=0.0)
         branches[i] = (v_nodes_branches,i_nodes_branches)
         v_nodes += v_nodes_branches
         i_nodes += i_nodes_branches
 
 
     idx = 0
-    for i in range(0,line_len,branch_stride):
+    for i in range(branch_offset,line_len,branch_stride):
         targ_v = v_nodes_line[i]
         targ_i = i_nodes_line[i]
         for br in range(branches_per_node):
@@ -226,7 +231,7 @@ def create_linear_tline(v_nt: NodeType, i_nt: NodeType,
 
     return graph, v_nodes, i_nodes
 
-def nominal_simulation(cdg,time_range,name):
+def nominal_simulation(cdg,time_range,name,post_process_hook=None):
     validator.validate(cdg=cdg, cdg_spec=spec)
     compiler.compile(cdg=cdg, cdg_spec=spec, help_fn=help_fn, import_lib={})
     mapping = compiler.var_mapping
@@ -239,32 +244,51 @@ def nominal_simulation(cdg,time_range,name):
     print(mapping)
     in_traj_idx = mapping[in_node]
     out_traj_idx = mapping[out_node]
+
+    fig, ax = plt.subplots(1, 1, sharex=True)
+
     plt.plot(time_points,trajs[in_traj_idx])
     plt.plot(time_points,trajs[out_traj_idx])
+    if not post_process_hook is None:
+        post_process_hook(fig,ax)
 
-    filename = "gviz-output/tln-example/%s.pdf" % name
+    filename = "gviz-output/tln-example/%s_plot.pdf" % name
     plt.savefig(filename)
     plt.clf()
 
+def highlight_refl(fig,ax):
+    WINDOW_SIZE = 40e-9
+    xmin, xmax, ymin, ymax = plt.axis()
+    wl = WINDOW_SIZE
+    wh = 2*(WINDOW_SIZE)
+    section = np.arange(wl,wh, (wh-wl)*0.01)
+    shadecolor = "yellow"
+    shadealpha = 0.2
+    x = np.arange(xmin, xmax, (xmax-xmin)*0.01)
+    ax.axvline(wl, color=shadecolor, lw=2, alpha=shadealpha)
+    ax.axvline(wh, color=shadecolor, lw=2, alpha=shadealpha)
+    ax.fill_between(section, ymin, ymax,  facecolor=shadecolor, alpha=shadealpha)
+    ax.fill_between(section, ymin, ymax,  facecolor=shadecolor, alpha=shadealpha)
 
 if __name__ == '__main__':
 
     line_len = 12
-    itl_linear, _, _ = create_linear_tline(IdealV, IdealI, MmE,line_len=10)
+    itl_linear, _, _ = create_linear_tline(IdealV, IdealI, IdealE,line_len=10)
     graphvizlib.cdg_to_graphviz("tln-example","idl_tline_linear",hw_tln_lang,itl_linear,inherited=False, \
                 horizontal=True,save_legend=True, show_node_labels=False)
-    opts = {"nominal":True,"name":"idl_tline_linear"}
+    lin_opts = {"nominal":True,"name":"idl_tline_linear", "post_process_hook":None}
 
-    branch_args = {"line_len":line_len, "branch_stride":4,"branches_per_node":1,"branch_len":7}
-    itl_branch, _, _ = create_tline_branch(IdealV, IdealI, MmE,  **branch_args)
+    branch_args = {"line_len":line_len, "branch_stride":12,"branches_per_node":1,"branch_len":5,"branch_offset":6}
+    itl_branch, _, _ = create_tline_branch(IdealV, IdealI, IdealE,  **branch_args)
     graphvizlib.cdg_to_graphviz("tln-example","idl_tline_branch",hw_tln_lang,itl_branch,inherited=False, \
                 horizontal=True,save_legend=False, show_node_labels=False)
-    opts = {"nominal":True,"name":"idl_tline_branch"}
+    br_opts = {"nominal":True,"name":"idl_tline_branch", "post_process_hook":highlight_refl}
 
-    TIME_RANGE = [0, 40e-9]
-    for options, cdg_prog in [(opts,itl_linear), (opts,itl_branch)]:
+    WINDOWS = 2
+    TIME_RANGE = [0, 40e-9*WINDOWS]
+    for options, cdg_prog in [(lin_opts,itl_linear), (br_opts,itl_branch)]:
         if options["nominal"]:
-            nominal_simulation(cdg_prog,TIME_RANGE,options["name"])            
+            nominal_simulation(cdg_prog,TIME_RANGE,options["name"],post_process_hook=options["post_process_hook"])            
 
  
 
@@ -275,7 +299,7 @@ if __name__ == '__main__':
 
     LINE_LEN = 20
     N_RAND_SIM = 100
-    TIME_RANGE = [0, 40e-9]
+    TIME_RANGE = [0, 40e-9*10]
     fig, ax = plt.subplots(nrows=2)
     for color_idx, (vt, it, et, title,handle) in enumerate([(IdealV, IdealI, MmE, '10% Mismatched XXX',"mmG"),
                                                      (MmV, MmI, IdealE, '10 Mismatched LC',"mmLC"),

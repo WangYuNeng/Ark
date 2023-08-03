@@ -168,7 +168,7 @@ elif SCALE_RSTD:
                                                             rstd=SCALE_RSTD)])
                                                         
 if not Coupling_distorted is None:
-    hw_obc_lang = CDGLang("hwobc-%f-%f" % (OFFSET_RSTD,SCALE_RSTD), inherits=obc_lang)
+    hw_obc_lang = CDGLang("hwobc-%s-%s" % (OFFSET_RSTD,SCALE_RSTD), inherits=obc_lang)
     hw_obc_lang.add_types(Coupling_distorted)
     latexlib.type_spec_to_latex(hw_obc_lang)
 

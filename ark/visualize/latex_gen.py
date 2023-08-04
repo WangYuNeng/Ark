@@ -201,7 +201,7 @@ def validation_rules_to_latex(cdglang):
 
     LatexPrettyPrinter.ESCAPE_STYLE = EscapeStyle.TABULAR
     K = 3
-    tab = LatexTabular("rclll")
+    tab = LatexTabular("rcl")
     syn = lambda x: LatexPrettyPrinter.fmt_code(Terms.SYNTAX, x)
     lit = lambda x: LatexPrettyPrinter.fmt_code(Terms.LITERAL, x)
     vari = lambda x: LatexPrettyPrinter.fmt_code(Terms.VARIABLE, x)
@@ -243,12 +243,14 @@ def validation_rules_to_latex(cdglang):
             tex_snippet.append(tex)
 
         for i,tex in enumerate(tex_snippet):
+            if i != 0:
+                tab.add_cell("")
+                tab.add_cell("")
             tab.add_cell(tex)
-            if i  % K == 2:
-                tab.end()
+            tab.end()
 
-        if len(tex_snippet) % K != 0: 
-            tab.fill_and_end()
+        # if len(tex_snippet) % K != 0: 
+        #     tab.fill_and_end()
         print("")
 
     latex_text = tab.to_latex()

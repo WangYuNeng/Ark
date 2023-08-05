@@ -10,6 +10,7 @@ class Terms(Enum):
     VARIABLE = "variable"
     HIGHLIGHT = "highlight"
     SYNTAX = "syntax"
+    EXPRESSION = "expression"
 
 class TextStyle(Enum):
     BOLD = "bold"
@@ -254,6 +255,7 @@ class LatexVerbatim:
 LatexPrettyPrinter.set_color(Terms.LITERAL, "deepred")
 LatexPrettyPrinter.set_color(Terms.VARIABLE, "deepblue")
 LatexPrettyPrinter.set_color(Terms.SYNTAX, "black")
+LatexPrettyPrinter.set_color(Terms.EXPRESSION, "green")
 LatexPrettyPrinter.set_style(Terms.SYNTAX, TextStyle.BOLD)
 
 def write_file(filename,text):

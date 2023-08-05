@@ -31,22 +31,22 @@ import ark.visualize.graphviz_gen as graphvizlib
 
 # Ark specification
 lc_range, gr_range = Range(min=0.1e-9, max=10e-9), Range(min=0)
-w_range = Range(exact=1.0)
+w_range = Range(min=0.5, max=2)
 
 tln_lang = CDGLang("tln")
 
 # Ideal implementation
-IdealV = NodeType(name='IdealV', order=1,
+IdealV = NodeType(name='V', order=1,
                   reduction=SUM,
                   attr_def=[AttrDef('c', attr_type=float, attr_range=lc_range),
                          AttrDef('g', attr_type=float, attr_range=gr_range)
                         ])
-IdealI = NodeType(name='IdealI', order=1,
+IdealI = NodeType(name='I', order=1,
                   reduction=SUM,
                   attr_def=[AttrDef('l', attr_type=float, attr_range=lc_range),
                          AttrDef('r', attr_type=float, attr_range=gr_range)
                         ])
-IdealE = EdgeType(name='IdealE')
+IdealE = EdgeType(name='E')
 InpV = NodeType(name='InpV',
                 order=0,
                 attr_def=[AttrDef('fn', attr_type=FunctionType),
@@ -104,15 +104,15 @@ inpi_val = ValRule(InpI, [ValPattern(SRC, IdealE, IdealV, Range(min=0, max=1)),
                           ValPattern(SRC, IdealE, IdealI, Range(min=0, max=1))])
 val_rules = [v_val, i_val, inpv_val, inpi_val]
 tln_lang.add_validation_rules(*val_rules)
-latexlib.validation_rules_to_latex(tln_lang)
+# latexlib.validation_rules_to_latex(tln_lang)
 
 hw_tln_lang = CDGLang("hwtln",inherits=tln_lang)
 # Nonideal implementation with 10% random variation
-MmV = NodeType(name='MmV', base=IdealV,
+MmV = NodeType(name='Vm', base=IdealV,
                attr_def=[AttrDefMismatch('c', attr_type=float, attr_range=lc_range, rstd=0.1)])
-MmI = NodeType(name='MmI', base=IdealI,
+MmI = NodeType(name='Im', base=IdealI,
                attr_def=[AttrDefMismatch('l', attr_type=float, attr_range=lc_range, rstd=0.1)])
-MmE = EdgeType(name='MmE', base=IdealE,
+MmE = EdgeType(name='Em', base=IdealE,
                attr_def=[AttrDefMismatch('ws', attr_type=float, attr_range=w_range, rstd=0.1),
                          AttrDefMismatch('wt', attr_type=float, attr_range=w_range, rstd=0.1)])
 hw_tln_lang.add_types(MmV, MmI, MmE)
@@ -127,6 +127,7 @@ inpi2_v_mm = ProdRule(MmE, InpI, IdealV, DST, EDGE.wt*(SRC.fn(TIME)-VAR(DST)*SRC
 inpi2_i_mm = ProdRule(MmE, InpI, IdealI, DST, EDGE.wt*(SRC.fn(TIME)-VAR(DST))/DST.l/SRC.g)
 hw_prod_rules = [_v2i_mm, v2_i_mm, _i2v_mm, i2_v_mm, inpv2_v_mm, inpv2_i_mm, inpi2_v_mm, inpi2_i_mm]
 hw_tln_lang.add_production_rules(*hw_prod_rules)
+latexlib.production_rules_to_latex(hw_tln_lang)
 latexlib.type_spec_to_latex(hw_tln_lang)
 
 prod_rules += hw_prod_rules

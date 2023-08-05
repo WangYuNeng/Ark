@@ -1,3 +1,4 @@
+from types import FunctionType
 from ark.visualize.latex_util import *
 from ark.specification.attribute_def import AttrDef, AttrDefMismatch
 
@@ -66,28 +67,28 @@ def range_to_latex(range_,std=None,rstd=None):
     elif range_.is_upper_bound():
         tex = syn("[") + syn("*") + syn(",")+lit(num(range_.max)) + syn("]")
     elif range_.is_lower_bound():
-        tex = syn("[") +lit(num(range_.min)) + syn(",") + syn("*")+ syn("]")
+        tex = syn("[") +lit(num(range_.min)) + syn(",") + syn("inf")+ syn("]")
     elif range_.is_interval_bound():
         tex = syn("[") +lit(num(range_.min)) + syn(",") + lit(num(range_.max))+ syn("]")
     assert(not tex is None)
 
     if not std is None:
-        tex = syn("N(") + tex + syn(",") + num(std) + ")"
+        tex = f'{tex} {syn("mismatch(")}{lit(num(std))}{syn(",")} {lit(num(0))}{syn(")")}'
     elif not rstd is None:
-        tex = syn("N(") + tex + syn(",") + pct(rstd) + syn("%") + syn(")")
+        tex = f'{tex} {syn("mismatch(")}{lit(num(0))}{syn(",")} {lit(num(rstd))}{syn(")")}'
     
     return tex
 
 
 
 def attr_to_latex(attr):
-    tex = syn("attr")
-    tex += vari(attr.name)
-    tex += syn(":")
-    if callable(attr.type):
-        tex += lit("func")
-    elif isinstance(attr.type, float):
-        tex += lit("real")
+    tex = f'{syn("attr")} {vari(attr.name)} {syn("=")} '
+    if attr.type == FunctionType:
+        tex += syn("lambd")
+    elif attr.type == float:
+        tex += syn("real")
+    elif attr.type == int:
+        tex += syn("int")
     else:
         raise Exception("unhandled attribute type <%s>" % attr.type)
 
@@ -115,24 +116,18 @@ def type_spec_to_latex(cdglang):
     q = lambda x: tab.add_token(x)
 
     def attr_block(attrs):
-        q(syn("{"))
-        tab.newline()
+        q(syn("\{"))
         for attr in attrs:
             q(attr_to_latex(attr))
             tab.comma()
         tab.eat_comma()
-        q(syn("}"))
+        q(syn("\}"))
         tab.newline()
 
     for node in cdglang.node_types():
-        q(syn("node-type"))
+        node_type_def = f'{syn("node-type(")}{lit(num(node.order))}{syn(",")} {syn(node.reduction.name)}{syn(")")}'
+        q(node_type_def)
         q(vari(node.name))
-        q(syn("order(")).gobble()
-        q(vari(str(node.order))).gobble()
-        q(syn(")"))
-        q(syn("reduce(")).gobble()
-        q(vari(node.reduction.name)).gobble()
-        q(syn(")"))
         attr_block(node.attr_def.values())
         
 

@@ -57,29 +57,32 @@ def format_variables(expr):
     sub_expr = fn_expr.subs(subdict)
     return sub_expr
 
-def range_to_latex(range_,std=None,rstd=None):
+def range_to_latex(range_,std=None,rstd=None, is_degree_range=False):
+    assert(not ((std or rstd) and is_degree_range))
     tex = None
     if range_.is_exact():
-        tex = lit(num(range_.exact))
+        tex = lit(num(range_.exact)) + syn(",") + " " + lit(num(range_.exact))
     elif range_.is_upper_bound():
-        tex = syn("[") + syn("*") + syn(",")+lit(num(range_.max)) + syn("]")
+        tex = syn("-inf") + syn(",") + " " + lit(num(range_.max))
     elif range_.is_lower_bound():
-        tex = syn("[") +lit(num(range_.min)) + syn(",") + syn("inf")+ syn("]")
+        tex = lit(num(range_.min)) + syn(",") + " " + syn("inf")
     elif range_.is_interval_bound():
-        tex = syn("[") +lit(num(range_.min)) + syn(",") + lit(num(range_.max))+ syn("]")
+        tex = lit(num(range_.min)) + syn(",") + " " + lit(num(range_.max))
     assert(not tex is None)
+    if not is_degree_range:
+        tex = f'{syn("[")}{tex}{syn("]")}'
 
-    if not std is None:
-        tex = f'{tex} {syn("mismatch(")}{lit(num(std))}{syn(",")} {lit(num(0))}{syn(")")}'
-    elif not rstd is None:
-        tex = f'{tex} {syn("mismatch(")}{lit(num(0))}{syn(",")} {lit(num(rstd))}{syn(")")}'
+        if not std is None:
+            tex = f'{tex} {syn("mismatch(")}{lit(num(std))}{syn(",")} {lit(num(0))}{syn(")")}'
+        elif not rstd is None:
+            tex = f'{tex} {syn("mismatch(")}{lit(num(0))}{syn(",")} {lit(num(rstd))}{syn(")")}'
     
     return tex
 
 
 
 def attr_to_latex(attr):
-    tex = f'{syn("attr")} {vari(attr.name)} {syn("=")} '
+    tex = f'{syn("attr")} {lit(attr.name)} {syn("=")} '
     if attr.type == FunctionType:
         tex += syn("lambd")
     elif attr.type == float:
@@ -154,9 +157,10 @@ def production_rules_to_latex(cdglang):
     varfmt = None
 
     tab = LatexTabular("lccl")
+    global syn, lit
     syn = lambda x: LatexPrettyPrinter.fmt_code(Terms.SYNTAX, x)
     lit = lambda x: LatexPrettyPrinter.fmt_code(Terms.LITERAL, x)
-    vari = lambda x: LatexPrettyPrinter.fmt_code(Terms.VARIABLE, x)
+    # vari = lambda x: LatexPrettyPrinter.fmt_code(Terms.VARIABLE, x)
 
     tab.add_preprocessing_directive("\setlength{\\tabcolsep}{1pt}")
     tab.add_preprocessing_directive("\\footnotesize")
@@ -170,16 +174,15 @@ def production_rules_to_latex(cdglang):
         latex_expr = latex(format_variables(expr), mul_symbol="dot", fold_short_frac=True)
 
         if not tgt == SELF:
-            prod_head = f'{syn("prod(")}{lit("e")}{syn(":")} {lit(edge_type)}{syn(",")}'
-            prod_head += f'{lit("s")}{syn(":")} {lit(src)}{syn("->")}{lit("t")}{syn(":")} {lit(dest)}{syn(")")}'
-            tab.add_cell(prod_head)
-            tab.add_cell(lit(str(tgt)[0]))
-            
+            second_arg_name = lit('t')
+            tgt_name = lit(str(tgt)[0])
         else:
-            prod_head = f'{syn("prod(")}{lit("e")}{syn(":")} {lit(edge_type)}{syn(",")}'
-            prod_head += f'{lit("s")}{syn(":")} {lit(src)}{syn(")")}'
-            tab.add_cell(prod_head)
-            tab.add_cell(lit('s'))
+            second_arg_name = lit('s')
+            tgt_name = lit('s')
+        prod_head = f'{syn("prod(")}{lit("e")}{syn(":")} {lit(edge_type)}{syn(",")} '
+        prod_head += f'{lit("s")}{syn(":")} {lit(src)}{syn("->")}{second_arg_name}{syn(":")} {lit(dest)}{syn(")")}'
+        tab.add_cell(prod_head)
+        tab.add_cell(tgt_name)
 
 
         tab.add_cell(syn("<="))
@@ -196,57 +199,57 @@ def validation_rules_to_latex(cdglang):
 
     LatexPrettyPrinter.ESCAPE_STYLE = EscapeStyle.TABULAR
     K = 3
-    tab = LatexTabular("rcl")
+    tab = LatexTabular("lll")
+    global syn, lit
     syn = lambda x: LatexPrettyPrinter.fmt_code(Terms.SYNTAX, x)
     lit = lambda x: LatexPrettyPrinter.fmt_code(Terms.LITERAL, x)
-    vari = lambda x: LatexPrettyPrinter.fmt_code(Terms.VARIABLE, x)
+    # vari = lambda x: LatexPrettyPrinter.fmt_code(Terms.VARIABLE, x)
 
+    tab.add_preprocessing_directive("\setlength{\\tabcolsep}{1pt}")
+    tab.add_preprocessing_directive("\\footnotesize")
 
-    for rule in cdglang.validation_rules():
-        target_type = rule.tgt_node_type.name
-        tab.add_cell(syn("rule(targ:")+vari(target_type)+syn(")"))
-        tab.add_cell("=")
-        tex_snippet = []
-        for pat in rule.acc_pats:
+    def add_patterns_to_cell(target_type, pats):
+        # fill in empty cells to align
+        for pat in pats:
+            for _ in range(tab.col_count, 2):
+                tab.add_cell("")
             targ = pat.target # source or destination
             edge_type = lit(pat.edge_type.name)
-            node_types = syn("|").join(list(map(lambda nt: lit(nt.name), pat.node_types)))
+            node_types = f'[{(syn(",") + " ").join(list(map(lambda nt: lit(nt.name), pat.node_types)))}]'
+            cell_text = syn("match(")
             deg_range = pat.deg_range
-            if targ.is_source():
-                src = vari("targ")
-                dest = vari("node") + syn(":") + node_types
-            elif targ.is_dest():
-                src = vari("node") + syn(":") + node_types
-                dest = vari("targ")
-
-            base_args = [edge_type,src+syn("=>")+dest]
-            if deg_range.is_exact():
-                args = [syn(str(deg_range.exact))] + base_args
-                name = "exactly" 
-            elif deg_range.is_lower_bound():
-                args = [syn(str(deg_range.min))] + base_args
-                name = "at-least"
-            elif deg_range.is_upper_bound():
-                args = [syn(str(deg_range.max))] + base_args
-                name = "at-most"
-            elif deg_range.is_interval_bound():
-                args = [syn(str(deg_range.min)),syn(str(deg_range.max))] + base_args
-                name = "between"
-
-            
-            tex = syn(name)+syn("(")+syn(",").join(args)+syn(")")
-            tex_snippet.append(tex)
-
-        for i,tex in enumerate(tex_snippet):
-            if i != 0:
-                tab.add_cell("")
-                tab.add_cell("")
-            tab.add_cell(tex)
+            cell_text += f'{range_to_latex(deg_range, is_degree_range=True)}{syn(",")} {edge_type}{syn(",")} '
+            if targ == SRC:
+                cell_text += f'{target_type}{syn("->")}{node_types}{syn(")")}'
+            elif targ == DST:
+                cell_text += f'{node_types}{syn("->")}{target_type}{syn(")")}'
+            elif targ == SELF:
+                cell_text += f'{target_type}{syn(")")}'
+            tab.add_cell(cell_text)
             tab.end()
 
-        # if len(tex_snippet) % K != 0: 
-        #     tab.fill_and_end()
-        print("")
+    def extern_func_to_latex(fns):
+        raise NotImplementedError
+
+    for rule in cdglang.validation_rules():
+        target_type = lit(rule.tgt_node_type.name)
+        tab.add_multicell(K, 'l', f'{syn("cstr")} {target_type}'+" \{")
+        tab.end()
+        tex_snippet = []
+        if rule.acc_pats != []:
+            tab.add_cell("")
+            tab.add_cell(syn("acc"))
+            add_patterns_to_cell(target_type, rule.acc_pats)
+        if rule.rej_pats != []:
+            tab.add_cell("")
+            tab.add_cell(syn("rej"))
+            add_patterns_to_cell(target_type, rule.rej_pats)
+        if rule.checking_fns != []:
+            tab.add_cell("")
+            tab.add_cell(syn("extern-func"))
+            extern_func_to_latex(rule.checking_fns)
+        tab.add_multicell(K, 'l', "\}")
+        tab.end()
 
     latex_text = tab.to_latex()
     print("----- validation rules [%s] ------" % (cdglang.name))
@@ -284,28 +287,32 @@ def gen_func_example(func_name, lang_name, v_node_type, i_node_type, edge_type):
     func_def += f'...{syn(",")} {lit("sw")}{syn(":")} {syn("int")}{range_to_latex(sw_range)}{syn(",")}'
     q(func_def)
     tab.newline()
-    func_def = f'{lit("r_v10")}{syn(":")} {syn("real")}{range_to_latex(Range(0))}{syn(",")}...{syn(")")}'
+    func_def = f'{lit("g_v10")}{syn(":")} {syn("real")}{range_to_latex(Range(0))}{syn(",")}...{syn(")")}'
     q(func_def)
     tab.newline()
     func_def = f'{syn("uses")} {lit(lang_name)}'
     func_def += syn("\{")
     q(func_def)
+    tab.add_indent()
     tab.newline()
-    q('  ...')
+    q('...')
     tab.newline()
-    q(f'  {syn("node")} {lit("n_v10")}{syn(":")} {lit(v_node_type)}')
+    q(f'{syn("node")} {lit("n_v10")}{syn(":")} {lit(v_node_type)}')
     tab.newline()
-    q(f'  {syn("node")} {lit("n_i11")}{syn(":")} {lit(i_node_type)}')
+    q(f'{syn("node")} {lit("n_i11")}{syn(":")} {lit(i_node_type)}')
     tab.newline()
-    q(f'  {syn("node")} {lit("n_ibr")}{syn(":")} {lit(i_node_type)}')
+    q(f'{syn("node")} {lit("n_ibr")}{syn(":")} {lit(i_node_type)}')
     tab.newline()
-    q(f'  {syn("edge<")}{lit("n_v10")}{syn(",")} {lit("n_i11")}{syn(">")} {lit("e_10_11")}{syn(":")} {lit(edge_type)}')
+    q(f'{syn("edge<")}{lit("n_v10")}{syn(",")} {lit("n_i11")}{syn(">")} {lit("e_10_11")}{syn(":")} {lit(edge_type)}')
     tab.newline()
-    q(f'  {syn("edge<")}{lit("n_i11")}{syn(",")} {lit("n_ibr")}{syn(">")} {lit("e_10_br")}{syn(":")} {lit(edge_type)}{lit("_sw")}')
+    q(f'{syn("edge<")}{lit("n_i11")}{syn(",")} {lit("n_ibr")}{syn(">")} {lit("e_10_br")}{syn(":")} {lit(edge_type)}{lit("_sw")}')
     tab.newline()
-    q(f'  {syn("set-switch")} {lit("n_ibr")} {syn("when")} {expr("sw==1")}')
+    q(f'{syn("set-switch")} {lit("n_ibr")} {syn("when")} {expr("sw==1")}')
     tab.newline()
-    q('  ...')
+    q(f'{syn("set-attr")} {lit("n_v10.g")} {syn("=")} {lit("g_v10")}')
+    tab.newline()
+    q('...')
+    tab.remove_indent()
     tab.newline()
     q(syn("\}"))
     tab.newline()

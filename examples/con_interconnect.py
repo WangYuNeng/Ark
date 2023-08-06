@@ -27,8 +27,8 @@ import ark.visualize.latex_gen as latexlib
 import ark.visualize.graphviz_gen as graphvizlib
 
 N_GROUP = 4
-con_lang = CDGLang("con")
-hw_con_lang = CDGLang("hwcon", inherits=con_lang)
+con_lang = CDGLang("con-intercon")
+hw_con_lang = CDGLang("hwcon-intercon", inherits=con_lang)
 
 
 Osc = NodeType(name='Osc', order=1, attr_def=[AttrDef('lock_fn', attr_type=FunctionType),
@@ -56,8 +56,9 @@ def coupling_fn(x):
 
 r_cp_src = ProdRule(Coupling, Osc, Osc, SRC, - EDGE.k * SRC.osc_fn(VAR(SRC) - VAR(DST)))
 r_cp_dst = ProdRule(Coupling, Osc, Osc, DST, - EDGE.k * DST.osc_fn(VAR(DST) - VAR(SRC)))
-r_lock = ProdRule(Coupling, Osc, Osc, SELF, - SELF.lock_fn(TIME, VAR(SELF)))
+r_lock = ProdRule(Coupling, Osc, Osc, SELF, - SRC.lock_fn(TIME, VAR(SRC)))
 con_lang.add_production_rules(r_cp_src, r_cp_dst, r_lock)
+latexlib.production_rules_to_latex(con_lang)
 
 val_rules = []
 for i in range(N_GROUP):
@@ -69,6 +70,7 @@ for i in range(N_GROUP):
                                          ValPattern(DST, Coupling_global, Osc, Range(min=0))]
                             ))
 hw_con_lang.add_validation_rules(*val_rules)
+latexlib.validation_rules_to_latex(hw_con_lang)
 
 cdg_types = [Osc, Coupling] + Osc_group
 production_rules = [r_cp_src, r_cp_dst, r_lock]

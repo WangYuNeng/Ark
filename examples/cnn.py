@@ -96,19 +96,19 @@ def saturation_diffpair(sig):
 Bmat = ProdRule(FlowE, Inp, IdealV, DST, EDGE.g * VAR(SRC))
 Dummy = ProdRule(FlowE, Inp, IdealV, SRC, 0) # Dummy rule to make sure Inp is not used
 ReadOut = ProdRule(MapE, IdealV, Out, DST, DST.fn(VAR(SRC)))
-SelfFeedback = ProdRule(MapE, IdealV, IdealV, SELF, -VAR(SELF) + SELF.z)
+SelfFeedback = ProdRule(MapE, IdealV, IdealV, SRC, -VAR(SRC) + SRC.z)
 Amat = ProdRule(FlowE, Out, IdealV, DST, EDGE.g * VAR(SRC))
 cnn_lang.add_production_rules(Bmat, Dummy, ReadOut, SelfFeedback, Amat)
 
 
 # Production rules for msimatch v
 Bmat_mm = ProdRule(FlowE, Inp, MmV, DST, DST.mm * EDGE.g * VAR(SRC))
-SelfFeedback_mm = ProdRule(MapE, MmV, MmV, SELF, SELF.mm * (-VAR(SELF) + SELF.z))
+SelfFeedback_mm = ProdRule(MapE, MmV, MmV, SELF, SRC.mm * (-VAR(SRC) + SRC.z))
 Amat_mm = ProdRule(FlowE, Out, MmV, DST, DST.mm * EDGE.g * VAR(SRC))
 
 prod_rules = [Bmat, Dummy, ReadOut, SelfFeedback, Amat, Bmat_mm, SelfFeedback_mm, Amat_mm]
 hw_cnn_lang.add_production_rules(Bmat_mm, SelfFeedback_mm, Amat_mm)
-latexlib.production_rules_to_latex(cnn_lang)
+latexlib.production_rules_to_latex(hw_cnn_lang)
 
 # Validation rules
 v_val = ValRule(IdealV, [ValPattern(SRC, MapE, Out, Range(exact=1)),

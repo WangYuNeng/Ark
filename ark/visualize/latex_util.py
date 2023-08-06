@@ -143,25 +143,25 @@ class LatexTabular:
     def add_cell(self,text):
         self.rowbuf.append(text)
         self.col_count += 1 
-        assert(len(self.rowbuf) <= self.ncols)
+        assert(self.col_count <= self.ncols)
         return self
 
     def add_multicell(self,k,a,text):
         text = "\\multicolumn{%d}{%s}{%s}" % (k,a,text)
         self.rowbuf.append(text)
         self.col_count += k 
-        assert(self.rowbuf <= self.ncols)
+        assert(self.col_count <= self.ncols)
         return text
 
 
     def fill_and_end(self):
-        n_empty = self.ncols - len(self.rowbuf)
+        n_empty = self.ncols - self.col_count
         for _ in range(n_empty):
             self.add_cell("")
         self.end()
 
     def end(self):
-        assert(len(self.rowbuf) == self.ncols)
+        assert(self.col_count == self.ncols)
         self.ctx.append(self.rowbuf)
         self.rowbuf  = []
         self.col_count = 0
@@ -192,6 +192,8 @@ class LatexVerbatim:
         self.preproc = []
         self.directives = []
         self.do_gobble = False
+        self.indent_style = "  "
+        self.n_indent = 0
         self.add_verbatim_directive("commandchars=\\\\\{\}")
         self.add_verbatim_directive("codes={\catcode`$=3\catcode`_=8}")
 
@@ -226,8 +228,14 @@ class LatexVerbatim:
     def comma(self):
         self._insert_comma = True
 
+    def add_indent(self):
+        self.n_indent += 1
+
+    def remove_indent(self):
+        self.n_indent -= 1
+
     def newline(self):
-        self.ctx.append(" ".join(self.row)+"\n")
+        self.ctx.append(" ".join(self.row)+"\n" + self.indent_style*self.n_indent)
         self.row = []
 
     def to_latex(self):

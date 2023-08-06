@@ -104,7 +104,7 @@ inpi_val = ValRule(InpI, [ValPattern(SRC, IdealE, IdealV, Range(min=0, max=1)),
                           ValPattern(SRC, IdealE, IdealI, Range(min=0, max=1))])
 val_rules = [v_val, i_val, inpv_val, inpi_val]
 tln_lang.add_validation_rules(*val_rules)
-# latexlib.validation_rules_to_latex(tln_lang)
+latexlib.validation_rules_to_latex(tln_lang)
 
 hw_tln_lang = CDGLang("hwtln",inherits=tln_lang)
 # Nonideal implementation with 10% random variation

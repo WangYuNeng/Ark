@@ -203,9 +203,9 @@ r_cp_dst = ProdRule(Coupling, Osc, Osc, DST, - EDGE.k * DST.osc_fn(VAR(DST) - VA
 obc_lang.add_production_rules(r_cp_src,r_cp_dst)
 
 r_lock_1 = ProdRule(Coupling, Osc1, Osc1, SELF,
-                    - SELF.lock_fn(TIME, VAR(SELF), A0, TAU) - SELF.noise_fn(NOIS_STD))
+                    - SRC.lock_fn(TIME, VAR(SRC), A0, TAU) - SRC.noise_fn(NOIS_STD))
 r_lock_2 = ProdRule(Coupling, Osc2, Osc2, SELF,
-                    - SELF.lock_fn(VAR(SELF)) - SELF.noise_fn(NOIS_STD))
+                    - SRC.lock_fn(VAR(SRC)) - SRC.noise_fn(NOIS_STD))
 obc_lang.add_production_rules(r_cp_src,r_cp_dst,r_lock_1,r_lock_2)
 
 cdg_types = [Osc, Coupling, Osc1, Osc2]

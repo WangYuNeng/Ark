@@ -284,11 +284,11 @@ def gen_func_example(func_name, lang_name, v_node_type, i_node_type, edge_type):
     sw_range = Range(0,1)
 
     func_def = f'{syn("func")} {lit(func_name)} {syn("(")}'
-    func_def += f'...{syn(",")} {lit("sw")}{syn(":")} {syn("int")}{range_to_latex(sw_range)}{syn(",")}'
+    func_def += f'{lit("sw")}{syn(":")} {syn("int")}{range_to_latex(sw_range)}{syn(")")}'
     q(func_def)
-    tab.newline()
-    func_def = f'{lit("g_v10")}{syn(":")} {syn("real")}{range_to_latex(Range(0))}{syn(",")}...{syn(")")}'
-    q(func_def)
+    # tab.newline()
+    # func_def = f'{lit("g_v10")}{syn(":")} {syn("real")}{range_to_latex(Range(0))}{syn(",")}...{syn(")")}'
+    # q(func_def)
     tab.newline()
     func_def = f'{syn("uses")} {lit(lang_name)}'
     func_def += syn("\{")
@@ -308,8 +308,8 @@ def gen_func_example(func_name, lang_name, v_node_type, i_node_type, edge_type):
     q(f'{syn("edge<")}{lit("n_i11")}{syn(",")} {lit("n_ibr")}{syn(">")} {lit("e_10_br")}{syn(":")} {lit(edge_type)}{lit("_sw")}')
     tab.newline()
     q(f'{syn("set-switch")} {lit("n_ibr")} {syn("when")} {expr("sw==1")}')
-    tab.newline()
-    q(f'{syn("set-attr")} {lit("n_v10.g")} {syn("=")} {lit("g_v10")}')
+    # tab.newline()
+    # q(f'{syn("set-attr")} {lit("n_v10.g")} {syn("=")} {lit("g_v10")}')
     tab.newline()
     q('...')
     tab.remove_indent()

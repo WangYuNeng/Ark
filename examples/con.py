@@ -179,8 +179,10 @@ def locking_fn_1(t, x, a0, tau):
     return a0 * (1 - np.exp(-t / tau)) * np.sin(2 * x)
 
 def locking_fn_2(x):
-    """Injection locking function from [2]"""
-    return 2 * 795.8e6 * np.sin(2 * np.pi * x)
+    """Injection locking function from [2]
+    Modify the leading coefficient to 1.2 has a better outcome
+    """
+    return 1.2 * 795.8e6 * np.sin(2 * np.pi * x)
 
 def coupling_fn_1(x):
     """Coupling function from [1]"""

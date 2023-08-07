@@ -14,11 +14,13 @@ echo "tln"
 python examples/tln.py
 echo "cnn"
 python examples/cnn.py -p
-echo "con mm1"
-python examples/con.py --initialize 1 --atol 0.1 --rtol 0.1
-echo "con mm2"
-python examples/con.py --initialize 1 --offset_rstd 0.1 
-echo "con mm3"
-python examples/con.py --initialize 1 --offset_rstd 0.1 --atol 0.1 --rtol 0.1
+echo "con ideal"
+python examples/con.py --initialize 1 --n_cycle 12
+echo "con ideal+tol"
+python examples/con.py --initialize 1 --n_cycle 12 --atol 0.1
+echo "con offset"
+python examples/con.py --initialize 1 --n_cycle 12 -offset_rstd 0.1 
+echo "con offset+tol"
+python examples/con.py --initialize 1 --n_cycle 12 --offset_rstd 0.1 --atol 0.1
 echo "con interconnection"
 python examples/con_interconnect.py

@@ -76,11 +76,11 @@ def create_tline_branch(v_nt: NodeType, i_nt: NodeType, e_nt: EdgeType,  e_nt_mm
         line_len: int=5, branch_len: int=2, branches_per_node: int=2, 
         branch_offset: int=0, branch_stride: int=1):
     graph = CDG()
-    current_in = InpI(fn=pulse, g=0.0)
+    current_in = InpI(fn=pulse, g=1.0)
     v_nodes = []
     i_nodes = []
     e_targ_nt = e_nt_mm if mismatch_strategy == "line-only"  and not e_nt_mm is None else e_nt 
-    v_nodes_line,i_nodes_line = build_line(graph,e_targ_nt,v_nt, i_nt, line_len,term_g=0.1)
+    v_nodes_line,i_nodes_line = build_line(graph,e_targ_nt,v_nt, i_nt, line_len,term_g=1.0)
     v_nodes += v_nodes_line
     i_nodes += i_nodes_line
 
@@ -119,7 +119,7 @@ def create_malformed_tline(v_nt: NodeType, i_nt: NodeType,
                     -> tuple[CDG, list[CDGNode], list[CDGNode]]:
     """Use the given node/edge types to create a single line"""
     graph = CDG()
-    current_in = InpI(fn=pulse, g=0.0)
+    current_in = InpI(fn=pulse, g=1.0)
     v_nodes = [v_nt(c=1e-9, g=0.0) for _ in range(line_len)] + [v_nt(c=1e-9, g=1.0)]
     i_nodes = [i_nt(l=1e-9, r=0.0) for _ in range(line_len)]
     for i in range(line_len):
@@ -149,7 +149,7 @@ def create_linear_tline(v_nt: NodeType, i_nt: NodeType,
                     -> tuple[CDG, list[CDGNode], list[CDGNode]]:
     """Use the given node/edge types to create a single line"""
     graph = CDG()
-    current_in = InpI(fn=pulse, g=0.0)
+    current_in = InpI(fn=pulse, g=1.0)
     v_nodes = [v_nt(c=1e-9, g=0.0) for _ in range(line_len)] + [v_nt(c=1e-9, g=1.0)]
     i_nodes = [i_nt(l=1e-9, r=0.0) for _ in range(line_len)]
     for i in range(line_len):
@@ -274,13 +274,13 @@ if __name__ == '__main__':
 
 
 
-    line_len = 12
-    itl_linear, _, _ = create_linear_tline(IdealV, IdealI, lambda: IdealE(),line_len=10)
+    LINE_LEN, BRANCH_LEN = 10, 16
+    itl_linear, _, _ = create_linear_tline(IdealV, IdealI, lambda: IdealE(),line_len=LINE_LEN)
     graphvizlib.cdg_to_graphviz("tln-example","idl-tline-linear",hw_tln_lang,itl_linear,inherited=False, \
                 horizontal=True,save_legend=True, show_node_labels=False, post_layout_hook=graph_process)
     lin_opts = {"nominal":True,"name":"idl-tline-linear", "post_process_hook":plot_process}
 
-    branch_args = {"line_len":line_len, "branch_stride":12,"branches_per_node":1,"branch_len":5,"branch_offset":6}
+    branch_args = {"line_len":LINE_LEN, "branch_stride":LINE_LEN,"branches_per_node":1,"branch_len":BRANCH_LEN,"branch_offset":1}
     itl_branch, _, _ = create_tline_branch(IdealV, IdealI, lambda: IdealE(),  **branch_args)
     graphvizlib.cdg_to_graphviz("tln-example","idl-tline-branch",hw_tln_lang,itl_branch,inherited=False, \
                 horizontal=True,save_legend=False, show_node_labels=False, post_layout_hook=graph_process)

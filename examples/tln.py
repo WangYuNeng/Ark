@@ -26,6 +26,7 @@ from ark.reduction import SUM
 # visualization scripts
 from ark.cdg.cdg_lang import CDGLang
 import ark.visualize.latex_gen as latexlib
+import ark.visualize.latex_gen_upd as latexlibnew
 import ark.visualize.graphviz_gen as graphvizlib
 
 
@@ -49,12 +50,12 @@ IdealI = NodeType(name='I', order=1,
 IdealE = EdgeType(name='E')
 InpV = NodeType(name='InpV',
                 order=0,
-                attr_def=[AttrDef('fn', attr_type=FunctionType),
+                attr_def=[AttrDef('fn', attr_type=FunctionType,nargs=1),
                        AttrDef('r', attr_type=float, attr_range=gr_range)
                        ])
 InpI = NodeType(name='InpI',
                 order=0,
-                attr_def=[AttrDef('fn', attr_type=FunctionType),
+                attr_def=[AttrDef('fn', attr_type=FunctionType,nargs=1),
                           AttrDef('g', attr_type=float, attr_range=gr_range)
                           ])
 tln_lang.add_types(IdealV, IdealI, IdealE, InpV, InpI)
@@ -106,7 +107,7 @@ val_rules = [v_val, i_val, inpv_val, inpi_val]
 tln_lang.add_validation_rules(*val_rules)
 latexlib.validation_rules_to_latex(tln_lang)
 
-hw_tln_lang = CDGLang("hwtln",inherits=tln_lang)
+hw_tln_lang = CDGLang("gmc-tln",inherits=tln_lang)
 # Nonideal implementation with 10% random variation
 MmV = NodeType(name='Vm', base=IdealV,
                attr_def=[AttrDefMismatch('c', attr_type=float, attr_range=lc_range, rstd=0.1)])
@@ -135,6 +136,9 @@ prod_rules += hw_prod_rules
 cdg_types = [IdealV, IdealI, IdealE, InpV, InpI, MmV, MmI, MmE]
 help_fn = [pulse]
 spec = CDGSpec(cdg_types, prod_rules, val_rules)
+
+latexlibnew.language_to_latex(tln_lang)
+latexlibnew.language_to_latex(hw_tln_lang)
 
 validator = ArkValidator(solver=SMTSolver())
 compiler = ArkCompiler(rewrite=RewriteGen())

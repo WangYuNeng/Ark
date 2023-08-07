@@ -15,8 +15,8 @@ class CDGLang:
         self._production_rules= {}
         self._validation_rules = {}
 
-    def edge_types(self):
-        if not self.inherits is None:
+    def edge_types(self,inherited=True):
+        if not self.inherits is None and inherited:
             for n in self.inherits.edge_types():
                 yield n
 
@@ -46,8 +46,8 @@ class CDGLang:
 
         return False
 
-    def node_types(self):
-        if not self.inherits is None:
+    def node_types(self,inherited=True):
+        if not self.inherits is None and inherited:
             for n in self.inherits.node_types():
                 yield n
 

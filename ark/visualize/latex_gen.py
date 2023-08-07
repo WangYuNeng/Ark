@@ -119,8 +119,8 @@ def type_spec_to_latex(cdglang):
         q(syn("\{"))
         for attr in attrs:
             q(attr_to_latex(attr))
-            tab.comma()
-        tab.eat_comma()
+            tab.delim(",")
+        tab.eat_delim()
         q(syn("\}"))
         # tab.newline()
 
@@ -150,6 +150,8 @@ def type_spec_to_latex(cdglang):
     print("---- type spec [%s] ----" % cdglang.name)
     print(latex_text)
     write_file(cdglang.filename("types","tex"),latex_text)
+
+
 
 def production_rules_to_latex(cdglang):
 

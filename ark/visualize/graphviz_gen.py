@@ -18,7 +18,9 @@ class EdgeShading(Enum):
 
 
 def rgb_to_graphviz(r,g,b,a):
-    return "#%2x%2x%2x%2x" % (r,g,b,a)
+    hexstr = "#%02x%02x%02x%02x" % (r,g,b,a)
+    return hexstr
+
 
 @dataclass
 class EdgeStyle:
@@ -59,12 +61,20 @@ class GraphVizFormatter:
     def add_edge_style(cls,style):
         cls.EDGE_STYLES.append(style)
 
+def too_light(r,g,b):
+    minh = 220
+    return r > minh and g > minh and b >minh 
+
+print("--- block colors ---")
 options = list(EdgeShading)
 for (r,g,b) in palettable.cartocolors.qualitative.Bold_10.colors:
+    if too_light(r,g,b):
+        continue
     GraphVizFormatter.add_node_style(NodeStyle(color=(r,g,b,255),shading=NodeShading.SOLID))
 
+print("--- line colors ---")
 for idx,(r,g,b) in enumerate(palettable.cartocolors.qualitative.Prism_10.colors):
-    if (r+g+b)/3 > 160:
+    if too_light(r,g,b):
         continue
 
     GraphVizFormatter.add_edge_style(EdgeStyle(color=(r,g,b,255),shading=options[idx%len(options)]))
@@ -72,6 +82,9 @@ for idx,(r,g,b) in enumerate(palettable.cartocolors.qualitative.Prism_10.colors)
 for idx,(r,g,b) in enumerate(palettable.cmocean.sequential.Gray_10.colors):
     v = (r+g+b)/3.0
     val = int(v/255*60+128)
+    if too_light(val,val,val):
+        continue
+
     GraphVizFormatter.add_inherited_node_style(NodeStyle(color=(val,val,val,255),shading=NodeShading.SOLID))
     GraphVizFormatter.add_inherited_edge_style(EdgeStyle(color=(val,val,val,255),shading=options[idx%len(options)]))
 
@@ -110,12 +123,21 @@ class RenderableGraph:
     def load_cdg_lang(self,lang):
         self.lang = lang
         for idx,n in enumerate(lang.node_types()):
+            if idx >= len(GraphVizFormatter.INHERITED_NODE_STYLES) or \
+                idx >= len(GraphVizFormatter.NODE_STYLES):
+                raise Exception("not enough node colors <idx=%d>" % idx)
+
             if lang.is_inherited(n) and self.inherited:
                 self.node_types[n] = GraphVizFormatter.INHERITED_NODE_STYLES[idx]
             else:
                 self.node_types[n] = GraphVizFormatter.NODE_STYLES[idx]
         
         for idx,n in enumerate(lang.edge_types()):
+            if idx >= len(GraphVizFormatter.INHERITED_EDGE_STYLES) or \
+                idx >= len(GraphVizFormatter.EDGE_STYLES):
+                raise Exception("not enough edge colors <idx=%d>" % idx)
+
+
             if lang.is_inherited(n) and self.inherited:
                 self.edge_types[n] = GraphVizFormatter.INHERITED_EDGE_STYLES[idx]
             else:

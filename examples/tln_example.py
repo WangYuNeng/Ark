@@ -28,108 +28,10 @@ import numpy as np
 # visualization scripts
 from ark.cdg.cdg_lang import CDGLang
 import ark.visualize.latex_gen as latexlib
+import ark.visualize.latex_gen_upd as latexlibnew
 import ark.visualize.graphviz_gen as graphvizlib
 
-
-# Ark specification
-lc_range, gr_range = Range(min=0.1e-9, max=10e-9), Range(min=0)
-w_range = Range(exact=1.0)
-
-tln_lang = CDGLang("tln")
-
-# Ideal implementation
-IdealV = NodeType(name='V', order=1,
-                  reduction=SUM,
-                  attr_def=[AttrDef('c', attr_type=float, attr_range=lc_range),
-                         AttrDef('g', attr_type=float, attr_range=gr_range)
-                        ])
-IdealI = NodeType(name='I', order=1,
-                  reduction=SUM,
-                  attr_def=[AttrDef('l', attr_type=float, attr_range=lc_range),
-                         AttrDef('r', attr_type=float, attr_range=gr_range)
-                        ])
-Meas = NodeType(name='Meas', order=0,
-                  reduction=SUM,
-                  attr_def=[])
-
-IdealE = EdgeType(name='IdealE',
-                  attr_def=[AttrDef('ws', attr_type=float,attr_range=w_range),
-                         AttrDef('wt', attr_type=float,attr_range=w_range)
-                        ])
-InpV = NodeType(name='InpV',
-                order=0,
-                attr_def=[AttrDef('fn', attr_type=FunctionType),
-                       AttrDef('r', attr_type=float, attr_range=gr_range)
-                       ])
-InpI = NodeType(name='InpI',
-                order=0,
-                attr_def=[AttrDef('fn', attr_type=FunctionType),
-                          AttrDef('g', attr_type=float, attr_range=gr_range)
-                          ])
-tln_lang.add_types(IdealV, IdealI, IdealE, InpV, InpI,Meas)
-latexlib.type_spec_to_latex(tln_lang)
-
-# Example input function
-def pulse(t, amplitude=1, delay=0, rise_time=5e-9, fall_time=5e-9, pulse_width=10e-9, period=1):
-    """Trapezoidal pulse function"""
-    t = (t - delay) % period
-    if rise_time <= t and pulse_width + rise_time >= t:
-        return amplitude
-    elif t < rise_time:
-        return amplitude * t / rise_time
-    elif pulse_width + rise_time < t and pulse_width + rise_time + fall_time >= t:
-        return amplitude * (1 - (t - pulse_width - rise_time) / fall_time)
-    return 0
-
-
-# Production rules
-_v2i = ProdRule(IdealE, IdealV, IdealI, SRC, -EDGE.ws*VAR(DST)/SRC.c)
-v2_i = ProdRule(IdealE, IdealV, IdealI, DST, EDGE.wt*VAR(SRC)/DST.l)
-_i2v = ProdRule(IdealE, IdealI, IdealV, SRC, -EDGE.ws*VAR(DST)/SRC.l)
-i2_v = ProdRule(IdealE, IdealI, IdealV, DST, EDGE.wt*VAR(SRC)/DST.c)
-vself = ProdRule(IdealE, IdealV, IdealV, SELF, -VAR(SRC)*SRC.g/SRC.c)
-iself = ProdRule(IdealE, IdealI, IdealI, SELF, -VAR(SRC)*SRC.r/SRC.l)
-inpv2_v = ProdRule(IdealE, InpV, IdealV, DST, EDGE.wt*(SRC.fn(TIME)-VAR(DST))/DST.c/SRC.r)
-inpv2_i = ProdRule(IdealE, InpV, IdealI, DST, EDGE.wt*(SRC.fn(TIME)-VAR(DST)*SRC.r)/DST.l)
-inpi2_v = ProdRule(IdealE, InpI, IdealV, DST, EDGE.wt*(SRC.fn(TIME)-VAR(DST)*SRC.g)/DST.c)
-inpi2_i = ProdRule(IdealE, InpI, IdealI, DST, EDGE.wt*(SRC.fn(TIME)-VAR(DST))/DST.l/SRC.g)
-meas_m = ProdRule(IdealE, IdealV, Meas, DST, VAR(SRC))
-meas_v = ProdRule(IdealE, IdealV, Meas, SRC, EDGE.wt*0.0)
-prod_rules = [_v2i, v2_i, _i2v, i2_v, vself, iself, inpv2_v, inpv2_i, inpi2_v, inpi2_i, meas_m, meas_v]
-
-tln_lang.add_production_rules(*prod_rules)
-latexlib.production_rules_to_latex(tln_lang)
-
-# Validation rules
-v_val = ValRule(IdealV, [ValPattern(SRC, IdealE, IdealI, Range(min=0)),
-                     ValPattern(DST, IdealE, IdealI, Range(min=0)),
-                     ValPattern(DST, IdealE, InpV, Range(min=0)),
-                     ValPattern(DST, IdealE, InpI, Range(min=0)),
-                     ValPattern(SELF, IdealE, IdealV, Range(exact=1))])
-i_val = ValRule(IdealI, [ValPattern(SRC, IdealE, IdealV, Range(min=0, max=1)),
-                     ValPattern(DST, IdealE, [IdealV, InpV, InpI], Range(min=0, max=1)),
-                     ValPattern(SELF, IdealE, IdealI, Range(exact=1))])
-inpv_val = ValRule(InpV, [ValPattern(SRC, IdealE, IdealV, Range(min=0, max=1)),
-                          ValPattern(SRC, IdealE, IdealI, Range(min=0, max=1))])
-inpi_val = ValRule(InpI, [ValPattern(SRC, IdealE, IdealV, Range(min=0, max=1)),
-                          ValPattern(SRC, IdealE, IdealI, Range(min=0, max=1))])
-inpv_val = ValRule(InpV, [ValPattern(SRC, IdealE, IdealV, Range(min=0, max=1)),
-                          ValPattern(SRC, IdealE, IdealI, Range(min=0, max=1))])
-
-val_rules = [v_val, i_val, inpv_val, inpi_val]
-tln_lang.add_validation_rules(*val_rules)
-latexlib.validation_rules_to_latex(tln_lang)
-
-hw_tln_lang = CDGLang("hwtln",inherits=tln_lang)
-# Nonideal implementation with 10% random variation
-MmV = NodeType(name='MmV', base=IdealV,
-               attr_def=[AttrDefMismatch('c', attr_type=float, attr_range=lc_range, rstd=0.1)])
-MmI = NodeType(name='MmI', base=IdealI,
-               attr_def=[AttrDefMismatch('l', attr_type=float, attr_range=lc_range, rstd=0.1)])
-MmE = EdgeType(name='MmE', base=IdealE,
-               attr_def=[AttrDefMismatch('ws', attr_type=float, attr_range=w_range, rstd=0.1)])
-hw_tln_lang.add_types(MmV, MmI, MmE)
-latexlib.type_spec_to_latex(hw_tln_lang)
+from examples.tln import *
 
 cdg_types = [IdealV, IdealI, IdealE, InpV, InpI, MmV, MmI, MmE]
 help_fn = [pulse]
@@ -138,42 +40,43 @@ spec = CDGSpec(cdg_types, prod_rules, val_rules)
 validator = ArkValidator(solver=SMTSolver())
 compiler = ArkCompiler(rewrite=RewriteGen())
 
+
 def build_line(graph,e_nt, v_nt,i_nt,length,term_g=1.0,start_i=False):
     tc = 1e-9
     if start_i:
         v_nodes = [v_nt(c=tc, g=0.0) for _ in range(length)] +  [v_nt(c=tc, g=term_g)]
         i_nodes = [i_nt(l=tc, r=0.0) for _ in range(length+1)] 
         for i in range(length):
-            graph.connect(e_nt(ws=1.0, wt=1.0), i_nodes[i], v_nodes[i])
-            graph.connect(e_nt(ws=1.0, wt=1.0), v_nodes[i], i_nodes[i+1])
-            graph.connect(IdealE(ws=1.0, wt=1.0), v_nodes[i], v_nodes[i])
-            graph.connect(IdealE(ws=1.0, wt=1.0), i_nodes[i], i_nodes[i])
+            graph.connect(e_nt(), i_nodes[i], v_nodes[i])
+            graph.connect(e_nt(), v_nodes[i], i_nodes[i+1])
+            graph.connect(IdealE(), v_nodes[i], v_nodes[i])
+            graph.connect(IdealE(), i_nodes[i], i_nodes[i])
             
-        graph.connect(e_nt(ws=1.0, wt=1.0), i_nodes[length], v_nodes[length])
-        graph.connect(e_nt(ws=1.0, wt=1.0), v_nodes[-1], v_nodes[-1])
+        graph.connect(e_nt(), i_nodes[length], v_nodes[length])
+        graph.connect(e_nt(), v_nodes[-1], v_nodes[-1])
 
 
     else:
         v_nodes = [v_nt(c=tc, g=0.0) for _ in range(length)] + [v_nt(c=tc, g=term_g)]
         i_nodes = [i_nt(l=tc, r=0.0) for _ in range(length)]
         for i in range(length):
-            graph.connect(e_nt(ws=1.0, wt=1.0), v_nodes[i], i_nodes[i])
-            graph.connect(e_nt(ws=1.0, wt=1.0), i_nodes[i], v_nodes[i + 1])
-            graph.connect(IdealE(ws=1.0, wt=1.0), v_nodes[i], v_nodes[i])
-            graph.connect(IdealE(ws=1.0, wt=1.0), i_nodes[i], i_nodes[i])
+            graph.connect(e_nt(), v_nodes[i], i_nodes[i])
+            graph.connect(e_nt(), i_nodes[i], v_nodes[i + 1])
+            graph.connect(IdealE(), v_nodes[i], v_nodes[i])
+            graph.connect(IdealE(), i_nodes[i], i_nodes[i])
 
-        graph.connect(e_nt(ws=1.0, wt=1.0), v_nodes[-1], v_nodes[-1])
+        graph.connect(e_nt(), v_nodes[-1], v_nodes[-1])
+        v_nodes[-1].programmable = True
 
     return v_nodes, i_nodes
 
 
 def create_tline_branch(v_nt: NodeType, i_nt: NodeType, e_nt: EdgeType,  e_nt_mm: EdgeType = None,
-        mismatch_strategy = None,
+        mismatch_strategy = None, 
         line_len: int=5, branch_len: int=2, branches_per_node: int=2, 
         branch_offset: int=0, branch_stride: int=1):
     graph = CDG()
     current_in = InpI(fn=pulse, g=0.0)
-    meas = Meas()
     v_nodes = []
     i_nodes = []
     e_targ_nt = e_nt_mm if mismatch_strategy == "line-only"  and not e_nt_mm is None else e_nt 
@@ -198,13 +101,44 @@ def create_tline_branch(v_nt: NodeType, i_nt: NodeType, e_nt: EdgeType,  e_nt_mm
         targ_i = i_nodes_line[i]
         for br in range(branches_per_node):
             br_v, br_i = branches[idx]
-            graph.connect(e_nt(ws=1.0,wt=1.0), targ_v, br_i[0])
+            edge = e_nt()
+            edge.switchable = True
+            graph.connect(e_nt(), targ_v, br_i[0])
             idx += 1
 
-    graph.connect(e_nt(ws=1.0, wt=1.0), current_in, v_nodes_line[0])
-    graph.connect(e_nt(ws=1.0, wt=1.0), v_nodes_line[-1], meas)
+    graph.connect(e_nt(), current_in, v_nodes_line[0])
     v_nodes_line[0].name = "IN_V"
     v_nodes_line[-1].name = "OUT_V"
+
+
+    return graph, v_nodes, i_nodes
+
+
+def create_malformed_tline(v_nt: NodeType, i_nt: NodeType,
+                 e_nt: EdgeType, line_len=10) \
+                    -> tuple[CDG, list[CDGNode], list[CDGNode]]:
+    """Use the given node/edge types to create a single line"""
+    graph = CDG()
+    current_in = InpI(fn=pulse, g=0.0)
+    v_nodes = [v_nt(c=1e-9, g=0.0) for _ in range(line_len)] + [v_nt(c=1e-9, g=1.0)]
+    i_nodes = [i_nt(l=1e-9, r=0.0) for _ in range(line_len)]
+    for i in range(line_len):
+        if i % 2 == 0:
+            graph.connect(e_nt(), i_nodes[i], v_nodes[i])
+            graph.connect(e_nt(), v_nodes[i], v_nodes[i + 1])
+        else:
+            graph.connect(e_nt(), v_nodes[i], i_nodes[i])
+            graph.connect(e_nt(), i_nodes[i], v_nodes[i + 1])
+
+        graph.connect(IdealE(), v_nodes[i], v_nodes[i])
+        graph.connect(IdealE(), i_nodes[i], i_nodes[i])
+    graph.connect(e_nt(), v_nodes[-1], v_nodes[-1])
+
+    graph.connect(e_nt(), current_in, i_nodes[0])
+    #graph.connect(e_nt(ws=1.0, wt=1.0), v_nodes[-1], meas)
+
+    v_nodes[0].name = "IN_V"
+    v_nodes[-1].name = "OUT_V"
 
 
     return graph, v_nodes, i_nodes
@@ -216,18 +150,17 @@ def create_linear_tline(v_nt: NodeType, i_nt: NodeType,
     """Use the given node/edge types to create a single line"""
     graph = CDG()
     current_in = InpI(fn=pulse, g=0.0)
-    meas = Meas()
     v_nodes = [v_nt(c=1e-9, g=0.0) for _ in range(line_len)] + [v_nt(c=1e-9, g=1.0)]
     i_nodes = [i_nt(l=1e-9, r=0.0) for _ in range(line_len)]
     for i in range(line_len):
-        graph.connect(e_nt(ws=1.0, wt=1.0), v_nodes[i], i_nodes[i])
-        graph.connect(e_nt(ws=1.0, wt=1.0), i_nodes[i], v_nodes[i + 1])
-        graph.connect(IdealE(ws=1.0, wt=1.0), v_nodes[i], v_nodes[i])
-        graph.connect(IdealE(ws=1.0, wt=1.0), i_nodes[i], i_nodes[i])
-    graph.connect(e_nt(ws=1.0, wt=1.0), v_nodes[-1], v_nodes[-1])
+        graph.connect(e_nt(), v_nodes[i], i_nodes[i])
+        graph.connect(e_nt(), i_nodes[i], v_nodes[i + 1])
+        graph.connect(IdealE(), v_nodes[i], v_nodes[i])
+        graph.connect(IdealE(), i_nodes[i], i_nodes[i])
+    graph.connect(e_nt(), v_nodes[-1], v_nodes[-1])
 
-    graph.connect(e_nt(ws=1.0, wt=1.0), current_in, v_nodes[0])
-    graph.connect(e_nt(ws=1.0, wt=1.0), v_nodes[-1], meas)
+    graph.connect(e_nt(), current_in, v_nodes[0])
+    #graph.connect(e_nt(ws=1.0, wt=1.0), v_nodes[-1], meas)
 
     v_nodes[0].name = "IN_V"
     v_nodes[-1].name = "OUT_V"
@@ -256,7 +189,7 @@ def nominal_simulation(cdg,time_range,name,post_process_hook=None):
     if not post_process_hook is None:
         post_process_hook(fig,ax)
 
-    filename = "gviz-output/tln-example/%s_plot.pdf" % name
+    filename = "gviz-output/tln-example/%s-plot.pdf" % name
     plt.savefig(filename)
     plt.clf()
 
@@ -293,9 +226,21 @@ def mismatch_simulation(cdg,time_range,name,post_process_hook=None):
     if not post_process_hook is None:
         post_process_hook(fig,ax)
 
-    filename = "gviz-output/tln-example/%s_plot.pdf" % name
+    filename = "gviz-output/tln-example/%s-plot.pdf" % name
     plt.savefig(filename)
     plt.clf()
+
+
+def graph_process(graph):
+    style = {"style":"dotted", "penwidth":"5pt", "arrowhead":"none"}
+    
+    graph.graph.graph_attr["layout"] = "neato"
+    graph.graph.graph_attr["sep"] = "+7"
+    graph.graph.graph_attr["overlap"] = "false"
+    graph.graph.graph_attr["splines"] = "true"
+
+def plot_process(fix,ax):
+    pass 
 
 
 def highlight_refl(fig,ax):
@@ -313,40 +258,57 @@ def highlight_refl(fig,ax):
     ax.fill_between(section, ymin, ymax,  facecolor=shadecolor, alpha=shadealpha)
 
 if __name__ == '__main__':
+    fnargs = {"br":latexlibnew.SwitchArg("E_6", "br==1")}
+    branch_args = {"line_len":2, "branch_stride":2,"branches_per_node":1,"branch_len":0,"branch_offset":0}
+    itl_small, _, _ = create_tline_branch(IdealV, IdealI, lambda: IdealE(),  **branch_args)
+    latexlibnew.gen_function("br-func",tln_lang,itl_small,fnargs,first_k=3)
+
+    graphvizlib.cdg_to_graphviz("tln-example","idl-small",hw_tln_lang,itl_small,inherited=False, \
+                horizontal=True,save_legend=True, show_node_labels=True, post_layout_hook=None)
+    lin_opts = {"nominal":True,"name":"idl-tline-small", "post_process_hook":plot_process}
+
+    itl_malform, _, _ = create_malformed_tline(IdealV, IdealI, lambda: IdealE(),line_len=2)
+    graphvizlib.cdg_to_graphviz("tln-example","idl-malf",hw_tln_lang,itl_malform,inherited=False, \
+                horizontal=True,save_legend=True, show_node_labels=True, post_layout_hook=None)
+    lin_opts = {"nominal":True,"name":"idl-tline-small-malf", "post_process_hook":plot_process}
+
+
 
     line_len = 12
-    itl_linear, _, _ = create_linear_tline(IdealV, IdealI, IdealE,line_len=10)
-    graphvizlib.cdg_to_graphviz("tln-example","idl_tline_linear",hw_tln_lang,itl_linear,inherited=False, \
-                horizontal=True,save_legend=True, show_node_labels=False)
-    lin_opts = {"nominal":True,"name":"idl_tline_linear", "post_process_hook":None}
+    itl_linear, _, _ = create_linear_tline(IdealV, IdealI, lambda: IdealE(),line_len=10)
+    graphvizlib.cdg_to_graphviz("tln-example","idl-tline-linear",hw_tln_lang,itl_linear,inherited=False, \
+                horizontal=True,save_legend=True, show_node_labels=False, post_layout_hook=graph_process)
+    lin_opts = {"nominal":True,"name":"idl-tline-linear", "post_process_hook":plot_process}
 
     branch_args = {"line_len":line_len, "branch_stride":12,"branches_per_node":1,"branch_len":5,"branch_offset":6}
-    itl_branch, _, _ = create_tline_branch(IdealV, IdealI, IdealE,  **branch_args)
-    graphvizlib.cdg_to_graphviz("tln-example","idl_tline_branch",hw_tln_lang,itl_branch,inherited=False, \
-                horizontal=True,save_legend=False, show_node_labels=False)
-    br_opts = {"nominal":True,"name":"idl_tline_branch", "post_process_hook":highlight_refl}
+    itl_branch, _, _ = create_tline_branch(IdealV, IdealI, lambda: IdealE(),  **branch_args)
+    graphvizlib.cdg_to_graphviz("tln-example","idl-tline-branch",hw_tln_lang,itl_branch,inherited=False, \
+                horizontal=True,save_legend=False, show_node_labels=False, post_layout_hook=graph_process)
+    br_opts = {"nominal":True,"name":"idl-tline-branch", "post_process_hook":highlight_refl}
 
-    node_mm_branch, _, _ = create_tline_branch(MmV, MmI, IdealE,  **branch_args)
+    node_mm_branch, _, _ = create_tline_branch(MmV, MmI, lambda: IdealE(),  **branch_args)
     graphvizlib.cdg_to_graphviz("tln-example","mmnode_tline_branch",hw_tln_lang,node_mm_branch,inherited=True, \
                 horizontal=True,save_legend=False, show_node_labels=False)
-    nodemm_br_opts = {"nominal":False,"name":"mmnode_tline_branch", "post_process_hook":None}
+    nodemm_br_opts = {"nominal":False,"name":"mmnode-tline-branch", "post_process_hook":plot_process}
 
-    edge_mm_branch, _, _ = create_tline_branch(IdealV, IdealI, MmE,  **branch_args)
-    graphvizlib.cdg_to_graphviz("tln-example","mmedge_tline_branch",hw_tln_lang,edge_mm_branch,inherited=True, \
-                horizontal=True,save_legend=False, show_node_labels=False)
-    edgemm_br_opts = {"nominal":False,"name":"mmedge_tline_branch", "post_process_hook":None}
+    edge_mm_branch, _, _ = create_tline_branch(IdealV, IdealI, lambda: MmE(ws=1.0,wt=1.0),  **branch_args)
+    graphvizlib.cdg_to_graphviz("tln-example","mmedge-tline-branch",hw_tln_lang,edge_mm_branch,inherited=True, \
+                horizontal=True,save_legend=False, show_node_labels=False, post_layout_hook=graph_process)
+    edgemm_br_opts = {"nominal":False,"name":"mmedge-tline-branch", "post_process_hook":plot_process}
 
     
-    edge_mmbranches_branch, _, _ = create_tline_branch(IdealV, IdealI, IdealE, e_nt_mm=MmE, mismatch_strategy="branch-only",  **branch_args)
+    edge_mmbranches_branch, _, _ = create_tline_branch(IdealV, IdealI, lambda: IdealE(), e_nt_mm=lambda: MmE(ws=1.0,wt=1.0), 
+                mismatch_strategy="branch-only",  **branch_args)
     graphvizlib.cdg_to_graphviz("tln-example","mmeBranches_tline_branch",hw_tln_lang,edge_mmbranches_branch,inherited=True, \
-                horizontal=True,save_legend=False, show_node_labels=False)
-    emmbranch_opts = {"nominal":False,"name":"mmeBranches_tline_branch", "post_process_hook":None}
+                horizontal=True,save_legend=False, show_node_labels=False, post_layout_hook=graph_process)
+    emmbranch_opts = {"nominal":False,"name":"mmeBranches-tline-branch", "post_process_hook":plot_process}
 
  
-    edge_mmline_branch, _, _ = create_tline_branch(IdealV, IdealI, IdealE, e_nt_mm=MmE, mismatch_strategy="line-only",  **branch_args)
+    edge_mmline_branch, _, _ = create_tline_branch(IdealV, IdealI, lambda: IdealE(), \
+                    e_nt_mm=lambda: MmE(ws=1.0,wt=1.0), mismatch_strategy="line-only",  **branch_args)
     graphvizlib.cdg_to_graphviz("tln-example","mmeLine_tline_branch",hw_tln_lang,edge_mmline_branch,inherited=True, \
-                horizontal=True,save_legend=False, show_node_labels=False)
-    emmline_opts = {"nominal":False,"name":"mmeLine_tline_branch", "post_process_hook":None}
+                horizontal=True,save_legend=False, show_node_labels=False, post_layout_hook=graph_process)
+    emmline_opts = {"nominal":False,"name":"mmeLine-tline-branch", "post_process_hook":plot_process}
 
 
 

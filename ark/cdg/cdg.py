@@ -150,7 +150,7 @@ class CDG:
 
     def connect(self, edge: CDGEdge, src: CDGNode, dst: CDGNode):
         """Add an edge to the graph."""
-        edge.connect(src, dst)
+        edge.connect(src=src, dst=dst)
         src.add_edge(edge)
         dst.add_edge(edge)
         self._add_node(src)

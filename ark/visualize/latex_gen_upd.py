@@ -13,7 +13,7 @@ kw = lambda x: LatexPrettyPrinter.fmt(Terms.KEYWORD, x)
 num = lambda x: LatexPrettyPrinter.fmt_number(x)
 pct = lambda x: LatexPrettyPrinter.fmt_percent(x)
 
-MAXLINEWIDTH = 25
+MAXLINEWIDTH = 50
 
 
 def range_to_latex(range_,std=None,rstd=None, is_degree_range=False):
@@ -24,7 +24,7 @@ def range_to_latex(range_,std=None,rstd=None, is_degree_range=False):
     elif range_.is_upper_bound():
         tex = kw("-inf") + syn(",") + " " + lit(num(range_.max))
     elif range_.is_lower_bound():
-        tex = lit(num(range_.min)) + syn(",") + " " + syn("inf")
+        tex = lit(num(range_.min)) + syn(",") + " " + kw("inf")
     elif range_.is_interval_bound():
         tex = lit(num(range_.min)) + syn(",") + " " + lit(num(range_.max))
     assert(not tex is None)
@@ -32,9 +32,9 @@ def range_to_latex(range_,std=None,rstd=None, is_degree_range=False):
         tex = f'{syn("[")}{tex}{syn("]")}'
 
         if not std is None:
-            tex = f'{tex} {syn("mismatch(")}{lit(num(std))}{syn(",")} {lit(num(0))}{syn(")")}'
+            tex = f'{tex} {kw("mismatch(")}{lit(num(std))}{syn(",")} {lit(num(0))}{syn(")")}'
         elif not rstd is None:
-            tex = f'{tex} {syn("mismatch(")}{lit(num(0))}{syn(",")} {lit(num(rstd))}{syn(")")}'
+            tex = f'{tex} {kw("mismatch(")}{lit(num(0))}{syn(",")} {lit(num(rstd))}{syn(")")}'
     
     return tex
 
@@ -42,9 +42,9 @@ def range_to_latex(range_,std=None,rstd=None, is_degree_range=False):
 
 def special_variable(name):
     if name == "time":
-        tok = syn("time")
+        tok = kw("time")
     else:
-        tok = f'{syn("var(")}{lit(name)}{syn(")")}'
+        tok = f'{kw("var(")}{lit(name)}{syn(")")}'
 
     return tok
 
@@ -88,7 +88,7 @@ def format_variables(expr):
 
 
 def attr_to_latex(attr):
-    tex = f'{syn("attr")} {lit(attr.name)} {syn("=")} '
+    tex = f'{kw("attr")} {lit(attr.name)} {syn("=")} '
     if attr.type == FunctionType:
         tex += kw("lambd")
     elif attr.type == float:
@@ -169,7 +169,7 @@ def type_spec_to_latex(tab,cdglang):
     def inherit_block(cdg_type):
         base_types = cdg_type.base_cdg_types()
         if len(base_types) > 1:
-            q(syn("inherit"))
+            qs(" " + kw("inherit"))
             # Only show the immediate parent type
             q(vari(base_types[1].name))
 
@@ -178,7 +178,7 @@ def type_spec_to_latex(tab,cdglang):
         q(syn("("))
         q(lit(num(node.order)))
         q(syn(","))
-        q(syn(node.reduction.name))
+        q(kw(node.reduction.name))
         qs(syn(")"))
         q(vari(node.name))
         inherit_block(node)
@@ -189,7 +189,7 @@ def type_spec_to_latex(tab,cdglang):
         
 
     for edge in cdglang.edge_types(inherited=False):
-        qs(syn("edge-type"))
+        qs(kw("edge-type"))
         q(vari(edge.name))
         inherit_block(edge)
         tab.linebreak(" ")
@@ -216,7 +216,7 @@ def production_rules_to_latex(tab,cdglang):
         else:
             tgt_name = 's'
 
-        q(syn("prod("))
+        q(kw("prod("))
         q(lit("e"))
         q(syn(":"))
         q(lit(rule.identifier.et.name))
@@ -233,7 +233,7 @@ def production_rules_to_latex(tab,cdglang):
         q(syn(")"))
         tab.indent() 
         tab.linebreak(" ")
-        q(syn(tgt_name))
+        q(lit(tgt_name))
         q(syn("<="))
         q(LatexPrettyPrinter.math_formula(latex_expr))
         q(syn(";"))
@@ -254,7 +254,7 @@ def validation_rules_to_latex(tab,cdglang):
             targ = pat.target # source or destination
             deg_range = pat.deg_range
             edge_type = pat.edge_type.name
-            node_types = LatexPrettyPrinter.delimited(syn(","), map(lambda nt: vari(nt.name), pat.node_types))
+            node_types = LatexPrettyPrinter.delimited(syn(","), map(lambda nt: lit(nt.name), pat.node_types))
             q(kw("match"))
             q(syn("("))
             q(range_to_latex(deg_range, is_degree_range=True))
@@ -262,7 +262,7 @@ def validation_rules_to_latex(tab,cdglang):
             q(lit(edge_type))
             q(syn(","))
             if targ == SRC:
-                q(vari(target_type))
+                q(lit(target_type))
                 q(syn("->"))
                 q(syn("["))
                 q(node_types)
@@ -272,7 +272,7 @@ def validation_rules_to_latex(tab,cdglang):
                 q(node_types)
                 q(syn("]"))
                 q(syn("->"))
-                q(vari(target_type))
+                q(lit(target_type))
             elif targ == SELF:
                 q(vari(target_type))
             q(syn(")"))

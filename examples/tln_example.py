@@ -311,13 +311,28 @@ if __name__ == '__main__':
     emmline_opts = {"nominal":False,"name":"mmeLine-tline-branch", "post_process_hook":plot_process}
 
 
+    itl_linear_short, _, _ = create_linear_tline(IdealV, IdealI, lambda: IdealE(),line_len=1)
+    graphvizlib.cdg_to_graphviz("tln-example","idl-tline-linear-short",hw_tln_lang,itl_linear_short,inherited=False, \
+                horizontal=True,save_legend=True, show_node_labels=True, post_layout_hook=None)
+    lin_short_opts = {"nominal":True,"name":"idl-tline-linear-short", "post_process_hook":plot_process}
 
+    emm_linear_short, _, _ = create_linear_tline(IdealV, IdealI, lambda: MmE(ws=1.0,wt=1.0),line_len=1)
+    graphvizlib.cdg_to_graphviz("tln-example","emm-tline-linear-short",hw_tln_lang,emm_linear_short,inherited=True, \
+                horizontal=True,save_legend=True, show_node_labels=True, post_layout_hook=None)
+    emm_short_opts = {"nominal":True,"name":"emm-tline-linear-short", "post_process_hook":plot_process}
+
+    nmm_linear_short, _, _ = create_linear_tline(MmV, MmI, lambda: IdealE(),line_len=1)
+    graphvizlib.cdg_to_graphviz("tln-example","nmm-tline-linear-short",hw_tln_lang,nmm_linear_short,inherited=True, \
+                horizontal=True,save_legend=True, show_node_labels=True, post_layout_hook=None)
+    nmm_short_opts = {"nominal":True,"name":"nmm-tline-linear-short", "post_process_hook":plot_process}
 
     WINDOWS = 2
     TIME_RANGE = [0, 40e-9*WINDOWS]
     for options, cdg_prog in [(lin_opts,itl_linear), (br_opts,itl_branch), \
                                 (nodemm_br_opts,node_mm_branch), (edgemm_br_opts,edge_mm_branch), 
-                                (emmbranch_opts, edge_mmbranches_branch), (emmline_opts, edge_mmline_branch)]:
+                                (emmbranch_opts, edge_mmbranches_branch), (emmline_opts, edge_mmline_branch),
+                                (lin_short_opts,itl_linear_short), (emm_short_opts, emm_linear_short), (nmm_short_opts, nmm_linear_short)
+                                ]:
         if options["nominal"]:
             nominal_simulation(cdg_prog,TIME_RANGE,options["name"],post_process_hook=options["post_process_hook"])            
         else:

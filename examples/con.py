@@ -72,6 +72,7 @@ from itertools import product
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 from ark.compiler import ArkCompiler
 from ark.rewrite import RewriteGen
 # from ark.solver import SMTSolver
@@ -284,19 +285,28 @@ def gen_max_cut_prob(seed, w_n_bits=W_N_BITS):
 
 def plot_oscillation(time_points, sol, mapping, omega, scaling, title=None):
     """Plot the oscillation of the oscillator"""
+    mpl.rcParams.update(mpl.rcParamsDefault)
+    plt.rcParams.update({
+        "text.usetex": True,
+        "font.size": 15,
+        "font.family": "Helvetica"
+    })
+    cycle = time_points / T_2
     fig, ax = plt.subplots(nrows=2)
     for node, idx in mapping.items():
         phi = sol.sol(time_points)[idx].T * scaling
-        ax[1].plot(time_points,
+        ax[1].plot(cycle,
                 np.sin(omega * time_points + phi),
                 label=node.name)
-        ax[0].plot(time_points, phi)
-    ax[0].set_title('phase (phi)')
-    ax[1].set_title('sin(wt + phi)')
-    ax[-1].set_xlabel('time')
+        ax[0].plot(cycle, phi)
+    ax[0].set_title(r'$\phi$')
+    ax[0].set_ylabel('phase (rad)')
+    ax[1].set_title(r'$\sin{(\omega t + \phi)}$')
+    ax[1].set_ylabel('Amplitude (V)')
+    ax[1].set_xlabel('\# of cycle (t/T)')
     plt.tight_layout()
     if title:
-        plt.savefig(title)
+        plt.savefig(title+'.pdf')
     plt.show()
 
 def phase_to_assignment(phase, atol=ATOL, rtol=RTOL):
@@ -372,8 +382,10 @@ def main():
                                                    for node in mapping.keys()})
         sol = compiler.prog(time_range, init_states=init_states,
                             sim_seed=seed, dense_output=True)
-        if PLOT:
-            plot_oscillation(time_points, sol, mapping, omega, scaling)
+        if seed == 1 and PLOT:
+            plot_oscillation(time_points, sol, mapping, omega, scaling,
+                                title=f'{osc_nodetype.name}, {cp_et.name}'
+                             )
         node_to_assignment = {}
         sync_failed = False
         for node, idx in mapping.items():

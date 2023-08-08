@@ -15,12 +15,12 @@ python examples/tln.py
 echo "cnn"
 python examples/cnn.py -p
 echo "con ideal"
-python examples/con.py --initialize 1 --n_cycle 12
+python examples/con.py  --n_cycle 5 # -p
 echo "con ideal+tol"
-python examples/con.py --initialize 1 --n_cycle 12 --atol 0.1
+python examples/con.py  --n_cycle 5 --atol 0.1
 echo "con offset"
-python examples/con.py --initialize 1 --n_cycle 12 -offset_rstd 0.1 
+python examples/con.py  --n_cycle 5 --offset_rstd 0.01 # -p
 echo "con offset+tol"
-python examples/con.py --initialize 1 --n_cycle 12 --offset_rstd 0.1 --atol 0.1
+python examples/con.py  --n_cycle 5 --offset_rstd 0.01 --atol 0.1
 echo "con interconnection"
 python examples/con_interconnect.py

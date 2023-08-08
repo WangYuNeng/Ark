@@ -77,6 +77,12 @@ class CDGType(type):
         """
         return cls.__name__
 
+    def reset_id(cls) -> None:
+        """
+        Reset the instance id counter
+        """
+        cls.new_instance_id = 0
+
 class NodeType(CDGType):
     """CDG node type.
 

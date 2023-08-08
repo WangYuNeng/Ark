@@ -1,10 +1,10 @@
-from ark.specification.cdg_types import NodeType
+from ark.specification.cdg_types import CDGType, NodeType
 from ark.specification.production_rule import ProdRule, ProdRuleId
 from ark.specification.validation_rule import ValRule, ValRuleId
 
 class CDGSpec:
 
-    def __init__(self, cdg_types: list[NodeType], production_rules: list[ProdRule],
+    def __init__(self, cdg_types: list[CDGType], production_rules: list[ProdRule],
                  validation_rules: list[ValRule]):
         self._cdg_types = cdg_types
         self._production_rules = production_rules
@@ -16,7 +16,7 @@ class CDGSpec:
         self._val_rule_dict = self._collect_type_to_val_rule()
 
     @property
-    def cdg_types(self) -> list[NodeType]:
+    def cdg_types(self) -> list[CDGType]:
         """Access CDG types in the spec."""
         return self._cdg_types
 
@@ -50,3 +50,8 @@ class CDGSpec:
             rule.identifier: rule for rule in rules
         }
         return genid_dict
+
+    def reset_type_id(self) -> None:
+        """Reset all id counters in cdg_type."""
+        for cdg_type in self.cdg_types:
+            cdg_type.reset_id()

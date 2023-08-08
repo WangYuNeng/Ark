@@ -13,11 +13,7 @@ kw = lambda x: LatexPrettyPrinter.fmt(Terms.KEYWORD, x)
 num = lambda x: LatexPrettyPrinter.fmt_number(x)
 pct = lambda x: LatexPrettyPrinter.fmt_percent(x)
 
-<<<<<<< HEAD
 MAXLINEWIDTH = 58 
-=======
-MAXLINEWIDTH = 50
->>>>>>> refs/remotes/origin/visualize
 
 
 def range_to_latex(range_,std=None,rstd=None, is_degree_range=False):
@@ -28,11 +24,7 @@ def range_to_latex(range_,std=None,rstd=None, is_degree_range=False):
     elif range_.is_upper_bound():
         tex = kw("-inf") + syn(",") + lit(num(range_.max))
     elif range_.is_lower_bound():
-<<<<<<< HEAD
         tex = lit(num(range_.min)) + syn(",") +  syn("inf")
-=======
-        tex = lit(num(range_.min)) + syn(",") + " " + kw("inf")
->>>>>>> refs/remotes/origin/visualize
     elif range_.is_interval_bound():
         tex = lit(num(range_.min)) + syn(",") +  lit(num(range_.max))
     assert(not tex is None)
@@ -40,15 +32,9 @@ def range_to_latex(range_,std=None,rstd=None, is_degree_range=False):
         tex = f'{syn("[")}{tex}{syn("]")}'
 
         if not std is None:
-<<<<<<< HEAD
             tex = f'{tex} {kw("mm(")}{lit(num(std))}{syn(",")}{lit(num(0))}{syn(")")}'
         elif not rstd is None:
             tex = f'{tex} {kw("mm(")}{lit(num(0))}{syn(",")}{lit(num(rstd))}{syn(")")}'
-=======
-            tex = f'{tex} {kw("mismatch(")}{lit(num(std))}{syn(",")} {lit(num(0))}{syn(")")}'
-        elif not rstd is None:
-            tex = f'{tex} {kw("mismatch(")}{lit(num(0))}{syn(",")} {lit(num(rstd))}{syn(")")}'
->>>>>>> refs/remotes/origin/visualize
     
     return tex
 
@@ -56,11 +42,7 @@ def range_to_latex(range_,std=None,rstd=None, is_degree_range=False):
 
 def special_variable(name):
     if name == "time":
-<<<<<<< HEAD
         tok = kw("t")
-=======
-        tok = kw("time")
->>>>>>> refs/remotes/origin/visualize
     else:
         tok = f'{kw("var(")}{lit(name)}{syn(")")}'
 
@@ -106,11 +88,7 @@ def format_variables(expr):
 
 
 def attr_to_latex(attr):
-<<<<<<< HEAD
     tex = f'{syn("attr")} {lit(attr.name)}{syn("=")}'
-=======
-    tex = f'{kw("attr")} {lit(attr.name)} {syn("=")} '
->>>>>>> refs/remotes/origin/visualize
     if attr.type == FunctionType:
         tex += kw("fn")
     elif attr.type == float:
@@ -193,11 +171,7 @@ def type_spec_to_latex(tab,cdglang):
         base_types = cdg_type.base_cdg_types()
         tab.add_space()
         if len(base_types) > 1:
-<<<<<<< HEAD
             qs(syn("inherit"))
-=======
-            qs(" " + kw("inherit"))
->>>>>>> refs/remotes/origin/visualize
             # Only show the immediate parent type
             q(vari(base_types[1].name))
 
@@ -217,11 +191,7 @@ def type_spec_to_latex(tab,cdglang):
         
 
     for edge in cdglang.edge_types(inherited=False):
-<<<<<<< HEAD
         qs(kw("etyp"))
-=======
-        qs(kw("edge-type"))
->>>>>>> refs/remotes/origin/visualize
         q(vari(edge.name))
         inherit_block(edge)
         tab.linebreak(" ")
@@ -249,11 +219,7 @@ def production_rules_to_latex(tab,cdglang):
             tgt_name = 's'
 
         q(kw("prod("))
-<<<<<<< HEAD
         q(vari("e"))
-=======
-        q(lit("e"))
->>>>>>> refs/remotes/origin/visualize
         q(syn(":"))
         q(lit(rule.identifier.et.name))
         q(",")

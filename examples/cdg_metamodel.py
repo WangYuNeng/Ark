@@ -74,6 +74,7 @@ for i in range(len(e_types)):
     ntyp.name = ntyp.cdg_type.name
     graph.connect(etyp, ntyp, targ)
 
+e_types_rev.reverse()
 for i in range(len(e_types_rev)):
     etyp = EdgeTypesRev[e_types_rev[i]]()
     etyp.name = etyp.cdg_type.name
@@ -85,17 +86,19 @@ for i in range(len(e_types_rev)):
 
 def process(graph):
     style = {"style":"dotted", "penwidth":"5pt", "arrowhead":"none"}
-    graph.graph.edge(n_types[0],n_types[1],**style)
-    graph.graph.edge(n_types[1],n_types[2],**style)
-    graph.graph.edge(n_types_rev[0],n_types_rev[1],**style)
-    graph.graph.edge(n_types_rev[1],n_types_rev[2],**style)
+    #graph.graph.edge(n_types[0],n_types[1],**style)
+    #graph.graph.edge(n_types[1],n_types[2],**style)
+    #graph.graph.edge(n_types_rev[0],n_types_rev[1],**style)
+    #graph.graph.edge(n_types_rev[1],n_types_rev[2],**style)
 
-    graph.graph.graph_attr["layout"] = "neato"
-    graph.graph.graph_attr["sep"] = "+7"
-    graph.graph.graph_attr["overlap"] = "false"
-    graph.graph.graph_attr["splines"] = "true"
+    force_layout = False 
+    if force_layout:
+        graph.graph.graph_attr["layout"] = "neato"
+        graph.graph.graph_attr["sep"] = "+7"
+        graph.graph.graph_attr["overlap"] = "false"
+        graph.graph.graph_attr["splines"] = "true"
 
-
+    graph.graph.graph_attr["ratio"] = "1.0"
 
 
 name = "cdg-example"

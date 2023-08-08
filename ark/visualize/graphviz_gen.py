@@ -180,6 +180,12 @@ class RenderableGraph:
         if self._save_legend:
             self.save_legend(graph_path)
 
+        if self.graph.graph_attr["ratio"] is None:
+            self.graph.graph_attr["ratio"] = "compress"
+        self.graph.graph_attr["bgcolor"] = "transparent"
+        self.graph.graph_attr["margin"] = "0"
+
+
         self.graph.render(directory=graph_path)
 
 def cdg_to_graphviz(subdir,name,cdg_lang,cdg,inherited=False,save_legend=False,horizontal=False,show_node_labels=True,show_edge_labels=False,post_layout_hook=None):

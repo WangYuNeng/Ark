@@ -87,6 +87,7 @@ from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME
 # visualization scripts
 from ark.cdg.cdg_lang import CDGLang
 import ark.visualize.latex_gen as latexlib
+import ark.visualize.latex_gen_upd as latexlibnew
 import ark.visualize.graphviz_gen as graphvizlib
 
 parser = ArgumentParser()
@@ -137,15 +138,15 @@ if OSC_TYPE == 1 and (OFFSET_RSTD or SCALE_RSTD):
 
 obc_lang = CDGLang("obc")
 
-Osc = NodeType(name='Osc', order=1, attr_def=[AttrDef('lock_fn', attr_type=FunctionType),
-                                               AttrDef('osc_fn', attr_type=FunctionType),
-                                               AttrDef('noise_fn', attr_type=FunctionType)])
-Coupling = EdgeType(name='Coupling', attr_def=[AttrDef('k', attr_type=float)])
+Osc = NodeType(name='Osc', order=1, attr_def=[AttrDef('lock_fn', attr_type=FunctionType, nargs=1),
+                                               AttrDef('osc_fn', attr_type=FunctionType, nargs=1)])
+                                            #    AttrDef('noise_fn', attr_type=FunctionType)])
+Coupling = EdgeType(name='Cpl', attr_def=[AttrDef('k', attr_type=float)])
 
 Osc1 = NodeType(name='Osc1', base=Osc)
 Osc2 = NodeType(name='Osc2', base=Osc)
 
-obc_lang.add_types(Osc,Coupling,Osc1,Osc2)
+obc_lang.add_types(Osc,Coupling)
 latexlib.type_spec_to_latex(obc_lang)
 
 Coupling_distorted = None
@@ -158,10 +159,10 @@ if OFFSET_RSTD and SCALE_RSTD:
                                                             rstd=SCALE_RSTD)])
 elif OFFSET_RSTD:
     offset_std = OFFSET_RSTD * 2 * F_2
-    Coupling_distorted = EdgeType(name='Coupling_distorted', base=Coupling,
+    Coupling_distorted = EdgeType(name='Cpl_ofs', base=Coupling,
                                   attr_def=[AttrDefMismatch('offset', attr_type=float,
-                                                            std=offset_std),
-                                            AttrDef('scale', attr_type=float)])
+                                                            std=offset_std)])
+                                            # AttrDef('scale', attr_type=float)])
 elif SCALE_RSTD:
     Coupling_distorted = EdgeType(name='Coupling_distorted', base=Coupling,
                                   attr_def=[AttrDef('offset', attr_type=float),
@@ -169,7 +170,7 @@ elif SCALE_RSTD:
                                                             rstd=SCALE_RSTD)])
                                                         
 if not Coupling_distorted is None:
-    hw_obc_lang = CDGLang("hwobc-%s-%s" % (OFFSET_RSTD,SCALE_RSTD), inherits=obc_lang)
+    hw_obc_lang = CDGLang("offset-obc", inherits=obc_lang)
     hw_obc_lang.add_types(Coupling_distorted)
     latexlib.type_spec_to_latex(hw_obc_lang)
 
@@ -203,13 +204,15 @@ def zero_noise(_):
 
 r_cp_src = ProdRule(Coupling, Osc, Osc, SRC, - EDGE.k * SRC.osc_fn(VAR(SRC) - VAR(DST)))
 r_cp_dst = ProdRule(Coupling, Osc, Osc, DST, - EDGE.k * DST.osc_fn(VAR(DST) - VAR(SRC)))
-obc_lang.add_production_rules(r_cp_src,r_cp_dst)
+r_lock = ProdRule(Coupling, Osc, Osc, SELF, - SRC.lock_fn(VAR(SRC)))
+obc_lang.add_production_rules(r_cp_src,r_cp_dst, r_lock)
 
 r_lock_1 = ProdRule(Coupling, Osc1, Osc1, SELF,
                     - SRC.lock_fn(TIME, VAR(SRC), A0, TAU) - SRC.noise_fn(NOIS_STD))
 r_lock_2 = ProdRule(Coupling, Osc2, Osc2, SELF,
-                    - SRC.lock_fn(VAR(SRC)) - SRC.noise_fn(NOIS_STD))
-obc_lang.add_production_rules(r_cp_src,r_cp_dst,r_lock_1,r_lock_2)
+                    - SRC.lock_fn(VAR(SRC)))
+                    # - SRC.lock_fn(VAR(SRC)) - SRC.noise_fn(NOIS_STD))
+obc_lang.add_production_rules(r_cp_src,r_cp_dst,r_lock)
 
 cdg_types = [Osc, Coupling, Osc1, Osc2]
 production_rules = [r_cp_src, r_cp_dst, r_lock_1, r_lock_2]
@@ -224,12 +227,21 @@ if Coupling_distorted:
                               - EDGE.k * (EDGE.scale * SRC.osc_fn(VAR(DST) - VAR(SRC)) \
                                           + EDGE.offset))
     production_rules += [r_cp_src_distorted, r_cp_dst_distorted]
-    hw_obc_lang.add_production_rules(r_cp_src_distorted, r_cp_dst_distorted)
+
+    r_cp_src_distorted_vis = ProdRule(Coupling_distorted, Osc, Osc, SRC,
+                              - EDGE.k * (EDGE.scale * SRC.osc_fn(VAR(SRC) - VAR(DST)) \
+                                           + EDGE.offset))
+    r_cp_dst_distorted_vis = ProdRule(Coupling_distorted, Osc, Osc, DST,
+                              - EDGE.k * (EDGE.scale * SRC.osc_fn(VAR(DST) - VAR(SRC)) \
+                                          + EDGE.offset))
+    hw_obc_lang.add_production_rules(r_cp_src_distorted_vis, r_cp_dst_distorted_vis)
 
 
 latexlib.production_rules_to_latex(obc_lang)
+latexlibnew.language_to_latex(obc_lang)
 if not Coupling_distorted is None:
     latexlib.production_rules_to_latex(hw_obc_lang)
+    latexlibnew.language_to_latex(hw_obc_lang)
 
 
 def create_max_cut_con(connection_mat, osc_nt: NodeType, cp_et: EdgeType, noise_fn: FunctionType):

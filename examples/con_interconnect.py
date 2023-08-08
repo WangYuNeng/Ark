@@ -24,25 +24,25 @@ from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME
 # visualization scripts
 from ark.cdg.cdg_lang import CDGLang
 import ark.visualize.latex_gen as latexlib
+import ark.visualize.latex_gen_upd as latexlibnew
 import ark.visualize.graphviz_gen as graphvizlib
 
 N_GROUP = 4
-con_lang = CDGLang("con-intercon")
-hw_con_lang = CDGLang("hwcon-intercon", inherits=con_lang)
+con_lang = CDGLang("con")
+hw_con_lang = CDGLang("intercon-con", inherits=con_lang)
 
 
-Osc = NodeType(name='Osc', order=1, attr_def=[AttrDef('lock_fn', attr_type=FunctionType),
-                                               AttrDef('osc_fn', attr_type=FunctionType)
+Osc = NodeType(name='Osc', order=1, attr_def=[AttrDef('lock_fn', attr_type=FunctionType, nargs=1),
+                                               AttrDef('osc_fn', attr_type=FunctionType, nargs=1)
                                                ])
-Coupling = EdgeType(name='Coupling', attr_def=[AttrDef('k', attr_type=float)])
+Coupling = EdgeType(name='Cpl', attr_def=[AttrDef('k', attr_type=float)])
 
 Osc_group = [NodeType(name=f'Osc_G{i}', base=Osc) for i in range(N_GROUP)]
-Coupling_local = EdgeType(name='Coupling_l', base=Coupling)
-Coupling_global = EdgeType(name='Coupling_g', base=Coupling)
+Coupling_local = EdgeType(name='Cpl_l', base=Coupling)
+Coupling_global = EdgeType(name='Cpl_g', base=Coupling)
 
 con_lang.add_types(Osc, Coupling)
 hw_con_lang.add_types(*Osc_group, Coupling_local, Coupling_global)
-latexlib.type_spec_to_latex(con_lang)
 latexlib.type_spec_to_latex(hw_con_lang)
 
 def locking_fn(x):
@@ -57,8 +57,6 @@ def coupling_fn(x):
 r_cp_src = ProdRule(Coupling, Osc, Osc, SRC, - EDGE.k * SRC.osc_fn(VAR(SRC) - VAR(DST)))
 r_cp_dst = ProdRule(Coupling, Osc, Osc, DST, - EDGE.k * DST.osc_fn(VAR(DST) - VAR(SRC)))
 r_lock = ProdRule(Coupling, Osc, Osc, SELF, - SRC.lock_fn(TIME, VAR(SRC)))
-con_lang.add_production_rules(r_cp_src, r_cp_dst, r_lock)
-latexlib.production_rules_to_latex(con_lang)
 
 val_rules = []
 for i in range(N_GROUP):
@@ -71,6 +69,8 @@ for i in range(N_GROUP):
                             ))
 hw_con_lang.add_validation_rules(*val_rules)
 latexlib.validation_rules_to_latex(hw_con_lang)
+
+latexlibnew.language_to_latex(hw_con_lang)
 
 cdg_types = [Osc, Coupling] + Osc_group
 production_rules = [r_cp_src, r_cp_dst, r_lock]

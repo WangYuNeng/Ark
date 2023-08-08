@@ -28,8 +28,8 @@ import ark.visualize.latex_gen_upd as latexlibnew
 import ark.visualize.graphviz_gen as graphvizlib
 
 N_GROUP = 4
-con_lang = CDGLang("con")
-hw_con_lang = CDGLang("intercon-con", inherits=con_lang)
+con_lang = CDGLang("obc")
+hw_con_lang = CDGLang("intercon-obc", inherits=con_lang)
 
 
 Osc = NodeType(name='Osc', order=1, attr_def=[AttrDef('lock_fn', attr_type=FunctionType, nargs=1),

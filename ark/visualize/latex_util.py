@@ -5,7 +5,7 @@ import sympy
 import os
 from pylatexenc.latex2text import LatexNodes2Text
 from dataclasses import dataclass
-
+from sympy.printing import julia_code as codegen
 
 class Terms(Enum):
     LITERAL = "literal"
@@ -130,9 +130,22 @@ class LatexPrettyPrinter:
         return "\\textbf{\\texttt{%s}}" % tex
 
     @classmethod
+    def math_code(cls,expr):
+        if isinstance(expr,sympy.Expr):
+            c_formula = codegen(expr)
+            formula = c_formula.split("\n")[-1]
+            formula = formula.replace(".*","*")
+            formula = formula.replace("./","/")
+            formula = "".join(formula.split(" "))
+            return formula
+        else:
+            return expr
+
+
+    @classmethod
     def math_formula(cls,expr):
         if isinstance(expr,sympy.Expr):
-            latex_formula = latex(expr)
+            latex_formula = latex(expr, mul_symbol="dot", fold_short_frac=True)
         else:
             latex_formula = str(expr)
 
@@ -220,7 +233,7 @@ class LatexVerbatim:
         self.preproc = []
         self.directives = []
         self.do_gobble = False
-        self.indent_style = "  "
+        self.indent_style = " "
         self.n_indent = 0
         self.linewidth = linewidth 
         self.add_verbatim_directive("commandchars=\\\\\{\}")
@@ -245,7 +258,6 @@ class LatexVerbatim:
         self.do_gobble = True
 
     def add_token(self,text):
-        print(text)
         assert(isinstance(text,str))
         if not self._delim is None:
             self.ctx.append(self._delim)
@@ -283,16 +295,20 @@ class LatexVerbatim:
         
         lb_ctx = []
         buf = []
+        pretty_buf = []
         nchars = 0
         for tok in self.ctx:
             if isinstance(tok, LatexVerbatim.LineBreak):
-                lb_ctx.append((nchars,tok,buf))
+                lb_ctx.append((nchars,tok,buf,pretty_buf))
                 buf = []
+                pretty_buf = []
                 nchars = 0
             else:
                 txt = LatexNodes2Text().latex_to_text(tok)
+                txt = txt.replace("\\","")
                 nchars += len(txt)
                 buf.append(tok)
+                pretty_buf.append(txt)
 
         if not(len(buf) == 0):
             raise Exception("must end verbatim in a linebreak or newline")
@@ -309,18 +325,31 @@ class LatexVerbatim:
 
         q("\\begin{Verbatim}[%s]\n" % incantation)
         lw = 0
-        for idx,(width,lb,buf) in enumerate(lb_ctx):
+        nlines = 0
+        for idx,(width,lb,buf,prettybuf) in enumerate(lb_ctx):
             for b in buf:
                 print(b)
                 q(b)
 
+            do_linebreak = True
             if self.linewidth is None \
                 or idx == len(lb_ctx)-1 \
-                or lb_ctx[idx+1][0]+width+lw >= self.linewidth \
-                or lb.force:
+                or (lb.force and lw + width> 0):
+                do_linebreak = True
+
+            elif not self.linewidth is None:
+                currbuf = width+lw 
+                nextbuf = currbuf + lb_ctx[idx+1][0]
+                do_linebreak = (nextbuf > self.linewidth)
+                print(prettybuf)
+                print("break",do_linebreak)
+                
+                
+            if do_linebreak:
                 q("\n")
                 q(lb.indent_style*lb.n_indent)
                 lw = 0
+                nlines += 1
             else:
                 q(lb.pad)
             lw += width
@@ -328,6 +357,7 @@ class LatexVerbatim:
         q("\\end{Verbatim}")
         q("\n")
         q("}")
+        print("generated num-lines=%d" % nlines)
 
 
         return "".join(stmts)

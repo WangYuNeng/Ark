@@ -13,28 +13,28 @@ kw = lambda x: LatexPrettyPrinter.fmt(Terms.KEYWORD, x)
 num = lambda x: LatexPrettyPrinter.fmt_number(x)
 pct = lambda x: LatexPrettyPrinter.fmt_percent(x)
 
-MAXLINEWIDTH = 25
+MAXLINEWIDTH = 58 
 
 
 def range_to_latex(range_,std=None,rstd=None, is_degree_range=False):
     assert(not ((std or rstd) and is_degree_range))
     tex = None
     if range_.is_exact():
-        tex = lit(num(range_.exact)) + syn(",") + " " + lit(num(range_.exact))
+        tex = lit(num(range_.exact)) + syn(",") +  lit(num(range_.exact))
     elif range_.is_upper_bound():
-        tex = kw("-inf") + syn(",") + " " + lit(num(range_.max))
+        tex = kw("-inf") + syn(",") + lit(num(range_.max))
     elif range_.is_lower_bound():
-        tex = lit(num(range_.min)) + syn(",") + " " + syn("inf")
+        tex = lit(num(range_.min)) + syn(",") +  syn("inf")
     elif range_.is_interval_bound():
-        tex = lit(num(range_.min)) + syn(",") + " " + lit(num(range_.max))
+        tex = lit(num(range_.min)) + syn(",") +  lit(num(range_.max))
     assert(not tex is None)
     if not is_degree_range:
         tex = f'{syn("[")}{tex}{syn("]")}'
 
         if not std is None:
-            tex = f'{tex} {syn("mismatch(")}{lit(num(std))}{syn(",")} {lit(num(0))}{syn(")")}'
+            tex = f'{tex} {kw("mm(")}{lit(num(std))}{syn(",")}{lit(num(0))}{syn(")")}'
         elif not rstd is None:
-            tex = f'{tex} {syn("mismatch(")}{lit(num(0))}{syn(",")} {lit(num(rstd))}{syn(")")}'
+            tex = f'{tex} {kw("mm(")}{lit(num(0))}{syn(",")}{lit(num(rstd))}{syn(")")}'
     
     return tex
 
@@ -42,7 +42,7 @@ def range_to_latex(range_,std=None,rstd=None, is_degree_range=False):
 
 def special_variable(name):
     if name == "time":
-        tok = syn("time")
+        tok = kw("t")
     else:
         tok = f'{syn("var(")}{lit(name)}{syn(")")}'
 
@@ -55,7 +55,7 @@ def format_variables(expr):
         name = f.func.name
         assert("." in name)
         caller,fname = name.split(".")
-        tok = lit(caller)
+        tok = vari(caller)
         tok += syn(".")
         tok += lit(fname)
         
@@ -69,7 +69,7 @@ def format_variables(expr):
         text = sym.name
         if "." in text:
             name,attr = text.split(".")
-            tok = lit(name)
+            tok = vari(name)
             tok += syn(".")
             tok += lit(attr)
         
@@ -88,9 +88,9 @@ def format_variables(expr):
 
 
 def attr_to_latex(attr):
-    tex = f'{syn("attr")} {lit(attr.name)} {syn("=")} '
+    tex = f'{syn("attr")} {lit(attr.name)}{syn("=")}'
     if attr.type == FunctionType:
-        tex += kw("lambd")
+        tex += kw("fn")
     elif attr.type == float:
         tex += kw("real")
     elif attr.type == int:
@@ -162,19 +162,21 @@ def type_spec_to_latex(tab,cdglang):
             q(attr_to_latex(attr))
             if idx < len(attrs) - 1:
                 q(syn(","))
-            tab.linebreak()
+                tab.linebreak()
         tab.unindent()
+        tab.linebreak()
         q(syn("}"))
 
     def inherit_block(cdg_type):
         base_types = cdg_type.base_cdg_types()
+        tab.add_space()
         if len(base_types) > 1:
-            q(syn("inherit"))
+            qs(syn("inherit"))
             # Only show the immediate parent type
             q(vari(base_types[1].name))
 
     for node in cdglang.node_types(inherited=False):
-        q(kw("node-type"))
+        q(kw("ntyp"))
         q(syn("("))
         q(lit(num(node.order)))
         q(syn(","))
@@ -189,12 +191,12 @@ def type_spec_to_latex(tab,cdglang):
         
 
     for edge in cdglang.edge_types(inherited=False):
-        qs(syn("edge-type"))
+        qs(kw("etyp"))
         q(vari(edge.name))
         inherit_block(edge)
         tab.linebreak(" ")
         if len(list(edge.attr_def.values())) == 0:
-            q("{}")
+            q("\{\}")
         else:
             attr_block(edge.attr_def.values())
         q(syn(";"))
@@ -209,25 +211,24 @@ def production_rules_to_latex(tab,cdglang):
         dest = rule.identifier.dst_nt.name
         tgt = rule.identifier.gen_tgt
         expr = rule.fn_sympy
-        latex_expr = latex(format_variables(expr), mul_symbol="dot", fold_short_frac=True)
+        latex_expr = format_variables(expr)
 
         if not tgt == SELF:
             tgt_name = str(tgt)[0]
         else:
             tgt_name = 's'
 
-        q(syn("prod("))
-        q(lit("e"))
+        q(kw("prod("))
+        q(vari("e"))
         q(syn(":"))
         q(lit(rule.identifier.et.name))
-        qs(",")
-        q(lit("s"))
+        q(",")
+        q(vari("s"))
         q(syn(":"))
         q(lit(rule.identifier.src_nt.name))
         if not rule.identifier.gen_tgt == SELF:
-            qs(syn(","))
-            qs(syn("->"))
-            q(lit("t"))
+            q(syn("->"))
+            q(vari("t"))
             q(syn(":"))
             q(lit(rule.identifier.dst_nt.name))
         q(syn(")"))
@@ -235,7 +236,7 @@ def production_rules_to_latex(tab,cdglang):
         tab.linebreak(" ")
         q(syn(tgt_name))
         q(syn("<="))
-        q(LatexPrettyPrinter.math_formula(latex_expr))
+        q(LatexPrettyPrinter.math_code(latex_expr))
         q(syn(";"))
         tab.unindent()
         tab.newline()
@@ -254,7 +255,7 @@ def validation_rules_to_latex(tab,cdglang):
             targ = pat.target # source or destination
             deg_range = pat.deg_range
             edge_type = pat.edge_type.name
-            node_types = LatexPrettyPrinter.delimited(syn(","), map(lambda nt: vari(nt.name), pat.node_types))
+            node_types = LatexPrettyPrinter.delimited(syn(","), map(lambda nt: lit(nt.name), pat.node_types))
             q(kw("match"))
             q(syn("("))
             q(range_to_latex(deg_range, is_degree_range=True))
@@ -262,7 +263,7 @@ def validation_rules_to_latex(tab,cdglang):
             q(lit(edge_type))
             q(syn(","))
             if targ == SRC:
-                q(vari(target_type))
+                q(lit(target_type))
                 q(syn("->"))
                 q(syn("["))
                 q(node_types)
@@ -304,7 +305,7 @@ def validation_rules_to_latex(tab,cdglang):
             add_patterns_to_verbatim(target_type, rule.rej_pats)
             q(syn("]"))
         if rule.checking_fns != []:
-            q(syn("extern-func"))
+            q(kw("extern-func"))
             extern_func_to_latex(rule.checking_fns)
         tab.unindent()
         q(syn("}"))
@@ -377,7 +378,6 @@ def gen_function(fname,lang,cdg,args,first_k=None):
             ellipses() 
             break
                    
-    tab.newline()
 
     n_edges = 0
     for e in cdg.edges:
@@ -436,7 +436,7 @@ def gen_function(fname,lang,cdg,args,first_k=None):
        
 
 
-    tab.newline()
+    tab.linebreak()
 
     tab.unindent()
     tab.linebreak(" ")    

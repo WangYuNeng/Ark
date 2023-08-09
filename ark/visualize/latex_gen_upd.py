@@ -24,7 +24,7 @@ def range_to_latex(range_,std=None,rstd=None, is_degree_range=False):
     elif range_.is_upper_bound():
         tex = kw("-inf") + syn(",") + lit(num(range_.max))
     elif range_.is_lower_bound():
-        tex = lit(num(range_.min)) + syn(",") +  syn("inf")
+        tex = lit(num(range_.min)) + syn(",") +  kw("inf")
     elif range_.is_interval_bound():
         tex = lit(num(range_.min)) + syn(",") +  lit(num(range_.max))
     assert(not tex is None)
@@ -44,7 +44,7 @@ def special_variable(name):
     if name == "time":
         tok = kw("t")
     else:
-        tok = f'{kw("var(")}{lit(name)}{syn(")")}'
+        tok = f'{kw("var")}{syn("(")}{lit(name)}{syn(")")}'
 
     return tok
 
@@ -88,7 +88,7 @@ def format_variables(expr):
 
 
 def attr_to_latex(attr):
-    tex = f'{syn("attr")} {lit(attr.name)}{syn("=")}'
+    tex = f'{kw("attr")} {lit(attr.name)}{syn("=")}'
     if attr.type == FunctionType:
         tex += kw("fn")
     elif attr.type == float:
@@ -171,7 +171,7 @@ def type_spec_to_latex(tab,cdglang):
         base_types = cdg_type.base_cdg_types()
         tab.add_space()
         if len(base_types) > 1:
-            qs(syn("inherit"))
+            qs(kw("inherit"))
             # Only show the immediate parent type
             q(vari(base_types[1].name))
 
@@ -218,7 +218,8 @@ def production_rules_to_latex(tab,cdglang):
         else:
             tgt_name = 's'
 
-        q(kw("prod("))
+        q(kw("prod"))
+        q(syn("("))
         q(vari("e"))
         q(syn(":"))
         q(lit(rule.identifier.et.name))
@@ -231,10 +232,15 @@ def production_rules_to_latex(tab,cdglang):
             q(vari("t"))
             q(syn(":"))
             q(lit(rule.identifier.dst_nt.name))
+        else:
+            q(syn("->"))
+            q(vari("s"))
+            q(syn(":"))
+            q(lit(rule.identifier.dst_nt.name))
         q(syn(")"))
         tab.indent() 
         tab.linebreak(" ")
-        q(lit(tgt_name))
+        q(vari(tgt_name))
         q(syn("<="))
         q(LatexPrettyPrinter.math_code(latex_expr))
         q(syn(";"))
@@ -275,7 +281,7 @@ def validation_rules_to_latex(tab,cdglang):
                 q(syn("->"))
                 q(lit(target_type))
             elif targ == SELF:
-                q(vari(target_type))
+                q(lit(target_type))
             q(syn(")"))
             if idx < len(pats) - 1:
                 q(syn(","))

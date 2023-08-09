@@ -82,7 +82,7 @@ from ark.specification.specification import CDGSpec
 from ark.cdg.cdg import CDG
 from ark.specification.cdg_types import NodeType, EdgeType
 from ark.specification.production_rule import ProdRule
-from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME
+from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME, RuleKeyword
 from ark.specification.range import Range
 
 # visualization scripts
@@ -147,7 +147,9 @@ Coupling = EdgeType(name='Cpl', attr_def=[AttrDef('k', attr_type=float, attr_ran
 Osc1 = NodeType(name='Osc1', base=Osc)
 Osc2 = NodeType(name='Osc2', base=Osc)
 
-obc_lang.add_types(Osc,Coupling)
+Osc_vis = NodeType(name='Osc', order=1)
+
+obc_lang.add_types(Osc_vis,Coupling)
 latexlib.type_spec_to_latex(obc_lang)
 
 Coupling_distorted = None
@@ -172,7 +174,7 @@ elif SCALE_RSTD:
                                                             rstd=SCALE_RSTD)])
                                                         
 if not Coupling_distorted is None:
-    hw_obc_lang = CDGLang("offset-obc", inherits=obc_lang)
+    hw_obc_lang = CDGLang("ofs-obc", inherits=obc_lang)
     hw_obc_lang.add_types(Coupling_distorted)
     latexlib.type_spec_to_latex(hw_obc_lang)
 
@@ -207,14 +209,21 @@ def zero_noise(_):
 r_cp_src = ProdRule(Coupling, Osc, Osc, SRC, - EDGE.k * SRC.osc_fn(VAR(SRC) - VAR(DST)))
 r_cp_dst = ProdRule(Coupling, Osc, Osc, DST, - EDGE.k * DST.osc_fn(VAR(DST) - VAR(SRC)))
 r_lock = ProdRule(Coupling, Osc, Osc, SELF, - SRC.lock_fn(VAR(SRC)))
-obc_lang.add_production_rules(r_cp_src,r_cp_dst, r_lock)
+
+SIN = RuleKeyword('sin')
+SIN2 = RuleKeyword('sin2')
+
+# placeholder to reduce manual work a bit
+r_cp_src_vis = ProdRule(Coupling, Osc_vis, Osc_vis, SRC, - EDGE.k * SIN.x * (VAR(SRC) - VAR(DST)))
+r_cp_dst_vis = ProdRule(Coupling, Osc_vis, Osc_vis, DST, - EDGE.k * SIN.x * (VAR(DST) - VAR(SRC)))
+r_lock_vis = ProdRule(Coupling, Osc_vis, Osc_vis, SELF, - SIN2.x * (VAR(SRC)))
 
 r_lock_1 = ProdRule(Coupling, Osc1, Osc1, SELF,
                     - SRC.lock_fn(TIME, VAR(SRC), A0, TAU) - SRC.noise_fn(NOIS_STD))
 r_lock_2 = ProdRule(Coupling, Osc2, Osc2, SELF,
                     - SRC.lock_fn(VAR(SRC)))
                     # - SRC.lock_fn(VAR(SRC)) - SRC.noise_fn(NOIS_STD))
-obc_lang.add_production_rules(r_cp_src,r_cp_dst,r_lock)
+obc_lang.add_production_rules(r_cp_src_vis,r_cp_dst_vis, r_lock_vis)
 
 cdg_types = [Osc, Coupling, Osc1, Osc2]
 production_rules = [r_cp_src, r_cp_dst, r_lock_1, r_lock_2]
@@ -231,10 +240,10 @@ if Coupling_distorted:
     production_rules += [r_cp_src_distorted, r_cp_dst_distorted]
 
     r_cp_src_distorted_vis = ProdRule(Coupling_distorted, Osc, Osc, SRC,
-                              - EDGE.k * (SRC.osc_fn(VAR(SRC) - VAR(DST)) \
+                              - EDGE.k * (SIN.x * (VAR(SRC) - VAR(DST)) \
                                            + EDGE.offset))
     r_cp_dst_distorted_vis = ProdRule(Coupling_distorted, Osc, Osc, DST,
-                              - EDGE.k * (SRC.osc_fn(VAR(DST) - VAR(SRC)) \
+                              - EDGE.k * (SIN.x * (VAR(DST) - VAR(SRC)) \
                                           + EDGE.offset))
     hw_obc_lang.add_production_rules(r_cp_src_distorted_vis, r_cp_dst_distorted_vis)
 

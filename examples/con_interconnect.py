@@ -32,9 +32,7 @@ con_lang = CDGLang("obc")
 hw_con_lang = CDGLang("intercon-obc", inherits=con_lang)
 
 
-Osc = NodeType(name='Osc', order=1, attr_def=[AttrDef('lock_fn', attr_type=FunctionType, nargs=1),
-                                               AttrDef('osc_fn', attr_type=FunctionType, nargs=1)
-                                               ])
+Osc = NodeType(name='Osc', order=1)
 Coupling = EdgeType(name='Cpl', attr_def=[AttrDef('k', attr_type=float, attr_range=Range(min=-8, max=8))])
 
 Osc_group = [NodeType(name=f'Osc_G{i}', base=Osc) for i in range(N_GROUP)]

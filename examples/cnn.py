@@ -23,7 +23,7 @@ from ark.specification.specification import CDGSpec
 from ark.cdg.cdg import CDG, CDGNode
 from ark.specification.cdg_types import NodeType, EdgeType
 from ark.specification.production_rule import ProdRule
-from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME
+from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME, RuleKeyword
 from ark.specification.validation_rule import ValRule, ValPattern
 from ark.reduction import SUM
 
@@ -57,17 +57,21 @@ hw_cnn_lang = CDGLang("hw-cnn", inherits=cnn_lang)
 lc_range, gr_range = Range(min=0.1e-9, max=10e-9), Range(min=0)
 positive = Range(min=0)
 
+Out_vis = NodeType(name='Out', order=0)
+SAT = RuleKeyword('sat')
+SAT_NI = RuleKeyword('sat_ni')
+
 # Ideal implementation
 IdealV = NodeType(name='V', order=1,
                   attr_def=[AttrDef('z', attr_type=float, attr_range=Range(min=-10, max=10))])
 Out = NodeType(name='Out', order=0, attr_def=[AttrDef('act', attr_type=FunctionType, nargs=1)])
 
 # Input should be stateless, setting to 1 just for convenience of setting its value
-Inp = NodeType(name='Inp', order=1)
+Inp = NodeType(name='Inp', order=0)
 MapE = EdgeType(name='iE')
 FlowE = EdgeType(name='fE',
                   attr_def=[AttrDef('g', attr_type=float, attr_range=Range(min=-10, max=10))])
-cnn_lang.add_types(IdealV, Out, Inp)
+cnn_lang.add_types(IdealV, Out_vis, Inp)
 cnn_lang.add_types(MapE, FlowE)
 latexlib.type_spec_to_latex(cnn_lang)
 
@@ -77,10 +81,12 @@ MmV = NodeType(name='Vm', base=IdealV,
                attr_def=[AttrDefMismatch('mm', attr_type=float, rstd=0.1, attr_range=Range(exact=1))])
 MmFlowE_1p = EdgeType(name='fEm_1p', base=FlowE,
                    attr_def=[AttrDefMismatch('g', attr_type=float, rstd=0.01, attr_range=Range(min=-10, max=10))])
-MmFlowE_10p = EdgeType(name='fEm_10p', base=FlowE,
+MmFlowE_10p = EdgeType(name='fEm', base=FlowE,
                    attr_def=[AttrDefMismatch('g', attr_type=float, rstd=0.1, attr_range=Range(min=-10, max=10))])
+OutNL = NodeType(name='OutNL', order=0, base=Out_vis)
+hw_cnn_lang.add_types(OutNL)
 hw_cnn_lang.add_types(MmV)
-hw_cnn_lang.add_types(MmFlowE_1p, MmFlowE_10p)
+hw_cnn_lang.add_types(MmFlowE_10p)
 latexlib.type_spec_to_latex(hw_cnn_lang)
 
 
@@ -100,7 +106,11 @@ Dummy = ProdRule(FlowE, Inp, IdealV, SRC, 0) # Dummy rule to make sure Inp is no
 ReadOut = ProdRule(MapE, IdealV, Out, DST, DST.act(VAR(SRC)))
 SelfFeedback = ProdRule(MapE, IdealV, IdealV, SELF, -VAR(SRC) + SRC.z)
 Amat = ProdRule(FlowE, Out, IdealV, DST, EDGE.g * VAR(SRC))
-cnn_lang.add_production_rules(Bmat, Dummy, ReadOut, SelfFeedback, Amat)
+
+ReadOut_vis = ProdRule(MapE, IdealV, Out_vis, DST, SAT.x+(VAR(SRC))) # placeholder to reduce manual work a bit
+Amat_vis = ProdRule(FlowE, Out_vis, IdealV, DST, EDGE.g * VAR(SRC))
+
+cnn_lang.add_production_rules(Bmat, ReadOut_vis, SelfFeedback, Amat_vis)
 
 
 # Production rules for msimatch v
@@ -108,8 +118,12 @@ Bmat_mm = ProdRule(FlowE, Inp, MmV, DST, DST.mm * EDGE.g * VAR(SRC))
 SelfFeedback_mm = ProdRule(MapE, MmV, MmV, SELF, SRC.mm * (-VAR(SRC) + SRC.z))
 Amat_mm = ProdRule(FlowE, Out, MmV, DST, DST.mm * EDGE.g * VAR(SRC))
 
+ReadOut_ni_vis = ProdRule(MapE, IdealV, OutNL, DST, SAT_NI.x+(VAR(SRC))) # placeholder to reduce manual work a bit
+Amat_mm_vis = ProdRule(FlowE, Out_vis, MmV, DST, DST.mm * EDGE.g * VAR(SRC))
+
+
 prod_rules = [Bmat, Dummy, ReadOut, SelfFeedback, Amat, Bmat_mm, SelfFeedback_mm, Amat_mm]
-hw_cnn_lang.add_production_rules(Bmat_mm, SelfFeedback_mm, Amat_mm)
+hw_cnn_lang.add_production_rules(Bmat_mm, SelfFeedback_mm, Amat_mm_vis, ReadOut_ni_vis)
 latexlib.production_rules_to_latex(hw_cnn_lang)
 
 # Validation rules

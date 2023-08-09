@@ -180,7 +180,7 @@ class RenderableGraph:
         if self._save_legend:
             self.save_legend(graph_path)
 
-        if self.graph.graph_attr["ratio"] is None:
+        if "ratio" not in self.graph.graph_attr or self.graph.graph_attr["ratio"] is None:
             self.graph.graph_attr["ratio"] = "compress"
         self.graph.graph_attr["bgcolor"] = "transparent"
         self.graph.graph_attr["margin"] = "0"

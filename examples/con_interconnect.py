@@ -27,7 +27,7 @@ import ark.visualize.latex_gen as latexlib
 import ark.visualize.latex_gen_upd as latexlibnew
 import ark.visualize.graphviz_gen as graphvizlib
 
-N_GROUP = 4
+N_GROUP = 2
 con_lang = CDGLang("obc")
 hw_con_lang = CDGLang("intercon-obc", inherits=con_lang)
 
@@ -35,11 +35,11 @@ hw_con_lang = CDGLang("intercon-obc", inherits=con_lang)
 Osc = NodeType(name='Osc', order=1, attr_def=[AttrDef('lock_fn', attr_type=FunctionType, nargs=1),
                                                AttrDef('osc_fn', attr_type=FunctionType, nargs=1)
                                                ])
-Coupling = EdgeType(name='Cpl', attr_def=[AttrDef('k', attr_type=float)])
+Coupling = EdgeType(name='Cpl', attr_def=[AttrDef('k', attr_type=float, attr_range=Range(min=-8, max=8))])
 
 Osc_group = [NodeType(name=f'Osc_G{i}', base=Osc) for i in range(N_GROUP)]
-Coupling_local = EdgeType(name='Cpl_l', base=Coupling)
-Coupling_global = EdgeType(name='Cpl_g', base=Coupling)
+Coupling_local = EdgeType(name='Cpl_l', base=Coupling, attr_def=[AttrDef('cost', attr_type=int, attr_range=Range(exact=10))])
+Coupling_global = EdgeType(name='Cpl_g', base=Coupling, attr_def=[AttrDef('cost', attr_type=int, attr_range=Range(exact=1))])
 
 con_lang.add_types(Osc, Coupling)
 hw_con_lang.add_types(*Osc_group, Coupling_local, Coupling_global)

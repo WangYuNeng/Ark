@@ -60,7 +60,7 @@ positive = Range(min=0)
 # Ideal implementation
 IdealV = NodeType(name='V', order=1,
                   attr_def=[AttrDef('z', attr_type=float, attr_range=Range(min=-10, max=10))])
-Out = NodeType(name='Out', order=0, attr_def=[AttrDef('sat', attr_type=FunctionType, nargs=1)])
+Out = NodeType(name='Out', order=0, attr_def=[AttrDef('act', attr_type=FunctionType, nargs=1)])
 
 # Input should be stateless, setting to 1 just for convenience of setting its value
 Inp = NodeType(name='Inp', order=1)
@@ -75,12 +75,12 @@ latexlib.type_spec_to_latex(cnn_lang)
 # Nonideal implementation
 MmV = NodeType(name='Vm', base=IdealV,
                attr_def=[AttrDefMismatch('mm', attr_type=float, rstd=0.1, attr_range=Range(exact=1))])
-MmFlowE_1p = EdgeType(name='MmFlowE_1p', base=FlowE,
-                   attr_def=[AttrDefMismatch('g', attr_type=float, rstd=0.01)])
-MmFlowE_10p = EdgeType(name='fEm', base=FlowE,
+MmFlowE_1p = EdgeType(name='fEm_1p', base=FlowE,
+                   attr_def=[AttrDefMismatch('g', attr_type=float, rstd=0.01, attr_range=Range(min=-10, max=10))])
+MmFlowE_10p = EdgeType(name='fEm_10p', base=FlowE,
                    attr_def=[AttrDefMismatch('g', attr_type=float, rstd=0.1, attr_range=Range(min=-10, max=10))])
 hw_cnn_lang.add_types(MmV)
-hw_cnn_lang.add_types(MmFlowE_10p)
+hw_cnn_lang.add_types(MmFlowE_1p, MmFlowE_10p)
 latexlib.type_spec_to_latex(hw_cnn_lang)
 
 
@@ -97,8 +97,8 @@ def saturation_diffpair(sig):
 # Production rules
 Bmat = ProdRule(FlowE, Inp, IdealV, DST, EDGE.g * VAR(SRC))
 Dummy = ProdRule(FlowE, Inp, IdealV, SRC, 0) # Dummy rule to make sure Inp is not used
-ReadOut = ProdRule(MapE, IdealV, Out, DST, DST.sat(VAR(SRC)))
-SelfFeedback = ProdRule(MapE, IdealV, IdealV, SRC, -VAR(SRC) + SRC.z)
+ReadOut = ProdRule(MapE, IdealV, Out, DST, DST.act(VAR(SRC)))
+SelfFeedback = ProdRule(MapE, IdealV, IdealV, SELF, -VAR(SRC) + SRC.z)
 Amat = ProdRule(FlowE, Out, IdealV, DST, EDGE.g * VAR(SRC))
 cnn_lang.add_production_rules(Bmat, Dummy, ReadOut, SelfFeedback, Amat)
 
@@ -151,7 +151,7 @@ def create_cnn(nrows: int, ncols: int,
     elif v_nt == MmV:
         vs = [[v_nt(z=bias, mm=1.0) for _ in range(ncols)] for _ in range(nrows)]
     inps = [[Inp() for _ in range(ncols)] for _ in range(nrows)]
-    outs = [[Out(sat=saturation_fn) for _ in range(ncols)] for _ in range(nrows)]
+    outs = [[Out(act=saturation_fn) for _ in range(ncols)] for _ in range(nrows)]
 
     # Create edges
     # All v nodes connect from self, and connect to output
@@ -294,13 +294,13 @@ def paper_plot():
 
     # plot saturation and saturation_diffpair in [-1.5, 1.5] in the same figure
     x = np.linspace(-1.5, 1.5, 100)
-    plt.plot(x, saturation(x), label='saturation-ideal')
-    plt.plot(x, saturation_diffpair(x), label='saturation-diffpair')
-    plt.legend(fontsize=15)
-    plt.xlabel('input', fontsize=15)
-    plt.ylabel('output', fontsize=15)
+    plt.plot(x, saturation(x), label='sat-ideal', linewidth=5.0)
+    plt.plot(x, saturation_diffpair(x), label='sat-diffpair',linewidth=5.0)
+    plt.legend(fontsize=20)
+    # plt.xlabel('input', fontsize=15)
+    # plt.ylabel('output', fontsize=15)
     plt.grid()
-    plt.savefig('examples/cnn_images/saturation_cmp.pdf')
+    plt.savefig('examples/cnn_images/saturation-cmp.pdf',bbox_inches='tight')
     plt.close()
 
 
@@ -312,7 +312,7 @@ def paper_plot():
     N_ROW = 5
     TIME_RANGE = [0, 1]
     time_points = np.linspace(*TIME_RANGE,N_ROW)
-    fig, axs = plt.subplots(N_ROW, len(components))
+    fig, axs = plt.subplots(N_ROW, len(components), figsize=(4.5, 4.8))
     fig.subplots_adjust(wspace=0, hspace=0)
     for j, (col_title, (v_nt, flow_et, saturation_fn)) in enumerate(zip(col_titles, components)):
         imgs = sim_cnn(image, A_mat, B_mat, bias, time_points,
@@ -329,7 +329,7 @@ def paper_plot():
                 ax.set_ylabel(f't={time:.2f}', rotation=0, labelpad=20)
 
     # put rows in plt closer together
-    plt.savefig('examples/cnn_images/cnn_output.pdf')
+    plt.savefig('examples/cnn_images/cnn-output.pdf', bbox_inches='tight')
     plt.show()
 
 

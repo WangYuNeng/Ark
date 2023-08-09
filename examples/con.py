@@ -83,6 +83,7 @@ from ark.cdg.cdg import CDG
 from ark.specification.cdg_types import NodeType, EdgeType
 from ark.specification.production_rule import ProdRule
 from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME
+from ark.specification.range import Range
 
 # visualization scripts
 from ark.cdg.cdg_lang import CDGLang
@@ -141,7 +142,7 @@ obc_lang = CDGLang("obc")
 Osc = NodeType(name='Osc', order=1, attr_def=[AttrDef('lock_fn', attr_type=FunctionType, nargs=1),
                                                AttrDef('osc_fn', attr_type=FunctionType, nargs=1)])
                                             #    AttrDef('noise_fn', attr_type=FunctionType)])
-Coupling = EdgeType(name='Cpl', attr_def=[AttrDef('k', attr_type=float)])
+Coupling = EdgeType(name='Cpl', attr_def=[AttrDef('k', attr_type=float, attr_range=Range(min=-8, max=8))])
 
 Osc1 = NodeType(name='Osc1', base=Osc)
 Osc2 = NodeType(name='Osc2', base=Osc)
@@ -159,9 +160,10 @@ if OFFSET_RSTD and SCALE_RSTD:
                                                             rstd=SCALE_RSTD)])
 elif OFFSET_RSTD:
     offset_std = OFFSET_RSTD * 2 * F_2
+    offset_std_norm = OFFSET_RSTD * 2 * F_2 / (1.2 * F_2)
     Coupling_distorted = EdgeType(name='Cpl_ofs', base=Coupling,
                                   attr_def=[AttrDefMismatch('offset', attr_type=float,
-                                                            std=offset_std)])
+                                                            std=offset_std_norm, attr_range=Range(exact=0))])
                                             # AttrDef('scale', attr_type=float)])
 elif SCALE_RSTD:
     Coupling_distorted = EdgeType(name='Coupling_distorted', base=Coupling,
@@ -229,10 +231,10 @@ if Coupling_distorted:
     production_rules += [r_cp_src_distorted, r_cp_dst_distorted]
 
     r_cp_src_distorted_vis = ProdRule(Coupling_distorted, Osc, Osc, SRC,
-                              - EDGE.k * (EDGE.scale * SRC.osc_fn(VAR(SRC) - VAR(DST)) \
+                              - EDGE.k * (SRC.osc_fn(VAR(SRC) - VAR(DST)) \
                                            + EDGE.offset))
     r_cp_dst_distorted_vis = ProdRule(Coupling_distorted, Osc, Osc, DST,
-                              - EDGE.k * (EDGE.scale * SRC.osc_fn(VAR(DST) - VAR(SRC)) \
+                              - EDGE.k * (SRC.osc_fn(VAR(DST) - VAR(SRC)) \
                                           + EDGE.offset))
     hw_obc_lang.add_production_rules(r_cp_src_distorted_vis, r_cp_dst_distorted_vis)
 

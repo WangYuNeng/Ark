@@ -42,9 +42,9 @@ def range_to_latex(range_,std=None,rstd=None, is_degree_range=False):
 
 def special_variable(name):
     if name == "time":
-        tok = kw("t")
+        tok = kw("times")
     else:
-        tok = f'{kw("var")}{syn("(")}{lit(name)}{syn(")")}'
+        tok = f'{vari("var")}{syn("(")}{vari(name)}{syn(")")}'
 
     return tok
 

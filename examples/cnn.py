@@ -302,18 +302,23 @@ def paper_plot():
     plt.rcParams.update({
         "text.usetex": True,
         "font.size": 12,
-        "font.family": "Helvetica"
+        "font.family": "Helvetica",
+        "axes.labelsize": 30,
+        "xtick.labelsize": 30,
+        "ytick.labelsize": 30
     })
     col_titles = [r'\texttt{A}', r'\texttt{B}', r'\texttt{C}', r'\texttt{D}']
 
     # plot saturation and saturation_diffpair in [-1.5, 1.5] in the same figure
-    x = np.linspace(-1.5, 1.5, 100)
-    plt.plot(x, saturation(x), label='sat-ideal', linewidth=5.0)
-    plt.plot(x, saturation_diffpair(x), label='sat-diffpair',linewidth=5.0)
-    plt.legend(fontsize=20)
+    x = np.linspace(-1.2, 1.2, 100)
+    # plt.plot(x, saturation(x), label='sat-ideal', linewidth=5.0)
+    plt.plot(x, saturation(x), linewidth=5.0)
+    # plt.plot(x, saturation_diffpair(x), label='sat-diffpair',linewidth=5.0)
+    plt.plot(x, saturation_diffpair(x),linewidth=5.0)
+    # plt.legend(fontsize=20)
     # plt.xlabel('input', fontsize=15)
     # plt.ylabel('output', fontsize=15)
-    plt.grid()
+    # plt.grid()
     plt.savefig('examples/cnn_images/saturation-cmp.pdf',bbox_inches='tight')
     plt.close()
 

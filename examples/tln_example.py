@@ -8,6 +8,7 @@ Provide specification for
 '''
 from types import FunctionType
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 from ark.compiler import ArkCompiler
 from ark.rewrite import RewriteGen
 from ark.solver import SMTSolver
@@ -40,6 +41,16 @@ spec = CDGSpec(cdg_types, prod_rules, val_rules)
 validator = ArkValidator(solver=SMTSolver())
 compiler = ArkCompiler(rewrite=RewriteGen())
 
+fontsize=25
+mpl.rcParams.update(mpl.rcParamsDefault)
+plt.rcParams.update({
+    "text.usetex": True,
+    "font.size": 12,
+    "font.family": "Helvetica",
+    "axes.labelsize": fontsize,
+    "xtick.labelsize": fontsize,
+    "ytick.labelsize": fontsize
+})
 
 def build_line(graph,e_nt, v_nt,i_nt,length,term_g=1.0,start_i=False):
     tc = 1e-9
@@ -188,12 +199,20 @@ def nominal_simulation(cdg,time_range,name,post_process_hook=None):
     fig, ax = plt.subplots(1, 1, sharex=True)
 
     linecolor = "black"
-    plt.plot(time_points,trajs[out_traj_idx], color=linecolor)
+    linewidth = 2.0
+    
+    plt.plot(time_points,trajs[out_traj_idx], color=linecolor, linewidth=linewidth)
+    ax = plt.gca()
+    ax.get_xaxis().get_offset_text().set_visible(False)
+    ax_max = max(ax.get_xticks())
+    exponent_axis = np.floor(np.log10(ax_max)).astype(int)
+    ax.annotate(r'$\times$10$^{%i}$'%(exponent_axis),
+             xy=(1, -0.05), xycoords='axes fraction', fontsize=fontsize-5)
     if not post_process_hook is None:
         post_process_hook(fig,ax)
 
     filename = "gviz-output/tln-example/%s-plot.pdf" % name
-    plt.savefig(filename)
+    plt.savefig(filename, bbox_inches='tight')
     plt.clf()
 
 def mismatch_simulation(cdg,time_range,name,post_process_hook=None):
@@ -214,23 +233,29 @@ def mismatch_simulation(cdg,time_range,name,post_process_hook=None):
 
     alpha = 0.5
     linecolor = "black"
+    linewidth = 2.0
     for seed in range(N_RAND_SIM):
         sol = compiler.prog(TIME_RANGE, init_states=init_states, init_seed=seed, max_step=1e-10)
         time_points = sol.t
         trajs = sol.y
         if seed == 0:
-            ax.plot(time_points * 1e9, trajs[out_traj_idx], alpha=alpha, color=linecolor)
+            ax.plot(time_points, trajs[out_traj_idx], alpha=alpha, color=linecolor, linewidth=linewidth)
         else:
-            ax.plot(time_points * 1e9, trajs[out_traj_idx], alpha=alpha, color=linecolor)
+            ax.plot(time_points , trajs[out_traj_idx], alpha=alpha, color=linecolor, linewidth=linewidth)
 
-
+    ax = plt.gca()
+    ax.get_xaxis().get_offset_text().set_visible(False)
+    ax_max = max(ax.get_xticks())
+    exponent_axis = np.floor(np.log10(ax_max)).astype(int)
+    ax.annotate(r'$\times$10$^{%i}$'%(exponent_axis),
+             xy=(1, -0.05), xycoords='axes fraction', fontsize=fontsize-5)
     
     
     if not post_process_hook is None:
         post_process_hook(fig,ax)
 
     filename = "gviz-output/tln-example/%s-plot.pdf" % name
-    plt.savefig(filename)
+    plt.savefig(filename, bbox_inches='tight')
     plt.clf()
 
 

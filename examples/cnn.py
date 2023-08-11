@@ -56,11 +56,15 @@ lc_range, gr_range = Range(min=0.1e-9, max=10e-9), Range(min=0)
 positive = Range(min=0)
 
 # Ideal implementation
+
+# Cells in CNN, z is the bias
 IdealV = NodeType(name='IdealV', order=1,
                   attr_def=[AttrDef('z', attr_type=float)])
+
+# Outpu function
 Out = NodeType(name='Out', order=0, attr_def=[AttrDef('fn', attr_type=FunctionType)])
 
-# Input should be stateless, setting to 1 just for convenience of setting its value
+# Input, should be stateless, setting to 1 just for convenience of setting its value
 Inp = NodeType(name='Inp', order=1)
 MapE = EdgeType(name='MapE')
 FlowE = EdgeType(name='FlowE',

@@ -136,9 +136,14 @@ if OSC_TYPE == 1 and (OFFSET_RSTD or SCALE_RSTD):
 
 obc_lang = CDGLang("obc")
 
+# Phase of an oscillator:
+# lock_fn: injection locking, e.g., omeag_s sin (2 phi)
+# osc_fn: coupling, e.g., omega_c sin (phi_i - phi_j)
 Osc = NodeType(name='Osc', order=1, attr_def=[AttrDef('lock_fn', attr_type=FunctionType),
                                                AttrDef('osc_fn', attr_type=FunctionType),
                                                AttrDef('noise_fn', attr_type=FunctionType)])
+
+# k: coupling strength
 Coupling = EdgeType(name='Coupling', attr_def=[AttrDef('k', attr_type=float)])
 
 Osc1 = NodeType(name='Osc1', base=Osc)

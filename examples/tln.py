@@ -37,22 +37,32 @@ w_range = Range(min=0.5, max=2)
 tln_lang = CDGLang("tln")
 
 # Ideal implementation
-IdealV = NodeType(name='V', order=1,
+# Parallel capacitor(c=capacitance) and resistor(g=conductance)
+IdealV = NodeType(name='IdealV', order=1,
                   reduction=SUM,
                   attr_def=[AttrDef('c', attr_type=float, attr_range=lc_range),
                          AttrDef('g', attr_type=float, attr_range=gr_range)
                         ])
-IdealI = NodeType(name='I', order=1,
+# Series inductor(l=inductance) and resistor(r=resistance)
+IdealI = NodeType(name='IdealI', order=1,
                   reduction=SUM,
                   attr_def=[AttrDef('l', attr_type=float, attr_range=lc_range),
                          AttrDef('r', attr_type=float, attr_range=gr_range)
                         ])
-IdealE = EdgeType(name='E')
+
+IdealE = EdgeType(name='IdealE',
+                  attr_def=[AttrDef('ws', attr_type=float,attr_range=w_range),
+                         AttrDef('wt', attr_type=float,attr_range=w_range)
+                        ])
+
+# Voltage source in Thevenin equivalent
 InpV = NodeType(name='InpV',
                 order=0,
                 attr_def=[AttrDef('fn', attr_type=FunctionType,nargs=1),
                        AttrDef('r', attr_type=float, attr_range=gr_range)
                        ])
+
+# Current source in Thevenin equivalent
 InpI = NodeType(name='InpI',
                 order=0,
                 attr_def=[AttrDef('fn', attr_type=FunctionType,nargs=1),

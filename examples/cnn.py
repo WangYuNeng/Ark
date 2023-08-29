@@ -62,16 +62,20 @@ SAT = RuleKeyword('sat')
 SAT_NI = RuleKeyword('sat_ni')
 
 # Ideal implementation
-IdealV = NodeType(name='V', order=1,
-                  attr_def=[AttrDef('z', attr_type=float, attr_range=Range(min=-10, max=10))])
-Out = NodeType(name='Out', order=0, attr_def=[AttrDef('act', attr_type=FunctionType, nargs=1)])
 
-# Input should be stateless, setting to 1 just for convenience of setting its value
-Inp = NodeType(name='Inp', order=0)
-MapE = EdgeType(name='iE')
-FlowE = EdgeType(name='fE',
-                  attr_def=[AttrDef('g', attr_type=float, attr_range=Range(min=-10, max=10))])
-cnn_lang.add_types(IdealV, Out_vis, Inp)
+# Cells in CNN, z is the bias
+IdealV = NodeType(name='IdealV', order=1,
+                  attr_def=[AttrDef('z', attr_type=float)])
+
+# Outpu function
+Out = NodeType(name='Out', order=0, attr_def=[AttrDef('fn', attr_type=FunctionType)])
+
+# Input, should be stateless, setting to 1 just for convenience of setting its value
+Inp = NodeType(name='Inp', order=1)
+MapE = EdgeType(name='MapE')
+FlowE = EdgeType(name='FlowE',
+                  attr_def=[AttrDef('g', attr_type=float)])
+cnn_lang.add_types(IdealV, Out, Inp)
 cnn_lang.add_types(MapE, FlowE)
 latexlib.type_spec_to_latex(cnn_lang)
 

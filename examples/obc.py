@@ -29,41 +29,6 @@ sync up successfully. The tolerance will affect whether we consider a problem is
 For example, setting the coupling to have higher offset will make the synchronization imperfect.
 If the tolerance is high, the problem will be considered solved even though you can see small phase
 difference in the plot.
-
-Some observations:
-1.  The system is sensitive to parameters. Can't find the good params for Osc1.
-    It is no better than random guess now if compare
-        python examples/con.py --baseline
-        with
-        python examples/con.py --osc_type 1
-    Therefore, we focus on Osc2 for now.
-2.  The system is quite resilient to random scaling of coupling sine functions.
-    It even solves slightly more problems than nominal cases.
-    E.g., compare
-        python examples/con.py
-        with
-        python examples/con.py --scale_rstd 0.1
-    It's not universally better though. For example, there are cases that solved by
-    the nominal system but not by the scaled one.
-3.  Offset could cause a problem in synchronization. For example, if run
-        python examples/con.py --offset_rstd 0.1
-    The synchronization success rate drops significantly (92.3% -> 5.1%)
-    However, the offset mismatch helps get out of local minimum if we allow slightly
-    tolerance in the definition of "synchronized". For example, if we initialize the
-    states in local minimum, the nominal system and scaled system won't get out of it.
-    E.g., run
-        python examples/con.py --initialize 1
-        python examples/con.py --initialize 1 --scale_rstd 0.1
-        The phase stuck at the initial value and not solving the problem.
-        (add -p to plot the phase for visualization)
-    However, with offset mismatch, the system can get out of the local minimum sometimes.
-    E.g., run
-        python examples/con.py --initialize 1 --offset_rstd 0.1
-    can have a better correct rate (1% -> 10.9%).
-    If we further increase the synchronization tolerance, it would solve more.
-    E.g., run
-        python examples/con.py --initialize 1 --offset_rstd 0.1 --atol 0.1 --rtol 0.1
-    The correct rate becomes 61%.
 """
 
 from types import FunctionType
@@ -84,12 +49,6 @@ from ark.specification.cdg_types import NodeType, EdgeType
 from ark.specification.production_rule import ProdRule
 from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME, RuleKeyword
 from ark.specification.range import Range
-
-# visualization scripts
-from ark.cdg.cdg_lang import CDGLang
-import ark.visualize.latex_gen as latexlib
-import ark.visualize.latex_gen_upd as latexlibnew
-import ark.visualize.graphviz_gen as graphvizlib
 
 parser = ArgumentParser()
 parser.add_argument('--osc_type', type=int, default=2)
@@ -137,26 +96,18 @@ W_N_BITS = sim_args.w_n_bits
 if OSC_TYPE == 1 and (OFFSET_RSTD or SCALE_RSTD):
     raise ValueError('Osc1 does not support OFFSET or SCALE')
 
-obc_lang = CDGLang("obc")
-
-
 # Phase of an oscillator:
 # lock_fn: injection locking, e.g., omeag_s sin (2 phi)
 # osc_fn: coupling, e.g., omega_c sin (phi_i - phi_j)
-Osc = NodeType(name='Osc', order=1, attr_def=[AttrDef('lock_fn', attr_type=FunctionType),
-                                               AttrDef('osc_fn', attr_type=FunctionType),
-                                               AttrDef('noise_fn', attr_type=FunctionType)])
+Osc = NodeType(name='Osc', order=1, attr_def=[AttrDef('lock_fn', attr_type=FunctionType, nargs=1),
+                                               AttrDef('osc_fn', attr_type=FunctionType, nargs=1),
+                                               AttrDef('noise_fn', attr_type=FunctionType, nargs=1)])
 
 # k: coupling strength
 Coupling = EdgeType(name='Coupling', attr_def=[AttrDef('k', attr_type=float)])
 
 Osc1 = NodeType(name='Osc1', base=Osc)
 Osc2 = NodeType(name='Osc2', base=Osc)
-
-Osc_vis = NodeType(name='Osc', order=1)
-
-obc_lang.add_types(Osc_vis,Coupling)
-latexlib.type_spec_to_latex(obc_lang)
 
 Coupling_distorted = None
 if OFFSET_RSTD and SCALE_RSTD:
@@ -168,23 +119,15 @@ if OFFSET_RSTD and SCALE_RSTD:
                                                             rstd=SCALE_RSTD)])
 elif OFFSET_RSTD:
     offset_std = OFFSET_RSTD * 2 * F_2
-    offset_std_norm = OFFSET_RSTD * 2 * F_2 / (1.2 * F_2)
-    Coupling_distorted = EdgeType(name='Cpl_ofs', base=Coupling,
+    Coupling_distorted = EdgeType(name='Coupling_offset', base=Coupling,
                                   attr_def=[AttrDefMismatch('offset', attr_type=float,
-                                                            std=offset_std_norm, attr_range=Range(exact=0))])
-                                            # AttrDef('scale', attr_type=float)])
+                                                            std=offset_std, attr_range=Range(exact=0)),
+                                            AttrDef('scale', attr_type=float)])
 elif SCALE_RSTD:
     Coupling_distorted = EdgeType(name='Coupling_distorted', base=Coupling,
                                   attr_def=[AttrDef('offset', attr_type=float),
                                             AttrDefMismatch('scale', attr_type=float,
                                                             rstd=SCALE_RSTD)])
-                                                        
-if not Coupling_distorted is None:
-    hw_obc_lang = CDGLang("ofs-obc", inherits=obc_lang)
-    hw_obc_lang.add_types(Coupling_distorted)
-    latexlib.type_spec_to_latex(hw_obc_lang)
-
-
 
 def locking_fn_1(t, x, a0, tau):
     """Injection locking function from [1]"""
@@ -216,22 +159,12 @@ r_cp_src = ProdRule(Coupling, Osc, Osc, SRC, - EDGE.k * SRC.osc_fn(VAR(SRC) - VA
 r_cp_dst = ProdRule(Coupling, Osc, Osc, DST, - EDGE.k * DST.osc_fn(VAR(DST) - VAR(SRC)))
 r_lock = ProdRule(Coupling, Osc, Osc, SELF, - SRC.lock_fn(VAR(SRC)))
 
-SIN = RuleKeyword('sin')
-SIN2 = RuleKeyword('sin2')
-
-# placeholder to reduce manual work a bit
-r_cp_src_vis = ProdRule(Coupling, Osc_vis, Osc_vis, SRC, - EDGE.k * SIN.x * (VAR(SRC) - VAR(DST)))
-r_cp_dst_vis = ProdRule(Coupling, Osc_vis, Osc_vis, DST, - EDGE.k * SIN.x * (VAR(DST) - VAR(SRC)))
-r_lock_vis = ProdRule(Coupling, Osc_vis, Osc_vis, SELF, - SIN2.x * (VAR(SRC)))
-
 r_lock_1 = ProdRule(Coupling, Osc1, Osc1, SELF,
                     - SRC.lock_fn(TIME, VAR(SRC), A0, TAU) - SRC.noise_fn(NOIS_STD))
 r_lock_2 = ProdRule(Coupling, Osc2, Osc2, SELF,
-                    - SRC.lock_fn(VAR(SRC)))
-                    # - SRC.lock_fn(VAR(SRC)) - SRC.noise_fn(NOIS_STD))
-obc_lang.add_production_rules(r_cp_src_vis,r_cp_dst_vis, r_lock_vis)
+                    - SRC.lock_fn(VAR(SRC)) - SRC.noise_fn(NOIS_STD))
 
-cdg_types = [Osc, Coupling, Osc1, Osc2]
+cdg_types = [Osc, Coupling, Coupling_distorted, Osc1, Osc2]
 production_rules = [r_cp_src, r_cp_dst, r_lock_1, r_lock_2]
 help_fn = [locking_fn_1, locking_fn_2, coupling_fn_1, coupling_fn_2, normal_noise, zero_noise]
 
@@ -244,21 +177,6 @@ if Coupling_distorted:
                               - EDGE.k * (EDGE.scale * SRC.osc_fn(VAR(DST) - VAR(SRC)) \
                                           + EDGE.offset))
     production_rules += [r_cp_src_distorted, r_cp_dst_distorted]
-
-    r_cp_src_distorted_vis = ProdRule(Coupling_distorted, Osc, Osc, SRC,
-                              - EDGE.k * (SIN.x * (VAR(SRC) - VAR(DST)) \
-                                           + EDGE.offset))
-    r_cp_dst_distorted_vis = ProdRule(Coupling_distorted, Osc, Osc, DST,
-                              - EDGE.k * (SIN.x * (VAR(DST) - VAR(SRC)) \
-                                          + EDGE.offset))
-    hw_obc_lang.add_production_rules(r_cp_src_distorted_vis, r_cp_dst_distorted_vis)
-
-
-latexlib.production_rules_to_latex(obc_lang)
-latexlibnew.language_to_latex(obc_lang)
-if not Coupling_distorted is None:
-    latexlib.production_rules_to_latex(hw_obc_lang)
-    latexlibnew.language_to_latex(hw_obc_lang)
 
 
 def create_max_cut_con(connection_mat, osc_nt: NodeType, cp_et: EdgeType, noise_fn: FunctionType):
@@ -391,11 +309,6 @@ def main():
                             total=N_TIRAL):
         connection_mat, max_cut_size, max_cut = prob
         nodes, graph = create_max_cut_con(connection_mat, osc_nodetype, cp_et, noise_fn)
-
-        lang = obc_lang if Coupling_distorted is None else hw_obc_lang
-        if seed == 0:
-            graphvizlib.cdg_to_graphviz("con", "con_%d_inh" % seed, lang,graph,inherited=True)
-            graphvizlib.cdg_to_graphviz("con", "con_%d" % seed, lang,graph,inherited=False)
         
         spec = CDGSpec(cdg_types, production_rules, None)
         compiler = ArkCompiler(rewrite=RewriteGen())

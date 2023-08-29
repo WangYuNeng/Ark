@@ -27,11 +27,6 @@ from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME, Rule
 from ark.specification.validation_rule import ValRule, ValPattern
 from ark.reduction import SUM
 
-# visualization scripts
-from ark.cdg.cdg_lang import CDGLang
-import ark.visualize.latex_gen as latexlib
-import ark.visualize.latex_gen_upd as latexlibnew
-import ark.visualize.graphviz_gen as graphvizlib
 
 
 parser = ArgumentParser()
@@ -51,15 +46,10 @@ plot_paper = args.paper
 seed = args.seed
 
 
-cnn_lang = CDGLang("cnn")
-hw_cnn_lang = CDGLang("hw-cnn", inherits=cnn_lang)
 # Ark specification
 lc_range, gr_range = Range(min=0.1e-9, max=10e-9), Range(min=0)
 positive = Range(min=0)
 
-Out_vis = NodeType(name='Out', order=0)
-SAT = RuleKeyword('sat')
-SAT_NI = RuleKeyword('sat_ni')
 
 # Ideal implementation
 
@@ -68,17 +58,13 @@ IdealV = NodeType(name='IdealV', order=1,
                   attr_def=[AttrDef('z', attr_type=float)])
 
 # Outpu function
-Out = NodeType(name='Out', order=0, attr_def=[AttrDef('fn', attr_type=FunctionType)])
+Out = NodeType(name='Out', order=0, attr_def=[AttrDef('act', attr_type=FunctionType, nargs=1)])
 
 # Input, should be stateless, setting to 1 just for convenience of setting its value
 Inp = NodeType(name='Inp', order=1)
 MapE = EdgeType(name='MapE')
 FlowE = EdgeType(name='FlowE',
                   attr_def=[AttrDef('g', attr_type=float)])
-cnn_lang.add_types(IdealV, Out, Inp)
-cnn_lang.add_types(MapE, FlowE)
-latexlib.type_spec_to_latex(cnn_lang)
-
 
 # Nonideal implementation
 MmV = NodeType(name='Vm', base=IdealV,
@@ -87,11 +73,6 @@ MmFlowE_1p = EdgeType(name='fEm_1p', base=FlowE,
                    attr_def=[AttrDefMismatch('g', attr_type=float, rstd=0.01, attr_range=Range(min=-10, max=10))])
 MmFlowE_10p = EdgeType(name='fEm', base=FlowE,
                    attr_def=[AttrDefMismatch('g', attr_type=float, rstd=0.1, attr_range=Range(min=-10, max=10))])
-OutNL = NodeType(name='OutNL', order=0, base=Out_vis)
-hw_cnn_lang.add_types(OutNL)
-hw_cnn_lang.add_types(MmV)
-hw_cnn_lang.add_types(MmFlowE_10p)
-latexlib.type_spec_to_latex(hw_cnn_lang)
 
 
 
@@ -111,10 +92,6 @@ ReadOut = ProdRule(MapE, IdealV, Out, DST, DST.act(VAR(SRC)))
 SelfFeedback = ProdRule(MapE, IdealV, IdealV, SELF, -VAR(SRC) + SRC.z)
 Amat = ProdRule(FlowE, Out, IdealV, DST, EDGE.g * VAR(SRC))
 
-ReadOut_vis = ProdRule(MapE, IdealV, Out_vis, DST, SAT.x+(VAR(SRC))) # placeholder to reduce manual work a bit
-Amat_vis = ProdRule(FlowE, Out_vis, IdealV, DST, EDGE.g * VAR(SRC))
-
-cnn_lang.add_production_rules(Bmat, ReadOut_vis, SelfFeedback, Amat_vis)
 
 
 # Production rules for msimatch v
@@ -122,13 +99,9 @@ Bmat_mm = ProdRule(FlowE, Inp, MmV, DST, DST.mm * EDGE.g * VAR(SRC))
 SelfFeedback_mm = ProdRule(MapE, MmV, MmV, SELF, SRC.mm * (-VAR(SRC) + SRC.z))
 Amat_mm = ProdRule(FlowE, Out, MmV, DST, DST.mm * EDGE.g * VAR(SRC))
 
-ReadOut_ni_vis = ProdRule(MapE, IdealV, OutNL, DST, SAT_NI.x+(VAR(SRC))) # placeholder to reduce manual work a bit
-Amat_mm_vis = ProdRule(FlowE, Out_vis, MmV, DST, DST.mm * EDGE.g * VAR(SRC))
 
 
 prod_rules = [Bmat, Dummy, ReadOut, SelfFeedback, Amat, Bmat_mm, SelfFeedback_mm, Amat_mm]
-hw_cnn_lang.add_production_rules(Bmat_mm, SelfFeedback_mm, Amat_mm_vis, ReadOut_ni_vis)
-latexlib.production_rules_to_latex(hw_cnn_lang)
 
 # Validation rules
 v_val = ValRule(IdealV, [ValPattern(SRC, MapE, Out, Range(exact=1)),
@@ -138,11 +111,6 @@ out_val = ValRule(Out, [ValPattern(SRC, FlowE, IdealV, Range(min=4, max=9)),
                         ValPattern(DST, MapE, IdealV, Range(exact=1))])
 inp_val = ValRule(Inp, [ValPattern(SRC, FlowE, IdealV, Range(min=4, max=9))])
 val_rules = [v_val, out_val, inp_val]
-cnn_lang.add_validation_rules(v_val, out_val, inp_val)
-latexlib.validation_rules_to_latex(cnn_lang)
-
-latexlibnew.language_to_latex(cnn_lang)
-latexlibnew.language_to_latex(hw_cnn_lang)
 
 cdg_types = [IdealV, Out, Inp, MapE, FlowE, MmV, MmFlowE_1p, MmFlowE_10p]
 help_fn = [saturation, saturation_diffpair]
@@ -307,9 +275,9 @@ def paper_plot():
         "text.usetex": True,
         "font.size": 12,
         "font.family": "Helvetica",
-        "axes.labelsize": 30,
-        "xtick.labelsize": 30,
-        "ytick.labelsize": 30
+        # "axes.labelsize": 30,
+        # "xtick.labelsize": 30,
+        # "ytick.labelsize": 30
     })
     col_titles = [r'\texttt{A}', r'\texttt{B}', r'\texttt{C}', r'\texttt{D}']
 

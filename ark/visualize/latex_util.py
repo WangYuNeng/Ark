@@ -3,20 +3,24 @@ import re
 from sympy import latex
 import sympy
 import os
-
+from pylatexenc.latex2text import LatexNodes2Text
+from dataclasses import dataclass
+from sympy.printing import julia_code as codegen
 
 class Terms(Enum):
     LITERAL = "literal"
     VARIABLE = "variable"
     HIGHLIGHT = "highlight"
     SYNTAX = "syntax"
+    EXPRESSION = "expression"
+    KEYWORD = "keyword"
 
 class TextStyle(Enum):
     BOLD = "bold"
 
     def formatted(self,text):
         if self == TextStyle.BOLD:
-            return "\\textbf{" + text + "}"
+            return "\\textbf{" + text+ "}"
         else:
             raise NotImplementedError
             
@@ -64,12 +68,22 @@ class LatexPrettyPrinter:
         assert(isinstance(style,TextStyle))
         LatexPrettyPrinter.STYLES[enum] = style
 
+    @classmethod
+    def delimited(cls,delim,arggen):
+        args = list(arggen)
+        tex = ""
+        for i in range(len(args)-1):
+            tex += args[i]
+            tex += delim
+        tex += args[len(args)-1]
+        return tex
+
 
     @classmethod
     def esc(cls,text):
         conv = cls.ESCAPE_STYLE.get_escape_characters()
         regex = re.compile('|'.join(re.escape(str(key)) for key in sorted(conv.keys(), key = lambda item: - len(item))))
-        result = regex.sub(lambda match: conv[match.group()], text)
+        result = regex.sub(lambda match: conv[match.group()], text) 
         return result 
 
     @classmethod
@@ -96,13 +110,17 @@ class LatexPrettyPrinter:
     @classmethod
     def fmt(cls,type_,text_):
         assert(isinstance(text_,str)) 
-        text = LatexPrettyPrinter.esc(text_)
+        esc = text = LatexPrettyPrinter.esc(text_)
         if type_ in LatexPrettyPrinter.STYLES:
-            text = LatexPrettyPrinter.STYLES[type_].formatted(text_)
+            text = LatexPrettyPrinter.STYLES[type_].formatted(text)
 
+        print(esc,text)
         if type_ in LatexPrettyPrinter.COLORS:
             color = LatexPrettyPrinter.COLORS[type_]
-            text = "\\textcolor{%s}{%s}" % (color,text)
+            tex = "\\textcolor{%s}" % (color)
+            tex += "{"+text+"}"
+            text = tex
+        print(esc,text)
 
         return text
 
@@ -112,17 +130,31 @@ class LatexPrettyPrinter:
         return "\\textbf{\\texttt{%s}}" % tex
 
     @classmethod
+    def math_code(cls,expr):
+        if isinstance(expr,sympy.Expr):
+            c_formula = codegen(expr)
+            formula = c_formula.split("\n")[-1]
+            formula = formula.replace(".*","*")
+            formula = formula.replace("./","/")
+            formula = "".join(formula.split(" "))
+            return formula
+        else:
+            return expr
+
+
+    @classmethod
     def math_formula(cls,expr):
         if isinstance(expr,sympy.Expr):
-            latex_formula = latex(expr)
+            latex_formula = latex(expr, mul_symbol="dot", fold_short_frac=True)
         else:
             latex_formula = str(expr)
 
         if LatexPrettyPrinter.ESCAPE_STYLE == EscapeStyle.NONE or \
-            LatexPrettyPrinter.ESCAPE_STYLE == EscapeStyle.TABULAR:
+            LatexPrettyPrinter.ESCAPE_STYLE == EscapeStyle.TABULAR or \
+            LatexPrettyPrinter.ESCAPE_STYLE == EscapeStyle.VERBATIM:
             return "$%s$" % latex_formula
         else:
-            raise NotImplementedError
+            raise  Exception("unknown escape style %s" % LatexPrettyPrinter.ESCAPE_STYLE)
 
 class LatexTabular:
 
@@ -142,31 +174,32 @@ class LatexTabular:
     def add_cell(self,text):
         self.rowbuf.append(text)
         self.col_count += 1 
-        assert(len(self.rowbuf) <= self.ncols)
+        assert(self.col_count <= self.ncols)
         return self
 
     def add_multicell(self,k,a,text):
         text = "\\multicolumn{%d}{%s}{%s}" % (k,a,text)
         self.rowbuf.append(text)
         self.col_count += k 
-        assert(self.rowbuf <= self.ncols)
+        assert(self.col_count <= self.ncols)
         return text
 
 
     def fill_and_end(self):
-        n_empty = self.ncols - len(self.rowbuf)
+        n_empty = self.ncols - self.col_count
         for _ in range(n_empty):
             self.add_cell("")
         self.end()
 
     def end(self):
-        assert(len(self.rowbuf) == self.ncols)
+        assert(self.col_count == self.ncols)
         self.ctx.append(self.rowbuf)
         self.rowbuf  = []
         self.col_count = 0
 
     def to_latex(self):
         stmts = []
+        
         def q(txt):
             stmts.append(txt)
         
@@ -182,18 +215,37 @@ class LatexTabular:
         q("}")
         return "\n".join(stmts)
 
+
 class LatexVerbatim:
 
-    def __init__(self):
+    @dataclass
+    class LineBreak:
+        indent_style : str
+        n_indent : int
+        pad : str
+        force: bool
+
+
+    def __init__(self,linewidth=None):
         self.ctx = []
         self.row = []
-        self._insert_comma = False
+        self._delim = None
         self.preproc = []
         self.directives = []
         self.do_gobble = False
+        self.indent_style = " "
+        self.n_indent = 0
+        self.linewidth = linewidth 
         self.add_verbatim_directive("commandchars=\\\\\{\}")
         self.add_verbatim_directive("codes={\catcode`$=3\catcode`_=8}")
 
+  
+    def eat_delim(self):
+        self._delim = None
+
+
+    def delim(self,txt):
+        self._delim = txt
 
     def add_verbatim_directive(self,direc):
         self.directives.append(direc)
@@ -207,54 +259,119 @@ class LatexVerbatim:
 
     def add_token(self,text):
         assert(isinstance(text,str))
-        if self._insert_comma:
-            self.row.append(",")
-            self._insert_comma = False 
+        if not self._delim is None:
+            self.ctx.append(self._delim)
+            self._delim = None
 
         if not self.do_gobble:
-            self.row.append(text)
+            self.ctx.append(text)
         else:
-            self.row[-1] += text
+            self.ctx[-1] += text
             self.do_gobble = False
         return self
-     
-    def eat_comma(self):
-        self._insert_comma = False
+    
+    def add_space(self):
+        self.add_token(" ")
 
+    def indent(self):
+        self.n_indent += 1
 
-    def comma(self):
-        self._insert_comma = True
+    def unindent(self):
+        self.n_indent -= 1
+
+    def linebreak(self,pad=""):
+        lb = LatexVerbatim.LineBreak(indent_style=self.indent_style,n_indent=self.n_indent,pad=pad, force=False)
+        self.ctx.append(lb)
 
     def newline(self):
-        self.ctx.append(" ".join(self.row)+"\n")
-        self.row = []
+        lb = LatexVerbatim.LineBreak(indent_style=self.indent_style,n_indent=self.n_indent,pad="",force=True)
+        self.ctx.append(lb)
 
     def to_latex(self):
         stmts = []
         def q(txt):
+            assert(isinstance(txt,str))
             stmts.append(txt)
+        
+        lb_ctx = []
+        buf = []
+        pretty_buf = []
+        nchars = 0
+        for tok in self.ctx:
+            if isinstance(tok, LatexVerbatim.LineBreak):
+                lb_ctx.append((nchars,tok,buf,pretty_buf))
+                buf = []
+                pretty_buf = []
+                nchars = 0
+            else:
+                txt = LatexNodes2Text().latex_to_text(tok)
+                txt = txt.replace("\\","")
+                nchars += len(txt)
+                buf.append(tok)
+                pretty_buf.append(txt)
 
-        incantation = ",".join(self.directives) 
+        if not(len(buf) == 0):
+            raise Exception("must end verbatim in a linebreak or newline")
+
+        incantation = ",".join(self.directives)
+
 
         #"codes={\catcode‘$=3\catcode‘^=7"
         q("{")
+        q("\n")
         for pre in self.preproc:
             q(pre)
+            q("\n")
+
         q("\\begin{Verbatim}[%s]\n" % incantation)
-        for st in self.ctx:
-            q(st)
-        q("\\end{Verbatim}\n")
+        lw = 0
+        nlines = 0
+        for idx,(width,lb,buf,prettybuf) in enumerate(lb_ctx):
+            for b in buf:
+                print(b)
+                q(b)
+
+            do_linebreak = True
+            if self.linewidth is None \
+                or idx == len(lb_ctx)-1 \
+                or (lb.force and lw + width> 0):
+                do_linebreak = True
+
+            elif not self.linewidth is None:
+                currbuf = width+lw 
+                nextbuf = currbuf + lb_ctx[idx+1][0]
+                do_linebreak = (nextbuf > self.linewidth)
+                print(prettybuf)
+                print("break",do_linebreak)
+                
+                
+            if do_linebreak:
+                q("\n")
+                q(lb.indent_style*lb.n_indent)
+                lw = 0
+                nlines += 1
+            else:
+                q(lb.pad)
+            lw += width
+
+        q("\\end{Verbatim}")
+        q("\n")
         q("}")
+        print("generated num-lines=%d" % nlines)
+
 
         return "".join(stmts)
 
 
 
 
-LatexPrettyPrinter.set_color(Terms.LITERAL, "deepred")
+LatexPrettyPrinter.set_color(Terms.LITERAL, "burntorange")
 LatexPrettyPrinter.set_color(Terms.VARIABLE, "deepblue")
+LatexPrettyPrinter.set_color(Terms.KEYWORD, "ultraviolet")
 LatexPrettyPrinter.set_color(Terms.SYNTAX, "black")
+LatexPrettyPrinter.set_color(Terms.EXPRESSION, "green")
 LatexPrettyPrinter.set_style(Terms.SYNTAX, TextStyle.BOLD)
+LatexPrettyPrinter.set_style(Terms.KEYWORD, TextStyle.BOLD)
 
 def write_file(filename,text):
     direc = "tex-outputs"

@@ -15,8 +15,8 @@ class CDGLang:
         self._production_rules= {}
         self._validation_rules = {}
 
-    def edge_types(self):
-        if not self.inherits is None:
+    def edge_types(self,inherited=True):
+        if not self.inherits is None and inherited:
             for n in self.inherits.edge_types():
                 yield n
 
@@ -35,6 +35,9 @@ class CDGLang:
             yield prod 
 
     def is_inherited(self,val):
+        if self.inherits is None:
+            return False
+
         if val in self.inherits.node_types():
             return True
         
@@ -43,8 +46,8 @@ class CDGLang:
 
         return False
 
-    def node_types(self):
-        if not self.inherits is None:
+    def node_types(self,inherited=True):
+        if not self.inherits is None and inherited:
             for n in self.inherits.node_types():
                 yield n
 
@@ -85,6 +88,6 @@ class CDGLang:
 
         prefix = format_filename(self.name)
         suffix = format_filename(suffix)
-        filename = "lang_%s_%s.%s" % (prefix, suffix, extension)
+        filename = "lang-%s-%s.%s" % (prefix, suffix, extension)
         return filename
 

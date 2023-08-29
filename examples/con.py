@@ -72,6 +72,7 @@ from itertools import product
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 from ark.compiler import ArkCompiler
 from ark.rewrite import RewriteGen
 # from ark.solver import SMTSolver
@@ -81,11 +82,13 @@ from ark.specification.specification import CDGSpec
 from ark.cdg.cdg import CDG
 from ark.specification.cdg_types import NodeType, EdgeType
 from ark.specification.production_rule import ProdRule
-from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME
+from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME, RuleKeyword
+from ark.specification.range import Range
 
 # visualization scripts
 from ark.cdg.cdg_lang import CDGLang
 import ark.visualize.latex_gen as latexlib
+import ark.visualize.latex_gen_upd as latexlibnew
 import ark.visualize.graphviz_gen as graphvizlib
 
 parser = ArgumentParser()
@@ -136,6 +139,7 @@ if OSC_TYPE == 1 and (OFFSET_RSTD or SCALE_RSTD):
 
 obc_lang = CDGLang("obc")
 
+
 # Phase of an oscillator:
 # lock_fn: injection locking, e.g., omeag_s sin (2 phi)
 # osc_fn: coupling, e.g., omega_c sin (phi_i - phi_j)
@@ -149,7 +153,9 @@ Coupling = EdgeType(name='Coupling', attr_def=[AttrDef('k', attr_type=float)])
 Osc1 = NodeType(name='Osc1', base=Osc)
 Osc2 = NodeType(name='Osc2', base=Osc)
 
-obc_lang.add_types(Osc,Coupling,Osc1,Osc2)
+Osc_vis = NodeType(name='Osc', order=1)
+
+obc_lang.add_types(Osc_vis,Coupling)
 latexlib.type_spec_to_latex(obc_lang)
 
 Coupling_distorted = None
@@ -162,10 +168,11 @@ if OFFSET_RSTD and SCALE_RSTD:
                                                             rstd=SCALE_RSTD)])
 elif OFFSET_RSTD:
     offset_std = OFFSET_RSTD * 2 * F_2
-    Coupling_distorted = EdgeType(name='Coupling_distorted', base=Coupling,
+    offset_std_norm = OFFSET_RSTD * 2 * F_2 / (1.2 * F_2)
+    Coupling_distorted = EdgeType(name='Cpl_ofs', base=Coupling,
                                   attr_def=[AttrDefMismatch('offset', attr_type=float,
-                                                            std=offset_std),
-                                            AttrDef('scale', attr_type=float)])
+                                                            std=offset_std_norm, attr_range=Range(exact=0))])
+                                            # AttrDef('scale', attr_type=float)])
 elif SCALE_RSTD:
     Coupling_distorted = EdgeType(name='Coupling_distorted', base=Coupling,
                                   attr_def=[AttrDef('offset', attr_type=float),
@@ -173,7 +180,7 @@ elif SCALE_RSTD:
                                                             rstd=SCALE_RSTD)])
                                                         
 if not Coupling_distorted is None:
-    hw_obc_lang = CDGLang("hwobc-%f-%f" % (OFFSET_RSTD,SCALE_RSTD), inherits=obc_lang)
+    hw_obc_lang = CDGLang("ofs-obc", inherits=obc_lang)
     hw_obc_lang.add_types(Coupling_distorted)
     latexlib.type_spec_to_latex(hw_obc_lang)
 
@@ -184,8 +191,10 @@ def locking_fn_1(t, x, a0, tau):
     return a0 * (1 - np.exp(-t / tau)) * np.sin(2 * x)
 
 def locking_fn_2(x):
-    """Injection locking function from [2]"""
-    return 2 * 795.8e6 * np.sin(2 * np.pi * x)
+    """Injection locking function from [2]
+    Modify the leading coefficient to 1.2 has a better outcome
+    """
+    return 1.2 * 795.8e6 * np.sin(2 * np.pi * x)
 
 def coupling_fn_1(x):
     """Coupling function from [1]"""
@@ -205,13 +214,22 @@ def zero_noise(_):
 
 r_cp_src = ProdRule(Coupling, Osc, Osc, SRC, - EDGE.k * SRC.osc_fn(VAR(SRC) - VAR(DST)))
 r_cp_dst = ProdRule(Coupling, Osc, Osc, DST, - EDGE.k * DST.osc_fn(VAR(DST) - VAR(SRC)))
-obc_lang.add_production_rules(r_cp_src,r_cp_dst)
+r_lock = ProdRule(Coupling, Osc, Osc, SELF, - SRC.lock_fn(VAR(SRC)))
+
+SIN = RuleKeyword('sin')
+SIN2 = RuleKeyword('sin2')
+
+# placeholder to reduce manual work a bit
+r_cp_src_vis = ProdRule(Coupling, Osc_vis, Osc_vis, SRC, - EDGE.k * SIN.x * (VAR(SRC) - VAR(DST)))
+r_cp_dst_vis = ProdRule(Coupling, Osc_vis, Osc_vis, DST, - EDGE.k * SIN.x * (VAR(DST) - VAR(SRC)))
+r_lock_vis = ProdRule(Coupling, Osc_vis, Osc_vis, SELF, - SIN2.x * (VAR(SRC)))
 
 r_lock_1 = ProdRule(Coupling, Osc1, Osc1, SELF,
-                    - SELF.lock_fn(TIME, VAR(SELF), A0, TAU) - SELF.noise_fn(NOIS_STD))
+                    - SRC.lock_fn(TIME, VAR(SRC), A0, TAU) - SRC.noise_fn(NOIS_STD))
 r_lock_2 = ProdRule(Coupling, Osc2, Osc2, SELF,
-                    - SELF.lock_fn(VAR(SELF)) - SELF.noise_fn(NOIS_STD))
-obc_lang.add_production_rules(r_cp_src,r_cp_dst,r_lock_1,r_lock_2)
+                    - SRC.lock_fn(VAR(SRC)))
+                    # - SRC.lock_fn(VAR(SRC)) - SRC.noise_fn(NOIS_STD))
+obc_lang.add_production_rules(r_cp_src_vis,r_cp_dst_vis, r_lock_vis)
 
 cdg_types = [Osc, Coupling, Osc1, Osc2]
 production_rules = [r_cp_src, r_cp_dst, r_lock_1, r_lock_2]
@@ -226,12 +244,21 @@ if Coupling_distorted:
                               - EDGE.k * (EDGE.scale * SRC.osc_fn(VAR(DST) - VAR(SRC)) \
                                           + EDGE.offset))
     production_rules += [r_cp_src_distorted, r_cp_dst_distorted]
-    hw_obc_lang.add_production_rules(r_cp_src_distorted, r_cp_dst_distorted)
+
+    r_cp_src_distorted_vis = ProdRule(Coupling_distorted, Osc, Osc, SRC,
+                              - EDGE.k * (SIN.x * (VAR(SRC) - VAR(DST)) \
+                                           + EDGE.offset))
+    r_cp_dst_distorted_vis = ProdRule(Coupling_distorted, Osc, Osc, DST,
+                              - EDGE.k * (SIN.x * (VAR(DST) - VAR(SRC)) \
+                                          + EDGE.offset))
+    hw_obc_lang.add_production_rules(r_cp_src_distorted_vis, r_cp_dst_distorted_vis)
 
 
 latexlib.production_rules_to_latex(obc_lang)
+latexlibnew.language_to_latex(obc_lang)
 if not Coupling_distorted is None:
     latexlib.production_rules_to_latex(hw_obc_lang)
+    latexlibnew.language_to_latex(hw_obc_lang)
 
 
 def create_max_cut_con(connection_mat, osc_nt: NodeType, cp_et: EdgeType, noise_fn: FunctionType):
@@ -287,19 +314,28 @@ def gen_max_cut_prob(seed, w_n_bits=W_N_BITS):
 
 def plot_oscillation(time_points, sol, mapping, omega, scaling, title=None):
     """Plot the oscillation of the oscillator"""
+    mpl.rcParams.update(mpl.rcParamsDefault)
+    plt.rcParams.update({
+        "text.usetex": True,
+        "font.size": 15,
+        "font.family": "Helvetica"
+    })
+    cycle = time_points / T_2
     fig, ax = plt.subplots(nrows=2)
     for node, idx in mapping.items():
         phi = sol.sol(time_points)[idx].T * scaling
-        ax[1].plot(time_points,
+        ax[1].plot(cycle,
                 np.sin(omega * time_points + phi),
                 label=node.name)
-        ax[0].plot(time_points, phi)
-    ax[0].set_title('phase (phi)')
-    ax[1].set_title('sin(wt + phi)')
-    ax[-1].set_xlabel('time')
+        ax[0].plot(cycle, phi)
+    ax[0].set_title(r'$\phi$')
+    ax[0].set_ylabel('phase (rad)')
+    ax[1].set_title(r'$\sin{(\omega t + \phi)}$')
+    ax[1].set_ylabel('Amplitude (V)')
+    ax[1].set_xlabel('\# of cycle (t/T)')
     plt.tight_layout()
     if title:
-        plt.savefig(title)
+        plt.savefig(title+'.pdf')
     plt.show()
 
 def phase_to_assignment(phase, atol=ATOL, rtol=RTOL):
@@ -357,8 +393,9 @@ def main():
         nodes, graph = create_max_cut_con(connection_mat, osc_nodetype, cp_et, noise_fn)
 
         lang = obc_lang if Coupling_distorted is None else hw_obc_lang
-        graphvizlib.cdg_to_graphviz("con", "con_%d_inh" % seed, lang,graph,inherited=True)
-        graphvizlib.cdg_to_graphviz("con", "con_%d" % seed, lang,graph,inherited=False)
+        if seed == 0:
+            graphvizlib.cdg_to_graphviz("con", "con_%d_inh" % seed, lang,graph,inherited=True)
+            graphvizlib.cdg_to_graphviz("con", "con_%d" % seed, lang,graph,inherited=False)
         
         spec = CDGSpec(cdg_types, production_rules, None)
         compiler = ArkCompiler(rewrite=RewriteGen())
@@ -374,8 +411,10 @@ def main():
                                                    for node in mapping.keys()})
         sol = compiler.prog(time_range, init_states=init_states,
                             sim_seed=seed, dense_output=True)
-        if PLOT:
-            plot_oscillation(time_points, sol, mapping, omega, scaling)
+        if seed == 1 and PLOT:
+            plot_oscillation(time_points, sol, mapping, omega, scaling,
+                                title=f'{osc_nodetype.name}, {cp_et.name}'
+                             )
         node_to_assignment = {}
         sync_failed = False
         for node, idx in mapping.items():

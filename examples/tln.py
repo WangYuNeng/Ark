@@ -26,17 +26,17 @@ from ark.reduction import SUM
 # visualization scripts
 from ark.cdg.cdg_lang import CDGLang
 import ark.visualize.latex_gen as latexlib
+import ark.visualize.latex_gen_upd as latexlibnew
 import ark.visualize.graphviz_gen as graphvizlib
 
 
 # Ark specification
 lc_range, gr_range = Range(min=0.1e-9, max=10e-9), Range(min=0)
-w_range = Range(exact=1.0)
+w_range = Range(min=0.5, max=2)
 
 tln_lang = CDGLang("tln")
 
 # Ideal implementation
-
 # Parallel capacitor(c=capacitance) and resistor(g=conductance)
 IdealV = NodeType(name='IdealV', order=1,
                   reduction=SUM,
@@ -58,14 +58,14 @@ IdealE = EdgeType(name='IdealE',
 # Voltage source in Thevenin equivalent
 InpV = NodeType(name='InpV',
                 order=0,
-                attr_def=[AttrDef('fn', attr_type=FunctionType),
+                attr_def=[AttrDef('fn', attr_type=FunctionType,nargs=1),
                        AttrDef('r', attr_type=float, attr_range=gr_range)
                        ])
 
 # Current source in Thevenin equivalent
 InpI = NodeType(name='InpI',
                 order=0,
-                attr_def=[AttrDef('fn', attr_type=FunctionType),
+                attr_def=[AttrDef('fn', attr_type=FunctionType,nargs=1),
                           AttrDef('g', attr_type=float, attr_range=gr_range)
                           ])
 tln_lang.add_types(IdealV, IdealI, IdealE, InpV, InpI)
@@ -85,16 +85,16 @@ def pulse(t, amplitude=1, delay=0, rise_time=5e-9, fall_time=5e-9, pulse_width=1
 
 
 # Production rules
-_v2i = ProdRule(IdealE, IdealV, IdealI, SRC, -EDGE.ws*VAR(DST)/SRC.c)
-v2_i = ProdRule(IdealE, IdealV, IdealI, DST, EDGE.wt*VAR(SRC)/DST.l)
-_i2v = ProdRule(IdealE, IdealI, IdealV, SRC, -EDGE.ws*VAR(DST)/SRC.l)
-i2_v = ProdRule(IdealE, IdealI, IdealV, DST, EDGE.wt*VAR(SRC)/DST.c)
+_v2i = ProdRule(IdealE, IdealV, IdealI, SRC, -VAR(DST)/SRC.c)
+v2_i = ProdRule(IdealE, IdealV, IdealI, DST, VAR(SRC)/DST.l)
+_i2v = ProdRule(IdealE, IdealI, IdealV, SRC, -VAR(DST)/SRC.l)
+i2_v = ProdRule(IdealE, IdealI, IdealV, DST, VAR(SRC)/DST.c)
 vself = ProdRule(IdealE, IdealV, IdealV, SELF, -VAR(SRC)*SRC.g/SRC.c)
 iself = ProdRule(IdealE, IdealI, IdealI, SELF, -VAR(SRC)*SRC.r/SRC.l)
-inpv2_v = ProdRule(IdealE, InpV, IdealV, DST, EDGE.wt*(SRC.fn(TIME)-VAR(DST))/DST.c/SRC.r)
-inpv2_i = ProdRule(IdealE, InpV, IdealI, DST, EDGE.wt*(SRC.fn(TIME)-VAR(DST)*SRC.r)/DST.l)
-inpi2_v = ProdRule(IdealE, InpI, IdealV, DST, EDGE.wt*(SRC.fn(TIME)-VAR(DST)*SRC.g)/DST.c)
-inpi2_i = ProdRule(IdealE, InpI, IdealI, DST, EDGE.wt*(SRC.fn(TIME)-VAR(DST))/DST.l/SRC.g)
+inpv2_v = ProdRule(IdealE, InpV, IdealV, DST, (SRC.fn(TIME)-VAR(DST))/DST.c/SRC.r)
+inpv2_i = ProdRule(IdealE, InpV, IdealI, DST, (SRC.fn(TIME)-VAR(DST)*SRC.r)/DST.l)
+inpi2_v = ProdRule(IdealE, InpI, IdealV, DST, (SRC.fn(TIME)-VAR(DST)*SRC.g)/DST.c)
+inpi2_i = ProdRule(IdealE, InpI, IdealI, DST, (SRC.fn(TIME)-VAR(DST))/DST.l/SRC.g)
 prod_rules = [_v2i, v2_i, _i2v, i2_v, vself, iself, inpv2_v, inpv2_i, inpi2_v, inpi2_i]
 
 tln_lang.add_production_rules(*prod_rules)
@@ -117,20 +117,38 @@ val_rules = [v_val, i_val, inpv_val, inpi_val]
 tln_lang.add_validation_rules(*val_rules)
 latexlib.validation_rules_to_latex(tln_lang)
 
-hw_tln_lang = CDGLang("hwtln",inherits=tln_lang)
+hw_tln_lang = CDGLang("gmc-tln",inherits=tln_lang)
 # Nonideal implementation with 10% random variation
-MmV = NodeType(name='MmV', base=IdealV,
+MmV = NodeType(name='Vm', base=IdealV,
                attr_def=[AttrDefMismatch('c', attr_type=float, attr_range=lc_range, rstd=0.1)])
-MmI = NodeType(name='MmI', base=IdealI,
+MmI = NodeType(name='Im', base=IdealI,
                attr_def=[AttrDefMismatch('l', attr_type=float, attr_range=lc_range, rstd=0.1)])
-MmE = EdgeType(name='MmE', base=IdealE,
-               attr_def=[AttrDefMismatch('ws', attr_type=float, attr_range=w_range, rstd=0.1)])
+MmE = EdgeType(name='Em', base=IdealE,
+               attr_def=[AttrDefMismatch('ws', attr_type=float, attr_range=w_range, rstd=0.1),
+                         AttrDefMismatch('wt', attr_type=float, attr_range=w_range, rstd=0.1)])
 hw_tln_lang.add_types(MmV, MmI, MmE)
+
+_v2i_mm = ProdRule(MmE, IdealV, IdealI, SRC, -EDGE.ws*VAR(DST)/SRC.c)
+v2_i_mm = ProdRule(MmE, IdealV, IdealI, DST, EDGE.wt*VAR(SRC)/DST.l)
+_i2v_mm = ProdRule(MmE, IdealI, IdealV, SRC, -EDGE.ws*VAR(DST)/SRC.l)
+i2_v_mm = ProdRule(MmE, IdealI, IdealV, DST, EDGE.wt*VAR(SRC)/DST.c)
+inpv2_v_mm = ProdRule(MmE, InpV, IdealV, DST, EDGE.wt*(SRC.fn(TIME)-VAR(DST))/DST.c/SRC.r)
+inpv2_i_mm = ProdRule(MmE, InpV, IdealI, DST, EDGE.wt*(SRC.fn(TIME)-VAR(DST)*SRC.r)/DST.l)
+inpi2_v_mm = ProdRule(MmE, InpI, IdealV, DST, EDGE.wt*(SRC.fn(TIME)-VAR(DST)*SRC.g)/DST.c)
+inpi2_i_mm = ProdRule(MmE, InpI, IdealI, DST, EDGE.wt*(SRC.fn(TIME)-VAR(DST))/DST.l/SRC.g)
+hw_prod_rules = [_v2i_mm, v2_i_mm, _i2v_mm, i2_v_mm, inpv2_v_mm, inpv2_i_mm, inpi2_v_mm, inpi2_i_mm]
+hw_tln_lang.add_production_rules(*hw_prod_rules)
+latexlib.production_rules_to_latex(hw_tln_lang)
 latexlib.type_spec_to_latex(hw_tln_lang)
+
+prod_rules += hw_prod_rules
 
 cdg_types = [IdealV, IdealI, IdealE, InpV, InpI, MmV, MmI, MmE]
 help_fn = [pulse]
 spec = CDGSpec(cdg_types, prod_rules, val_rules)
+
+latexlibnew.language_to_latex(tln_lang)
+latexlibnew.language_to_latex(hw_tln_lang)
 
 validator = ArkValidator(solver=SMTSolver())
 compiler = ArkCompiler(rewrite=RewriteGen())
@@ -141,16 +159,20 @@ def create_tline(v_nt: NodeType, i_nt: NodeType,
                     -> tuple[CDG, list[CDGNode], list[CDGNode]]:
     """Use the given node/edge types to create a single line"""
     graph = CDG()
+    if e_nt == IdealE:
+        kwargs = {}
+    elif e_nt == MmE:
+        kwargs = {'ws': 1.0, 'wt': 1.0}
     current_in = InpI(fn=pulse, g=0.0)
     v_nodes = [v_nt(c=1e-9, g=0.0) for _ in range(line_len)] + [v_nt(c=1e-9, g=1.0)]
     i_nodes = [i_nt(l=1e-9, r=0.0) for _ in range(line_len)]
     for i in range(line_len):
-        graph.connect(e_nt(ws=1.0, wt=1.0), v_nodes[i], i_nodes[i])
-        graph.connect(e_nt(ws=1.0, wt=1.0), i_nodes[i], v_nodes[i + 1])
-        graph.connect(IdealE(ws=1.0, wt=1.0), v_nodes[i], v_nodes[i])
-        graph.connect(IdealE(ws=1.0, wt=1.0), i_nodes[i], i_nodes[i])
-    graph.connect(e_nt(ws=1.0, wt=1.0), current_in, v_nodes[0])
-    graph.connect(e_nt(ws=1.0, wt=1.0), v_nodes[-1], v_nodes[-1])
+        graph.connect(e_nt(**kwargs), v_nodes[i], i_nodes[i])
+        graph.connect(e_nt(**kwargs), i_nodes[i], v_nodes[i + 1])
+        graph.connect(IdealE(), v_nodes[i], v_nodes[i])
+        graph.connect(IdealE(), i_nodes[i], i_nodes[i])
+    graph.connect(e_nt(**kwargs), current_in, v_nodes[0])
+    graph.connect(e_nt(**kwargs), v_nodes[-1], v_nodes[-1])
     return graph, v_nodes, i_nodes
 
 if __name__ == '__main__':
@@ -169,7 +191,9 @@ if __name__ == '__main__':
         graphvizlib.cdg_to_graphviz("tln",name,hw_tln_lang,graph,inherited=False)
         graphvizlib.cdg_to_graphviz("tln",name+"_inh",hw_tln_lang,graph,inherited=True)
 
-        validator.validate(cdg=graph, cdg_spec=spec)
+        failed, _ = validator.validate(cdg=graph, cdg_spec=spec)
+        if failed:
+            raise ValueError("Validation failed!!")
         compiler.compile(cdg=graph, cdg_spec=spec, help_fn=help_fn, import_lib={})
         mapping = compiler.var_mapping
         init_states = compiler.map_init_state({node: 0 for node in mapping.keys()})

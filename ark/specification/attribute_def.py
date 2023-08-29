@@ -4,16 +4,20 @@ Attribute class for CDGType.
 from typing import NewType, Union, Optional
 from types import FunctionType
 from ark.specification.range import Range
+from pylatexenc.latex2text import LatexNodes2Text
 
 AttrImpl = NewType('AttrImpl', Union[int, float, FunctionType]) # why pylint error?
 
 
 class AttrDef:
     """Ａttribute Definition for a CDGType."""
-    def __init__(self, name: str, attr_type: type, attr_range: Optional[Range]=None):
+    def __init__(self, name: str, attr_type: type, attr_range: Optional[Range]=None, nargs:Optional[int]=None):
         self.name = name
         self.type = attr_type
         self.valid_range = attr_range
+        self.nargs = nargs
+        if self.type == FunctionType:
+            assert(not nargs is None)
 
     def __repr__(self) -> str:
         return f'AttrDef(name={self.name}, type={self.type}, \

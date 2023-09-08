@@ -15,6 +15,12 @@ class CDGSpec:
         self._validation_rules = validation_rules
         self._val_rule_dict = self._collect_type_to_val_rule()
 
+    def cdg_type(self, name):
+        for x in self._cdg_types:
+            if x.name == name:
+                return x
+        raise Exception("unknown type <%s>" % name)
+    
     @property
     def cdg_types(self) -> list[CDGType]:
         """Access CDG types in the spec."""

@@ -200,6 +200,58 @@ class ArkCompiler():
             vals[ele_to_idx[ele]] = val
         return vals
 
+    def compile_to_sympy(self, cdg: CDG, cdg_spec: CDGSpec, help_fn: list[FunctionType]):
+        def build_dynamics(node):
+            reduction = node.reduction
+            rhs = []
+            for edge in node.edges:
+                src, dst = edge.src, edge.dst
+                gen_rule = match_prod_rule(rule_dict=rule_dict, edge=edge,
+                                            src=src, dst=dst,tgt=node.which_tgt(edge))
+                if gen_rule is not None:
+                    self._rewrite.mapping = gen_rule.get_rewrite_mapping(edge=edge)
+                    rhs_expr = apply_gen_rule(rule=gen_rule, transformer=self._rewrite)
+                    if edge.switchable:
+                        body = ast.BinOp(left=rhs_expr.body, op=reduction.ast_switch,
+                                            right=set_ctx(mk_var(switch_attr(edge.name)),
+                                                        ast.Load))
+                        rhs_expr = ast.Expression(body=body)
+                    rhs.append(rhs_expr)
+                else:
+                    raise Exception("unknown rule for src=%s, dst=%s, edge=%s target=%s" % (src.cdg_type, dst.cdg_type, edge.cdg_type, node.which_tgt(edge).cdg_type))
+
+            rhs_expr = concat_expr(rhs, reduction.ast_op)
+            return rhs_expr
+        
+        user_def_fns = self._compile_user_def_fn(help_fn)
+        attr_var_def, attr_mapping = self._compile_attribute_var(cdg, inline=True)
+        self._rewrite.attr_mapping = attr_mapping
+        nodes = cdg.nodes
+        rule_dict = cdg_spec.prod_rule_dict
+        
+        expression_map  = {}
+        for node in nodes:
+            if node.order >= 1:
+                continue
+            
+            expr = build_dynamics(node)
+            expression_map[mkvar(node.name, order=node.order)] = expr
+        
+        print(expression_map)
+        for node in  nodes:
+            if not (node.order <= 1):
+                raise Exception("currently, we only support order 1, found order %d" % node.order)
+            
+            vname = ddt(node.name, order=node.order)
+            rhs_expr = build_dynamics(node)
+            lhs_var = mk_var(vname)
+            order = node.order
+            print(lhs_var)
+            print(rhs_expr)
+            input()
+        
+    
+
     def compile(self, cdg: CDG, cdg_spec: CDGSpec, help_fn: list[FunctionType], import_lib: dict,
                 verbose: int = 0, inline_attr: bool = False):
         '''

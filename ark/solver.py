@@ -2,8 +2,8 @@ from abc import ABC, abstractmethod
 from pysmt.shortcuts import Symbol, And, GE, LE, Plus, Equals, Int, get_model
 from pysmt.typing import INT
 import numpy as np
+from ark.specification.range import Range
 
-from ark.specification.constraint import Constraint, DegreeConstraint
 
 class Solver(ABC):
 
@@ -16,11 +16,11 @@ class Solver(ABC):
 
 class SMTSolver(Solver):
 
-    def __init__(self) -> None:
-        super().__init__()
-
-    def solve_validation_matrix(self, matrix, constraints):
-
+    def solve_validation_matrix(self, matrix: list[list[bool]], constraints: list[Range]):
+        """
+        Solve the validation matrix using SMT solver.
+        TODO: Prettify the code, e.g., rename "constraints"
+        """
         variables = np.array([[Int(0) for _ in row] for row in matrix])
         row_constraints = []
         for i, row in enumerate(matrix):
@@ -30,29 +30,11 @@ class SMTSolver(Solver):
             row_constraints.append(Equals(Plus(variables[i, :].tolist()), Int(1)))
         col_constraints = []
         for j, constraint in enumerate(constraints):
-            op, val = self.interpret_constraint(constraint)
-            if op != None:
-                col_constraints.append(op(Plus(variables[:, j].tolist()), val))
+            summation = Plus(variables[:, j].tolist())
+            col_constraints.append(constraint.to_smt(summation))
         problem = And(*row_constraints, *col_constraints)
         model = get_model(problem)
         if model:
-            # print(model)
-            pass
+            return True
         else:
-            assert False, 'Can\'t satisfy constraints!'
-    
-    def interpret_constraint(self, constraint: Constraint):
-
-        if isinstance(constraint, DegreeConstraint):
-            expr = constraint.expr
-            if expr == '*':
-                return None, None
-            elif expr.startswith('='):
-                val = int(expr[1:])
-                return Equals, Int(val)
-            elif expr.startswith('<='):
-                val = int(expr[2:])
-                return LE, Int(val)
-            else:
-                raise NotImplementedError
-        raise NotImplementedError
+            return False

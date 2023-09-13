@@ -1,195 +1,219 @@
-from ark.globals import Direction
-from ark.specification.types import CDGType, StatefulNodeType, NodeType, EdgeType
-from collections import OrderedDict
-import warnings
+from typing import Mapping
+from ark.specification.rule_keyword import SRC, DST, SELF, Target
+from ark.specification.attribute_def import AttrDef, AttrImpl
+from ark.reduction import Reduction
+# from ark.specification.types import CDGType, NodeType, EdgeType
 
 class CDGElement:
+    """Base class for CDG nodes and edges."""
+    attr_def: Mapping[str, AttrDef]
 
-    def __init__(self, id: int, name: str, cdg_type: CDGType, attrs: dict) -> None:
-        self._id = id
-        self._name = name
-        self._cdg_type = cdg_type
-        self._attrs = attrs
+    def __init__(self, cdg_type: "CDGType", name: str, **attrs: Mapping[str, AttrImpl]) -> None:
+        self.cdg_type = cdg_type
+        self.name = name
+        self.attrs = attrs
 
-    @property
-    def id(self) -> int:
-        return self._id
-        
-    @property
-    def name(self)-> str:
-        return self._name
+    def __str__(self) -> str:
+        return self.name
 
-    @property
-    def cdg_type(self) -> CDGType:
-        return self._cdg_type
+    def get_attr_str(self, attr_name: str) -> str:
+        """Return the string representation of the attribute value."""
+        val = self.attrs[attr_name]
+        return self.attr_def[attr_name].attr_str(val)
 
-    @property
-    def attrs(self) -> dict:
-        return self._attrs
-
-    def __repr__(self) -> str:
-        return '{}({}, {}, {}, {})'.format(self.__class__.__name__, self._id, self.name, self.cdg_type, self.attrs)
-
-    def __eq__(self, __o: object) -> bool:
-        return self._id == __o.id
-    
-    def __hash__(self) -> int:
-        return self.id.__hash__()
-
+def sort_element(elements: list[CDGElement]) -> list[CDGElement]:
+    """Sort CDG elements by their names."""
+    return sorted(elements, key=lambda x: x.name)
 
 class CDGNode(CDGElement):
+    """Constrained Dynamic Graph (CDG) node class."""
 
-    def __init__(self, id: int, name: str, cdg_type: CDGType, attrs: dict) -> None:
-        super().__init__(id, name, cdg_type, attrs)
-        self._edges = set()
+    edges: set["CDGEdge"]
+    reduction: Reduction
 
-    @property
-    def edges(self) -> list:
-        return list(self._edges)
+    def __init__(self, cdg_type: "NodeType", name: str, **attrs) -> None:
+        super().__init__(cdg_type, name, **attrs)
+        self.edges = set()
 
     @property
     def degree(self) -> int:
-        return len(self._edges)
+        """Return the degree of the node."""
+        return len(self.edges)
 
-    def add_edge(self, e):
-        self._edges.add(e)
-    
-    def remove_edge(self, e):
-        self._edges.remove(e)
+    def get_non_switchable(self) -> set["CDGEdge"]:
+        """return all the non-switchable edges"""
+        for edge in self.edges:
+            if not edge.switchable:
+                yield edge
 
-    def is_src(self, edge: 'CDGEdge') -> bool:
+    def get_switchable(self) -> set["CDGEdge"]:
+        """return all the switchable edges"""
+        for edge in self.edges:
+            if edge.switchable:
+                yield edge
+
+    def add_edge(self, edge: "CDGEdge"):
+        """Add the edge to the node."""
+        self.edges.add(edge)
+
+    def remove_edge(self, edge: "CDGEdge"):
+        """Remove the edge from the node."""
+        self.edges.remove(edge)
+
+    def which_tgt(self, edge: "CDGEdge") -> Target:
+        """Return whether this node is src/dst/self of the edge."""
+        if edge.src == edge.dst:
+            return SELF
+        elif self.is_src(edge):
+            return SRC
+        elif self.is_dst(edge):
+            return DST
+
+    def is_src(self, edge: "CDGEdge") -> bool:
+        """Return whether this node is the source of the edge."""
         return edge.src == self
 
-    def is_dst(self, edge: 'CDGEdge') -> bool:
+    def is_dst(self, edge: "CDGEdge") -> bool:
+        """Return whether this node is the destination of the edge."""
         return edge.dst == self
 
-    def is_neighbor(self, node: 'CDGNode') -> bool:
+    def is_neighbor(self, node: "CDGNode") -> bool:
+        """Return whether the node is a neighbor of this node."""
         for edge in self.edges:
             if self.get_neighbor(edge=edge) == node:
                 return True
 
         return False
 
-    def get_direction(self, edge: 'CDGEdge') -> int:
-        if self.is_src(edge) and self.is_dst(edge):
-            return Direction.SELF
-        elif self.is_src(edge):
-            return Direction.OUT
-        elif self.is_dst(edge):
-            return Direction.IN
-        else:
-            assert False, '{} does not connect to {}'.format(self, edge)
-
     def get_neighbor(self, edge: 'CDGEdge'):
+        """Return the neighbor of this node."""
         if self.is_src(edge):
             return edge.dst
         elif self.is_dst(edge):
             return edge.src
         else:
-            assert False, '{} does not connect to {}'.format(self, edge)
+            assert False, f'{self} does not connect to {edge}'
 
     def print_local(self):
+        """Print the local view of this node."""
         print(self.name)
         for edge in self.edges:
             if self.is_src(edge=edge):
-                arrow = '-{}>'.format(edge.name)
+                arrow = f'-{edge.name}>'
             else:
-                arrow = '<{}-'.format(edge.name)
+                arrow = f'<{edge.name}-'
             print('\t', arrow, self.get_neighbor(edge=edge).name)
-            
-
 
 class CDGEdge(CDGElement):
+    """Constrained Dynamic Graph (CDG) edge class."""
 
-    def __init__(self, id: int, name: str, cdg_type: CDGType, attrs: dict, src: CDGNode, dst: CDGNode) -> None:
-        super().__init__(id, name, cdg_type, attrs)
-        self._src = src
-        self._dst = dst
-        
-    def set_src(self, node: CDGNode) -> None:
-        self._src = node
-        
-    def set_dst(self, node: CDGNode) -> None:
-        self._dst = node
-        
+    def __init__(self, cdg_type: "CDGType", name: str, **attrs) -> None:
+        super().__init__(cdg_type, name, **attrs)
+        self._src, self._dst = None, None
+
+    def connect(self, src: CDGNode, dst: CDGNode) -> None:
+        """Connect this edge to two nodes."""
+        if self._src is not None or self._dst is not None:
+            raise RuntimeError('Edge already connected')
+        self._src, self._dst = src, dst
+
     @property
     def src(self) -> CDGNode:
+        """Return the source node of this edge."""
         return self._src
 
     @property
     def dst(self) -> CDGNode:
+        """Return the destination node of this edge."""
         return self._dst
 
+    @property
+    def switchable(self) -> bool:
+        """Return whether this edge is also a switch."""
+        return self._switchable
+
+    @switchable.setter
+    def switchable(self, switchable: bool) -> None:
+        self._switchable = switchable
+
 class CDG:
+    """
+    Constrained Dynamic Graph (CDG) class.
+    """
+
+    _order_to_nodes: list[dict]
 
     def __init__(self) -> None:
-        self._stateful_nodes = OrderedDict()
-        self._stateless_nodes = OrderedDict()
-        self._edges = OrderedDict()
-        self._switches = []
-        self._elements = OrderedDict()
-        self._next_id = 0
-        
-    def _get_id(self) -> int:
-        self._next_id += 1
-        return self._next_id - 1
-    
-    def add_node(self, name: str, cdg_type: CDGType, attrs: dict) -> CDGNode:
-        id = self._get_id()
-        node = CDGNode(id=id, name=name, cdg_type=cdg_type, attrs=attrs)
-        if isinstance(cdg_type, StatefulNodeType):
-            self._stateful_nodes[id] = node
-        elif isinstance(cdg_type, NodeType):
-            self._stateless_nodes[id] = node
-        self._elements[id] = node
-        return node
+        self._order_to_nodes = [set()]
+        self._edges = set()
+        self._switches = set()
 
-    def add_edge(self, name: str, cdg_type: CDGType, attrs: dict, src: CDGNode, dst: CDGNode) -> CDGEdge:
-        id = self._get_id()
-        edge = CDGEdge(id=id, name=name, cdg_type=cdg_type, attrs=attrs, src=src, dst=dst)
+    def connect(self, edge: CDGEdge, src: CDGNode, dst: CDGNode):
+        """Add an edge to the graph."""
+        edge.connect(src=src, dst=dst)
         src.add_edge(edge)
         dst.add_edge(edge)
-        self._edges[id] = edge
-        self._elements[id] = edge
-        return edge
-    
-    def update_edge(self, edge: CDGEdge):
-        id = edge.id
-        self._edges[id] = edge
-        self._elements[id] = edge
-        
-    def delete_node(self, node_id: int) -> None: 
-        node = self._elements[node_id]
-        if isinstance(node.cdg_type, StatefulNodeType):
-            self._stateful_nodes.pop(node.id)
-        elif isinstance(node.cdg_type, NodeType):
-            self._stateless_nodes.pop(node.id)
-        self._elements.pop(node.id)
-        
+        self._add_node(src)
+        self._add_node(dst)
+        self._edges.add(edge)
+        if edge.switchable:
+            self._switches.add(edge)
+
+    def delete_node(self, node: CDGNode) -> None:
+        """Delete a node from the graph.
+        Disconnect edges connected to the node accordingly.
+        """
+        order = node.order
+        self._order_to_nodes[order].remove(node)
+        raise NotImplementedError
+
+    def check_exist(self, element: CDGElement) -> bool:
+        """Check if an element exists in the graph."""
+        if isinstance(element, CDGNode):
+            order = element.order
+            return order < self.ds_order and element in self._order_to_nodes[order]
+        elif isinstance(element, CDGEdge):
+            return element in self._edges
+
     def check_connectivity(self) -> bool:
-        for e in self.edges:
-            if e.src.id not in self._elements:
-                warnings.warn("Source Node of Edge not in graph")
-            elif e.dst.id not in self._elements:
-                warnings.warn("Source Node of Edge not in graph")
-        return True
+        """Check if the graph is well-connected."""
+
+        raise NotImplementedError
+
+    def _add_node(self, node: CDGNode) -> None:
+        """Add a node to the graph."""
+        order = node.order
+        max_order = len(self._order_to_nodes) - 1
+        if order > max_order:
+            self._order_to_nodes += [set() for _ in range(order - max_order)]
+        self._order_to_nodes[order].add(node)
+
+    def nodes_in_order(self, order: int) -> list[CDGNode]:
+        """Return nodes in the graph based on order sorted by node.name.
+
+        If order is -1, return all nodes.
+        """
+        if order == -1:
+            return sort_element(list(set.union(*self._order_to_nodes)))
+        else:
+            return sort_element(list(self._order_to_nodes[order]))
 
     @property
-    def nodes(self) -> list:
-        return list(self._stateful_nodes.values()) + list(self._stateless_nodes.values())
-    
-    @property
-    def stateful_nodes(self) -> list:
-        return list(self._stateful_nodes.values())
+    def nodes(self) -> list[CDGNode]:
+        """Return all nodes in the graph sorted by node.name."""
+        return sort_element(list(set.union(*self._order_to_nodes)))
 
     @property
-    def stateless_nodes(self) -> list:
-        return list(self._stateless_nodes.values())
-    
-    @property
-    def edges(self) -> list:
-        return list(self._edges.values())
+    def edges(self) -> list[CDGEdge]:
+        """Return all edges in the graph sorted by node.name."""
+        return sort_element(list(self._edges))
 
     @property
-    def switches(self) -> list:
-        return self._switches
+    def switches(self) -> list[CDGElement]:
+        """Return all switches in the graph sorted by node.name."""
+        return sort_element(list(self._switches))
+
+    @property
+    def ds_order(self) -> int:
+        """Order of the system of differential equations."""
+        return len(self._order_to_nodes) - 1

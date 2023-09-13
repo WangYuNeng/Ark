@@ -1,80 +1,57 @@
-import ast
-from ark.specification.types import EdgeType, NodeType, StatefulNodeType
-from ark.specification.generation_rule import GenRule
-from ark.specification.validation_rule import ValRule
-from ark.cdg.cdg import CDG, CDGEdge, CDGNode
+from ark.specification.cdg_types import CDGType, NodeType
+from ark.specification.production_rule import ProdRule, ProdRuleId
+from ark.specification.validation_rule import ValRule, ValRuleId
 
 class CDGSpec:
 
-    def __init__(self, cdg_types: list, generation_rules: list, validation_rules: list):
+    def __init__(self, cdg_types: list[CDGType], production_rules: list[ProdRule],
+                 validation_rules: list[ValRule]):
         self._cdg_types = cdg_types
-        self._generation_rules = generation_rules
-        self._gen_rule_dict = self._collect_gen_identifier()
-        self._gen_rule_class = self._check_class(generation_rules)
+        self._production_rules = production_rules
+        self._prod_rule_dict = self._collect_prod_identifier()
+
+        if validation_rules is None:
+            validation_rules = []
         self._validation_rules = validation_rules
-        self._val_rule_dict = self._collect_val_identifier()
-        self._val_rule_class = self._check_class(validation_rules)
+        self._val_rule_dict = self._collect_type_to_val_rule()
 
     @property
-    def cdg_types(self):
+    def cdg_types(self) -> list[CDGType]:
+        """Access CDG types in the spec."""
         return self._cdg_types
 
     @property
-    def generation_rules(self):
-        return self._generation_rules
+    def production_rules(self) -> list[ProdRule]:
+        """Access production rules in the spec."""
+        return self._production_rules
 
     @property
-    def gen_rule_dict(self):
-        return self._gen_rule_dict
+    def prod_rule_dict(self) -> dict[ProdRuleId, ProdRule]:
+        """Access mapping from production rule identifier to production rule."""
+        return self._prod_rule_dict
 
     @property
-    def gen_rule_class(self):
-        return self._gen_rule_class
-
-    @property
-    def validation_rules(self):
+    def validation_rules(self) -> list[ValRule]:
+        """Access validation rules in the spec."""
         return self._validation_rules
 
     @property
-    def val_rule_dict(self):
+    def val_rule_dict(self) -> dict[NodeType, ValRule]:
+        """Access mapping from validation rule identifier to validation rule."""
         return self._val_rule_dict
 
-    @property
-    def val_rule_class(self):
-        return self._val_rule_class    
+    def _collect_type_to_val_rule(self) -> dict[NodeType, ValRule]:
+        return {val_rule.tgt_node_type: val_rule for val_rule in self.validation_rules}
 
-    def apply_gen_rule(self, edge: CDGEdge, src: CDGNode, dst: CDGNode, tgt: bool):
-        '''
-        Call the corresponding generation rule to walk the ast and generate expr
-        '''
-        id = GenRule.get_identifier(tgt_et=edge.cdg_type, src_nt=src.cdg_type, dst_nt=dst.cdg_type, gen_tgt=tgt)
-        rule = self._genid_dict[id]
-        return rule.apply(edge=edge, src_node=src, dst_node=dst)
+    def _collect_prod_identifier(self) -> dict[ProdRuleId, ProdRule]:
 
-    def _collect_val_identifier(self):
-        rule: ValRule
-        val_type_dict = {}
-        for rule in self.validation_rules:
-            type_name = rule.tgt_node_type.type_name
-            if type_name in val_type_dict:
-                val_type_dict[type_name].append(rule)
-            else:
-                val_type_dict[type_name] = [rule]
-        return val_type_dict
-
-    def _collect_gen_identifier(self):
-        rule: GenRule
-
-        rules = self.generation_rules
+        rules = self.production_rules
         genid_dict = {
             rule.identifier: rule for rule in rules
         }
         return genid_dict
 
-    def _check_class(self, instances: list):
-
-        class_obj = instances[0].__class__
-        for instance in instances[1:]:
-            if instance.__class__ != class_obj:
-                assert False, 'Rules should all belong to the same class!'
-        return class_obj
+    def reset_type_id(self) -> None:
+        """Reset all id counters in cdg_type."""
+        for cdg_type in self.cdg_types:
+            cdg_type.reset_id()

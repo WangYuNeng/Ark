@@ -1,77 +1,145 @@
-import numpy as np
+from dataclasses import dataclass
+from itertools import product
+from typing import Callable, Optional
 from ark.cdg.cdg import CDGNode, CDGEdge
-from ark.specification.types import EdgeType, NodeType, StatefulNodeType
-from ark.specification.constraint import DegreeConstraint
+from ark.specification.cdg_types import EdgeType, NodeType
+from ark.specification.range import Range
+from ark.specification.rule_keyword import Target, kw_name
 
-class Connection:
+@dataclass
+class ValRuleId:
+    """Validation Rule Identifier Class"""
 
-    def __init__(self, edge_type: EdgeType, direction: int, degree: DegreeConstraint, node_types: list) -> None:
+    val_tgt: Target
+    edge_type: EdgeType
+    node_type: NodeType
+
+    def __hash__(self) -> int:
+        return repr([kw_name(self.val_tgt), self.edge_type.name, self.node_type.name]).__hash__()
+
+    def __str__(self) -> str:
+        return str([kw_name(self.val_tgt), self.edge_type.name, self.node_type.name])
+
+@dataclass
+class ValPattern:
+    """Pattern for a CDGNode.
+    
+    target: Which side of the edge that the node under validation is on.
+    edge_type: The type of the edge
+    node_types: list of acceptable node types
+    deg_range: The range of acceptable degrees of this pattern.
+    """
+
+    def __init__(self, target: Target, edge_type: EdgeType,
+                 node_types: NodeType | list[NodeType], deg_range: Range) -> None:
+        self._target = target
         self._edge_type = edge_type
-        self._direction = direction
-        self._degree = degree
-        self._node_types = node_types
+        if isinstance(node_types, NodeType):
+            self._node_types = [node_types]
+        else:
+            self._node_types = node_types
+        self._deg_range = deg_range
 
     @property
-    def edge_type(self):
+    def edge_type(self) -> EdgeType:
+        """The type of the edge."""
         return self._edge_type
-    
-    @property
-    def direction(self):
-        return self._direction
 
     @property
-    def degree(self):
-        return self._degree
-    
+    def target(self) -> Target:
+        """Which side of the edge that the node under validation is on."""
+        return self._target
+
     @property
-    def node_types(self):
+    def deg_range(self) -> Range:
+        """The range of acceptable degrees of this pattern."""
+        return self._deg_range
+
+    @property
+    def node_types(self) -> list[NodeType]:
+        """The list of acceptable node types."""
         return self._node_types
 
     @property
-    def identifiers(self) -> set:
-        nt: NodeType
+    def identifiers(self) -> set[ValRuleId]:
+        """Set of uniqe identifiers for the subpatterns.
+        
+        Will expand all the node types into subpatterns and return a set of
+        unique identifiers for them."""
 
         ids = set()
-        for nt in self.node_types:
-            ids.add(self.get_identifier(edge_type=self.edge_type, direction=self.direction, node_type=nt))
+        for node_type in self.node_types:
+            ids.add(self.get_identifier(self.target, self.edge_type, node_type))
         return ids
 
     @staticmethod
-    def get_identifier(edge_type: EdgeType, direction: int, node_type: NodeType):
-        return repr([edge_type.type_name, direction, node_type.type_name])
+    def get_identifier(target: Target, edge_type: EdgeType, node_type: NodeType) -> ValRuleId:
+        """Returns a unique identifier for the pattern"""
+        return ValRuleId(target, edge_type, node_type)
+
+    def check_match(self, tgt: Target, edge: CDGEdge, node: CDGNode) -> bool:
+        """check if the edge and node match the pattern
+        
+        Will check all the base types of the edge and node against the pattern."""
+        edge_type: EdgeType = edge.cdg_type
+        node_type: NodeType = node.cdg_type
+
+        if tgt != self.target:
+            return False
+
+        et_base = edge_type.base_cdg_types()
+        nt_base = node_type.base_cdg_types()
+
+        for edge_type, node_type in product(et_base, nt_base):
+            if self.get_identifier(tgt, edge_type, node_type) in self.identifiers:
+                return True
+        return False
 
     def __repr__(self) -> str:
-        return '{}({}, {}, {}, {})'.format(self.__class__.__name__, self.edge_type, self.direction, self.degree, self.node_types)
+        return f'{self.__class__.__name__}({kw_name(self.target)} \
+            {self.edge_type} {self.node_types} {self.deg_range})'
 
 class ValRule:
+    """Validation rule for a CDGNode."""
 
-    def __init__(self, tgt_node_type: NodeType, connections: list) -> None:
+    def __init__(self, tgt_node_type: NodeType,
+                 acc_pats: Optional[list[ValPattern]]=None,
+                 rej_pats: Optional[list[ValPattern]]=None,
+                 checking_fns: Optional[list[Callable[[CDGNode], bool]]]=None
+                 ) -> None:
         self._tgt_node_type = tgt_node_type
-        self._connections = connections
+        if acc_pats is None:
+            acc_pats = []
+        self._acc_pats = acc_pats
+
+        if rej_pats is None:
+            rej_pats = []
+        self._rej_pats = rej_pats
+
+        if checking_fns is None:
+            checking_fns = []
+        self._checking_fns = checking_fns
 
     @property
-    def tgt_node_type(self):
+    def tgt_node_type(self) -> NodeType:
+        """The target node type of this validation rule."""
         return self._tgt_node_type
 
     @property
-    def connections(self):
-        return self._connections
+    def acc_pats(self) -> list[ValPattern]:
+        """The accepted patterns of this validation rule."""
+        return self._acc_pats
 
-    def get_validation_matrix(self, node: CDGNode):
-        edge: CDGEdge
-        conn: Connection
+    @property
+    def rej_pats(self) -> list[ValPattern]:
+        """The rejected patterns of this validation rule."""
+        return self._rej_pats
 
-        matrix = np.zeros(shape=(node.degree, len(self._connections)))
-        for i, edge in enumerate(node.edges):
-            edge_id = Connection.get_identifier(edge_type=edge.cdg_type, direction=node.get_direction(edge), node_type=node.get_neighbor(edge).cdg_type)
-            for j, conn in enumerate(self._connections):
-                conn_ids = conn.identifiers
-                if edge_id in conn_ids:
-                    matrix[i, j] = 1
-        
-        constraints = [conn.degree for conn in self._connections]
-        return matrix, constraints
-
+    @property
+    def checking_fns(self) -> list[Callable[[CDGNode], bool]]:
+        """The custonchecking functions of this validation rule."""
+        return self._checking_fns
 
     def __repr__(self) -> str:
-        return '{}({} {})'.format(self.__class__.__name__, self.tgt_node_type, self.connections)
+        return f'{self.__class__.__name__}({self.tgt_node_type} \
+            {self.acc_pats} {self.rej_pats} {self.checking_fns})'

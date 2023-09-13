@@ -1,0 +1,6 @@
+1. Separate spec definition and graph initialization.
+2. Separate tex/cdg visualization from execution (probably just remove tex/cdg visualization).
+3. Add sympy generation and use it to replace the current compilation.
+4. Implement higher-order ODE.
+5. Port the old spice generation to the new implementation.
+

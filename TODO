@@ -3,4 +3,5 @@
 3. Add sympy generation and use it to replace the current compilation.
 4. Implement higher-order ODE.
 5. Port the old spice generation to the new implementation.
+6. Better I/O interface for cdg
 

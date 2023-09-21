@@ -1,11 +1,8 @@
 """
-Cellular Nonlinear Network (CNN) example.
-The template performs linear diffusion for filtering.
+CNN for grayscale edge detection
 - Shows how random mismatch affects the convergence
-ref: https://onlinelibrary.wiley.com/doi/abs/10.1002/cta.564
-     https://github.com/ankitaggarwal011/PyCNN
+ref: https://github.com/ankitaggarwal011/PyCNN
 """
-
 from types import FunctionType
 import os
 from argparse import ArgumentParser
@@ -17,105 +14,18 @@ from ark.compiler import ArkCompiler
 from ark.rewrite import RewriteGen
 from ark.solver import SMTSolver
 from ark.validator import ArkValidator
-from ark.specification.attribute_def import AttrDef, AttrDefMismatch
-from ark.specification.range import Range
-from ark.specification.specification import CDGSpec
 from ark.cdg.cdg import CDG, CDGNode
 from ark.specification.cdg_types import NodeType, EdgeType
-from ark.specification.production_rule import ProdRule
-from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME, RuleKeyword
-from ark.specification.validation_rule import ValRule, ValPattern
-from ark.reduction import SUM
+from spec import cnn_spec, saturation, saturation_diffpair
 
 
 
-parser = ArgumentParser()
-parser.add_argument('-i', '--input', type=str,
-                    help='Input image')
-parser.add_argument('-o', '--output', type=str,
-                    help='Output folder')
-parser.add_argument('-p', '--paper', action='store_true',
-                    help='Generate figures for the paper')
-parser.add_argument('-s', '--seed', type=int, default=428,
-                    help='Random seed')
-
-args = parser.parse_args()
-input_file = args.input
-output_folder = args.output
-plot_paper = args.paper
-seed = args.seed
-
-
-# Ark specification
-lc_range, gr_range = Range(min=0.1e-9, max=10e-9), Range(min=0)
-positive = Range(min=0)
-
-
-# Ideal implementation
-
-# Cells in CNN, z is the bias
-IdealV = NodeType(name='IdealV', order=1,
-                  attr_def=[AttrDef('z', attr_type=float)])
-
-# Outpu function
-Out = NodeType(name='Out', order=0, attr_def=[AttrDef('act', attr_type=FunctionType, nargs=1)])
-
-# Input, should be stateless, setting to 1 just for convenience of setting its value
-Inp = NodeType(name='Inp', order=1)
-MapE = EdgeType(name='MapE')
-FlowE = EdgeType(name='FlowE',
-                  attr_def=[AttrDef('g', attr_type=float)])
-
-# Nonideal implementation
-MmV = NodeType(name='Vm', base=IdealV,
-               attr_def=[AttrDefMismatch('mm', attr_type=float, rstd=0.1, attr_range=Range(exact=1))])
-MmFlowE_1p = EdgeType(name='fEm_1p', base=FlowE,
-                   attr_def=[AttrDefMismatch('g', attr_type=float, rstd=0.01, attr_range=Range(min=-10, max=10))])
-MmFlowE_10p = EdgeType(name='fEm', base=FlowE,
-                   attr_def=[AttrDefMismatch('g', attr_type=float, rstd=0.1, attr_range=Range(min=-10, max=10))])
-
-
-
-def saturation(sig):
-    """Saturate the value at 1"""
-    return 0.5 * (abs(sig + 1) - abs(sig - 1))
-
-def saturation_diffpair(sig):
-    """Saturation function for diffpair implementation"""
-    sat_sig = saturation(sig)
-    return sat_sig / 0.707107 * np.sqrt(1 - np.square(sat_sig / 2 / 0.707107))
-
-# Production rules
-Bmat = ProdRule(FlowE, Inp, IdealV, DST, EDGE.g * VAR(SRC))
-Dummy = ProdRule(FlowE, Inp, IdealV, SRC, 0) # Dummy rule to make sure Inp is not used
-ReadOut = ProdRule(MapE, IdealV, Out, DST, DST.act(VAR(SRC)))
-SelfFeedback = ProdRule(MapE, IdealV, IdealV, SELF, -VAR(SRC) + SRC.z)
-Amat = ProdRule(FlowE, Out, IdealV, DST, EDGE.g * VAR(SRC))
-
-
-
-# Production rules for msimatch v
-Bmat_mm = ProdRule(FlowE, Inp, MmV, DST, DST.mm * EDGE.g * VAR(SRC))
-SelfFeedback_mm = ProdRule(MapE, MmV, MmV, SELF, SRC.mm * (-VAR(SRC) + SRC.z))
-Amat_mm = ProdRule(FlowE, Out, MmV, DST, DST.mm * EDGE.g * VAR(SRC))
-
-
-
-prod_rules = [Bmat, Dummy, ReadOut, SelfFeedback, Amat, Bmat_mm, SelfFeedback_mm, Amat_mm]
-
-# Validation rules
-v_val = ValRule(IdealV, [ValPattern(SRC, MapE, Out, Range(exact=1)),
-                         ValPattern(DST, FlowE, Out, Range(min=4, max=9)),
-                         ValPattern(SELF, FlowE, IdealV, Range(exact=1))])
-out_val = ValRule(Out, [ValPattern(SRC, FlowE, IdealV, Range(min=4, max=9)),
-                        ValPattern(DST, MapE, IdealV, Range(exact=1))])
-inp_val = ValRule(Inp, [ValPattern(SRC, FlowE, IdealV, Range(min=4, max=9))])
-val_rules = [v_val, out_val, inp_val]
-
-cdg_types = [IdealV, Out, Inp, MapE, FlowE, MmV, MmFlowE_1p, MmFlowE_10p]
 help_fn = [saturation, saturation_diffpair]
-
-spec = CDGSpec(cdg_types, prod_rules, val_rules)
+IdealV = cnn_spec.node_type('IdealV')
+Out, Inp = cnn_spec.node_type('Out'), cnn_spec.node_type('Inp')
+MapE, FlowE = cnn_spec.edge_type('MapE'), cnn_spec.edge_type('FlowE')
+Vm = cnn_spec.node_type('Vm')
+fEm_1p, fEm_10p = cnn_spec.edge_type('fEm_1p'), cnn_spec.edge_type('fEm_10p')
 
 validator = ArkValidator(solver=SMTSolver())
 compiler = ArkCompiler(rewrite=RewriteGen())
@@ -134,16 +44,19 @@ def create_cnn(nrows: int, ncols: int,
     # Create nodes
     if v_nt == IdealV:
         vs = [[v_nt(z=bias) for _ in range(ncols)] for _ in range(nrows)]
-    elif v_nt == MmV:
+    elif v_nt == Vm:
         vs = [[v_nt(z=bias, mm=1.0) for _ in range(ncols)] for _ in range(nrows)]
     inps = [[Inp() for _ in range(ncols)] for _ in range(nrows)]
     outs = [[Out(act=saturation_fn) for _ in range(ncols)] for _ in range(nrows)]
 
     # Create edges
     # All v nodes connect from self, and connect to output
-    # in/output node in the corner -> connect the v node in that position and 3 neighbors v nodes
-    # in/output node on the edge -> connect the v node in that position and 5 neighbors v nodes
-    # in/output node in the middle -> connect the v node in that position and 8 neighbors v nodes
+    # in/output node in the corner 
+    # -> connect v node in that position and 3 neighbors v nodes
+    # in/output node on the edge 
+    # -> connect the v node in that position and 5 neighbors v nodes
+    # in/output node in the middle 
+    # -> connect the v node in that position and 8 neighbors v nodes
     for row_id in range(nrows):
         for col_id in range(ncols):
             v = vs[row_id][col_id]
@@ -198,13 +111,6 @@ def prepare_tpl():
     bias = -0.5
     return A_mat, B_mat, bias
 
-def layout_dense_graph(graph):
-    graph.graph.graph_attr["layout"] = "neato"
-    graph.graph.graph_attr["sep"] = "+7"
-    graph.graph.graph_attr["overlap"] = "false"
-    graph.graph.graph_attr["splines"] = "true"
-
-
 def sim_cnn(image: np.array,
             A_mat: np.array, B_mat: np.array, bias: int,
             time_points: np.array,
@@ -215,20 +121,13 @@ def sim_cnn(image: np.array,
     vs, inps, outs, graph = create_cnn(nrows, ncols, v_nt, flow_et,
                                                A_mat, B_mat, bias, saturation_fn)
 
-    # _, _, _, small_graph = create_cnn(3, 3, v_nt, flow_et,
-    #                                            A_mat, B_mat, bias, saturation_fn)
-
-    # print("index = %d" % index)
-    # graphvizlib.cdg_to_graphviz("cnn", "cnn_inh_%d" % index , hw_cnn_lang,small_graph,inherited=True, post_layout_hook=layout_dense_graph)
-    # graphvizlib.cdg_to_graphviz("cnn", "cnn_%d" % index , hw_cnn_lang,small_graph,inherited=False,post_layout_hook=layout_dense_graph)
-
     node_mapping = {v: 0 for row in vs for v in row}
-    validator.validate(cdg=graph, cdg_spec=spec)
+    validator.validate(cdg=graph, cdg_spec=cnn_spec)
     if flow_et == FlowE and v_nt == IdealV:
-        compiler.compile(graph, spec, help_fn=help_fn, import_lib={},
+        compiler.compile(graph, cnn_spec, help_fn=help_fn, import_lib={},
                         inline_attr=True, verbose=True)
     else:
-        compiler.compile(graph, spec, help_fn=help_fn, import_lib={},
+        compiler.compile(graph, cnn_spec, help_fn=help_fn, import_lib={},
                         inline_attr=False, verbose=True)
     node_mapping.update(get_input_mapping(inps, image))
     init_states = compiler.map_init_state(node_mapping)
@@ -246,8 +145,8 @@ def grayscale_edge_detection(file_name: str):
     TIME_RANGE = [0, 1]
     time_points = np.linspace(*TIME_RANGE, 9)[1:]
 
-    nt_list = [MmV, IdealV, IdealV, IdealV]
-    et_list = [FlowE, FlowE, MmFlowE_1p, MmFlowE_10p]
+    nt_list = [Vm, IdealV, IdealV, IdealV]
+    et_list = [FlowE, FlowE, fEm_1p, fEm_10p]
     idx = 0
     for saturation_fn in [saturation, saturation_diffpair]:
         for v_nt, flow_et in zip(nt_list, et_list):
@@ -264,7 +163,8 @@ def grayscale_edge_detection(file_name: str):
             title = f'{v_nt.name}_{flow_et.name}'
             plt.suptitle(title)
             plt.tight_layout()
-            save_path = os.path.join(output_folder, f'{saturation_fn.__name__}_{title}.png')
+            save_path = os.path.join(output_folder,
+                                     f'{saturation_fn.__name__}_{title}.png')
             plt.savefig(save_path)
             idx += 1
 
@@ -275,37 +175,28 @@ def paper_plot():
         "text.usetex": True,
         "font.size": 12,
         "font.family": "Helvetica",
-        # "axes.labelsize": 30,
-        # "xtick.labelsize": 30,
-        # "ytick.labelsize": 30
     })
     col_titles = [r'\texttt{A}', r'\texttt{B}', r'\texttt{C}', r'\texttt{D}']
 
-    # plot saturation and saturation_diffpair in [-1.5, 1.5] in the same figure
     x = np.linspace(-1.2, 1.2, 100)
-    # plt.plot(x, saturation(x), label='sat-ideal', linewidth=5.0)
     plt.plot(x, saturation(x), linewidth=5.0)
-    # plt.plot(x, saturation_diffpair(x), label='sat-diffpair',linewidth=5.0)
     plt.plot(x, saturation_diffpair(x),linewidth=5.0)
-    # plt.legend(fontsize=20)
-    # plt.xlabel('input', fontsize=15)
-    # plt.ylabel('output', fontsize=15)
-    # plt.grid()
-    plt.savefig('examples/cnn_images/saturation-cmp.pdf',bbox_inches='tight')
+    plt.savefig('saturation-cmp.pdf',bbox_inches='tight')
     plt.close()
 
 
-    components = [[IdealV, FlowE, saturation], [MmV, FlowE, saturation],
-                  [IdealV, MmFlowE_10p, saturation],[IdealV, FlowE, saturation_diffpair]]
+    components = [[IdealV, FlowE, saturation], [Vm, FlowE, saturation],
+                  [IdealV, fEm_10p, saturation],[IdealV, FlowE, saturation_diffpair]]
 
     A_mat, B_mat, bias = prepare_tpl()
-    image = rgb_to_gray(plt.imread('examples/cnn_images/cnn_input.png'))
+    image = rgb_to_gray(plt.imread('cnn_input.png'))
     N_ROW = 5
     TIME_RANGE = [0, 1]
     time_points = np.linspace(*TIME_RANGE,N_ROW)
     fig, axs = plt.subplots(N_ROW, len(components), figsize=(4.5, 4.8))
     fig.subplots_adjust(wspace=0, hspace=0)
-    for j, (col_title, (v_nt, flow_et, saturation_fn)) in enumerate(zip(col_titles, components)):
+    for j, (col_title, (v_nt, flow_et, saturation_fn)) \
+        in enumerate(zip(col_titles, components)):
         imgs = sim_cnn(image, A_mat, B_mat, bias, time_points,
                         v_nt, flow_et, saturation_fn)
         for i, (time, img) in enumerate(zip(time_points, imgs)):
@@ -320,11 +211,28 @@ def paper_plot():
                 ax.set_ylabel(f't={time:.2f}', rotation=0, labelpad=20)
 
     # put rows in plt closer together
-    plt.savefig('examples/cnn_images/cnn-output.pdf', bbox_inches='tight')
+    plt.savefig('cnn-output.pdf', bbox_inches='tight')
     plt.show()
 
 
 if __name__ == '__main__':
+
+    parser = ArgumentParser()
+    parser.add_argument('-i', '--input', type=str,
+                        help='Input image')
+    parser.add_argument('-o', '--output', type=str,
+                        help='Output folder')
+    parser.add_argument('-p', '--paper', action='store_true',
+                        help='Generate figures for the paper')
+    parser.add_argument('-s', '--seed', type=int, default=428,
+                        help='Random seed')
+
+    args = parser.parse_args()
+    input_file = args.input
+    output_folder = args.output
+    plot_paper = args.paper
+    seed = args.seed
+
     np.random.seed(seed)
     if not plot_paper:
         grayscale_edge_detection(input_file)

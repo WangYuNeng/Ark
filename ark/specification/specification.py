@@ -1,14 +1,22 @@
 from typing import Optional
 from ark.specification.cdg_types import CDGType, NodeType, EdgeType
 from ark.specification.production_rule import ProdRule, ProdRuleId
-from ark.specification.validation_rule import ValRule, ValRuleId
+from ark.specification.validation_rule import ValRule
 
 class CDGSpec:
 
-    def __init__(self, cdg_types: Optional[list[CDGType]],
-                 production_rules: Optional[list[ProdRule]],
-                 validation_rules: Optional[list[ValRule]]):
-        self._node_types, self._edge_types = {}, {}
+    def __init__(self, cdg_types: Optional[list[CDGType]]=None,
+                 production_rules: Optional[list[ProdRule]]=None,
+                 validation_rules: Optional[list[ValRule]]=None):
+
+        if cdg_types is None:
+            cdg_types = []
+        if production_rules is None:
+            production_rules = []
+        if validation_rules is None:
+            validation_rules = []
+
+        self._node_types_dict, self._edge_types_dict= {}, {}
         self.add_cdg_types(cdg_types)
         self._production_rules, self._prod_rule_dict = [], {}
         self.add_production_rules(production_rules)
@@ -17,40 +25,40 @@ class CDGSpec:
 
     def node_type(self, name: str) -> NodeType:
         """Access a node type in the spec."""
-        if name not in self._node_types:
+        if name not in self._node_types_dict:
             raise ValueError(f'Node type {name} not defined.')
-        return self._node_types[name]
+        return self._node_types_dict[name]
     
     def edge_type(self, name: str) -> EdgeType:
         """Access an edge type in the spec."""
-        if name not in self._edge_types:
+        if name not in self._edge_types_dict:
             raise ValueError(f'Edge type {name} not defined.')
-        return self._edge_types[name]
+        return self._edge_types_dict[name]
 
     @property
     def cdg_types(self) -> list[CDGType]:
         """Access CDG types in the spec."""
-        return self._node_types.values() + self._edge_types.values()
+        return self.node_types + self.edge_types
     
     @property
     def node_types(self) -> list[NodeType]:
         """Access node types in the spec."""
-        return self._node_types.values()
+        return list(self._node_types_dict.values())
     
     @property
     def nt_names(self) -> list[str]:
         """Access node type names in the spec."""
-        return self._node_types.keys()
+        return self._node_types_dict.keys()
     
     @property
     def edge_types(self) -> list[EdgeType]:
         """Access edge types in the spec."""
-        return self._edge_types.values()
+        return list(self._edge_types_dict.values())
     
     @property
     def et_names(self) -> list[str]:
         """Access edge type names in the spec."""
-        return self._edge_types.keys()
+        return self._edge_types_dict.keys()
 
     @property
     def production_rules(self) -> list[ProdRule]:
@@ -76,13 +84,13 @@ class CDGSpec:
         """Add a CDG type to the spec."""
         for cdg_type in cdg_types:
             if isinstance(cdg_type, NodeType):
-                if cdg_type.name in self._node_types:
+                if cdg_type.name in self._node_types_dict:
                     raise ValueError('Node type already defined.')
-                self.node_types[cdg_type.name] = cdg_type
+                self._node_types_dict[cdg_type.name] = cdg_type
             elif isinstance(cdg_type, EdgeType):
-                if cdg_type.name in self._edge_types:
+                if cdg_type.name in self._edge_types_dict:
                     raise ValueError('Edge type already defined.')
-                self.edge_types[cdg_type.name] = cdg_type
+                self._edge_types_dict[cdg_type.name] = cdg_type
 
     def add_production_rules(self, production_rules: list[ProdRule]) -> None:
         """Add a production rule to the spec."""

@@ -8,36 +8,50 @@ from ark.specification.attribute_def import AttrDefMismatch
 from ark.specification.rule_keyword import SRC, DST, SELF
 from pylatexenc.latex2text import LatexNodes2Text
 
+
 def syn(x):
     return LatexPrettyPrinter.fmt(Terms.SYNTAX, x)
+
+
 def lit(x):
     return LatexPrettyPrinter.fmt(Terms.LITERAL, x)
+
+
 def expr(x):
     return LatexPrettyPrinter.fmt(Terms.EXPRESSION, x)
+
+
 def vari(x):
     return LatexPrettyPrinter.fmt(Terms.VARIABLE, x)
+
+
 def kw(x):
     return LatexPrettyPrinter.fmt(Terms.KEYWORD, x)
+
+
 def num(x):
     return LatexPrettyPrinter.fmt_number(x)
+
+
 def pct(x):
     return LatexPrettyPrinter.fmt_percent(x)
 
-MAXLINEWIDTH = 58 
+
+MAXLINEWIDTH = 58
 
 
-def range_to_latex(range_,std=None,rstd=None, is_degree_range=False):
-    assert(not ((std or rstd) and is_degree_range))
+def range_to_latex(range_, std=None, rstd=None, is_degree_range=False):
+    assert not ((std or rstd) and is_degree_range)
     tex = None
     if range_.is_exact():
-        tex = lit(num(range_.exact)) + syn(",") +  lit(num(range_.exact))
+        tex = lit(num(range_.exact)) + syn(",") + lit(num(range_.exact))
     elif range_.is_upper_bound():
         tex = kw("-inf") + syn(",") + lit(num(range_.max))
     elif range_.is_lower_bound():
-        tex = lit(num(range_.min)) + syn(",") +  kw("inf")
+        tex = lit(num(range_.min)) + syn(",") + kw("inf")
     elif range_.is_interval_bound():
-        tex = lit(num(range_.min)) + syn(",") +  lit(num(range_.max))
-    assert(tex is not None)
+        tex = lit(num(range_.min)) + syn(",") + lit(num(range_.max))
+    assert tex is not None
     if not is_degree_range:
         tex = f'{syn("[")}{tex}{syn("]")}'
 
@@ -45,9 +59,8 @@ def range_to_latex(range_,std=None,rstd=None, is_degree_range=False):
             tex = f'{tex} {kw("mm(")}{lit(num(std))}{syn(",")}{lit(num(0))}{syn(")")}'
         elif rstd is not None:
             tex = f'{tex} {kw("mm(")}{lit(num(0))}{syn(",")}{lit(num(rstd))}{syn(")")}'
-    
-    return tex
 
+    return tex
 
 
 def special_variable(name):
@@ -58,19 +71,19 @@ def special_variable(name):
 
     return tok
 
+
 def format_variables(expr):
     print(expr)
     fn_subdict = {}
     for f in expr.atoms(sympy.Function):
         name = f.func.name
-        assert("." in name)
-        caller,fname = name.split(".")
+        assert "." in name
+        caller, fname = name.split(".")
         tok = vari(caller)
         tok += syn(".")
         tok += lit(fname)
-        
-        fn_subdict[f]  = sympy.Function(tok,real=True)(*f.args)
-        
+
+        fn_subdict[f] = sympy.Function(tok, real=True)(*f.args)
 
     fn_expr = expr.subs(fn_subdict)
 
@@ -78,20 +91,18 @@ def format_variables(expr):
     for sym in fn_expr.free_symbols:
         text = sym.name
         if "." in text:
-            name,attr = text.split(".")
+            name, attr = text.split(".")
             tok = vari(name)
             tok += syn(".")
             tok += lit(attr)
-        
+
         else:
             tok = special_variable(sym.name)
 
         subdict[sym] = sympy.Symbol(tok)
-       
+
     for f in fn_expr.atoms(sympy.Float):
         subdict[f] = sympy.Symbol(num(f))
-
-
 
     sub_expr = fn_expr.subs(subdict)
     return sub_expr
@@ -109,19 +120,21 @@ def attr_to_latex(attr):
         raise Exception("unhandled attribute type <%s>" % attr.type)
 
     if attr.valid_range is not None:
-        if isinstance(attr,AttrDefMismatch):
-            assert(attr.std is not None or attr.rstd is not None)
-            assert(attr.std is None or attr.rstd is None)
-            tex += range_to_latex(attr.valid_range,std=attr.std,rstd=attr.rstd)
+        if isinstance(attr, AttrDefMismatch):
+            assert attr.std is not None or attr.rstd is not None
+            assert attr.std is None or attr.rstd is None
+            tex += range_to_latex(attr.valid_range, std=attr.std, rstd=attr.rstd)
         else:
             tex += range_to_latex(attr.valid_range)
 
     if attr.type == FunctionType:
         tex += syn("(")
-        tex += LatexPrettyPrinter.delimited(syn(","), map(lambda i: vari("a%d" % i), range(attr.nargs)))
+        tex += LatexPrettyPrinter.delimited(
+            syn(","), map(lambda i: vari("a%d" % i), range(attr.nargs))
+        )
         tex += syn(")")
     return tex
-        
+
 
 def language_to_latex(cdglang: CDGSpec):
     LatexPrettyPrinter.ESCAPE_STYLE = EscapeStyle.VERBATIM
@@ -129,9 +142,9 @@ def language_to_latex(cdglang: CDGSpec):
 
     def q(x):
         return tab.add_token(x)
+
     def qs(x):
         return tab.add_token(x + " ")
-
 
     tab.add_verbatim_directive("fontsize=\\footnotesize")
     tab.add_verbatim_directive("fontseries=b")
@@ -141,14 +154,14 @@ def language_to_latex(cdglang: CDGSpec):
         qs(kw("inherits"))
         q(vari(cdglang.inherit.name))
     q(syn("{"))
-    tab.indent()    
+    tab.indent()
     tab.newline()
 
-    type_spec_to_latex(tab,cdglang)
-    production_rules_to_latex(tab,cdglang)
-    validation_rules_to_latex(tab,cdglang)
+    type_spec_to_latex(tab, cdglang)
+    production_rules_to_latex(tab, cdglang)
+    validation_rules_to_latex(tab, cdglang)
     tab.unindent()
-    tab.linebreak(" ")    
+    tab.linebreak(" ")
     q(syn("}"))
     tab.newline()
 
@@ -156,9 +169,8 @@ def language_to_latex(cdglang: CDGSpec):
     print("---- lang [%s] ----" % cdglang.name)
     txt = LatexNodes2Text().latex_to_text(latex_text)
     print(txt)
-    
-    write_file(cdglang.filename("language","tex"),latex_text)
 
+    write_file(cdglang.filename("language", "tex"), latex_text)
 
 
 def type_spec_to_latex(tab, cdglang: CDGSpec):
@@ -166,13 +178,14 @@ def type_spec_to_latex(tab, cdglang: CDGSpec):
 
     def q(x):
         return tab.add_token(x)
+
     def qs(x):
         return tab.add_token(x + " ")
 
     def attr_block(attrs):
         q(syn("{"))
         tab.indent()
-        for idx,attr in enumerate(attrs):
+        for idx, attr in enumerate(attrs):
             q(attr_to_latex(attr))
             if idx < len(attrs) - 1:
                 q(syn(","))
@@ -202,7 +215,6 @@ def type_spec_to_latex(tab, cdglang: CDGSpec):
         attr_block(node.attr_def.values())
         q(syn(";"))
         tab.newline()
-        
 
     for edge in cdglang.edge_types(inherit=False):
         qs(kw("etyp"))
@@ -216,10 +228,11 @@ def type_spec_to_latex(tab, cdglang: CDGSpec):
         q(syn(";"))
         tab.newline()
 
-    
+
 def production_rules_to_latex(tab, cdglang: CDGSpec):
     def q(x):
         return tab.add_token(x)
+
     def qs(x):
         return tab.add_token(x + " ")
 
@@ -231,7 +244,7 @@ def production_rules_to_latex(tab, cdglang: CDGSpec):
         if not tgt == SELF:
             tgt_name = str(tgt)[0]
         else:
-            tgt_name = 's'
+            tgt_name = "s"
 
         q(kw("prod"))
         q(syn("("))
@@ -253,7 +266,7 @@ def production_rules_to_latex(tab, cdglang: CDGSpec):
             q(syn(":"))
             q(lit(rule.identifier.dst_nt.name))
         q(syn(")"))
-        tab.indent() 
+        tab.indent()
         tab.linebreak(" ")
         q(vari(tgt_name))
         q(syn("<="))
@@ -266,19 +279,21 @@ def production_rules_to_latex(tab, cdglang: CDGSpec):
 def validation_rules_to_latex(tab, cdglang: CDGSpec):
     def q(x):
         return tab.add_token(x)
+
     def qs(x):
         return tab.add_token(x + " ")
-
 
     def add_patterns_to_verbatim(target_type, pats):
         # fill in empty cells to align
         tab.indent()
         tab.linebreak()
-        for idx,pat in enumerate(pats):
-            targ = pat.target # source or destination
+        for idx, pat in enumerate(pats):
+            targ = pat.target  # source or destination
             deg_range = pat.deg_range
             edge_type = pat.edge_type.name
-            node_types = LatexPrettyPrinter.delimited(syn(","), map(lambda nt: lit(nt.name), pat.node_types))
+            node_types = LatexPrettyPrinter.delimited(
+                syn(","), map(lambda nt: lit(nt.name), pat.node_types)
+            )
             q(kw("match"))
             q(syn("("))
             q(range_to_latex(deg_range, is_degree_range=True))
@@ -333,10 +348,12 @@ def validation_rules_to_latex(tab, cdglang: CDGSpec):
         q(syn("}"))
         tab.newline()
 
+
 @dataclass
 class SwitchArg:
-    edge : str
-    expr : str
+    edge: str
+    expr: str
+
 
 def gen_function(fname, lang: CDGSpec, cdg, args, first_k=None):
     LatexPrettyPrinter.ESCAPE_STYLE = EscapeStyle.VERBATIM
@@ -344,10 +361,11 @@ def gen_function(fname, lang: CDGSpec, cdg, args, first_k=None):
 
     def q(x):
         return tab.add_token(x)
+
     def qs(x):
         return tab.add_token(x + " ")
 
-    def gen_attrs(n,a,v):
+    def gen_attrs(n, a, v):
         val = num(v)
         qs(kw("set-attr"))
         q(vari(n.name))
@@ -357,7 +375,7 @@ def gen_function(fname, lang: CDGSpec, cdg, args, first_k=None):
         q(val)
         q(syn(";"))
         tab.linebreak(" ")
- 
+
     def ellipses():
         tab.newline()
         q(syn("..."))
@@ -371,23 +389,22 @@ def gen_function(fname, lang: CDGSpec, cdg, args, first_k=None):
     n_args = len(list(args.values()))
 
     edge_map = {}
-    for idx,(name,arg) in enumerate(args.items()):
+    for idx, (name, arg) in enumerate(args.items()):
         q(vari(name))
         q(syn(":"))
         if isinstance(arg, SwitchArg):
             edge_map[arg.edge] = name
             q(lit("int"))
             q(syn("[0,1]"))
-        if idx < n_args-1:
+        if idx < n_args - 1:
             q(syn(","))
 
     qs(syn(")"))
     qs(kw("uses"))
     q(vari(lang.name))
     q(syn("{"))
-    tab.indent()    
+    tab.indent()
     tab.newline()
-
 
     n_nodes = 0
     for n in cdg.nodes:
@@ -399,9 +416,8 @@ def gen_function(fname, lang: CDGSpec, cdg, args, first_k=None):
         tab.linebreak(" ")
         n_nodes += 1
         if first_k is not None and n_nodes >= first_k:
-            ellipses() 
+            ellipses()
             break
-                   
 
     n_edges = 0
     for e in cdg.edges:
@@ -418,10 +434,9 @@ def gen_function(fname, lang: CDGSpec, cdg, args, first_k=None):
         tab.linebreak(" ")
         n_edges += 1
         if first_k is not None and n_edges >= first_k:
-            ellipses() 
+            ellipses()
             break
-           
-        
+
     for edge in edge_map:
         sw = edge_map[edge]
         qs(kw("set-switch"))
@@ -430,45 +445,42 @@ def gen_function(fname, lang: CDGSpec, cdg, args, first_k=None):
         q(expr(sw))
         q(syn(";"))
         tab.linebreak(" ")
-            
+
     n_attrs = 0
     stop = False
     for n in cdg.nodes:
-        for a,v in n.attrs.items():
+        for a, v in n.attrs.items():
             if stop:
                 continue
 
-            gen_attrs(n,a,v)
+            gen_attrs(n, a, v)
             n_attrs += 1
-            stop = first_k is not None and n_attrs>= first_k
+            stop = first_k is not None and n_attrs >= first_k
             if stop:
-                ellipses() 
-                break 
+                ellipses()
+                break
 
     n_attrs = 0
     for e in cdg.edges:
-        for a,v in n.attrs.items():
+        for a, v in n.attrs.items():
             if stop:
                 continue
 
-            gen_attrs(e,a,v)
+            gen_attrs(e, a, v)
             n_attrs += 1
-            stop = first_k is not None and n_attrs>= first_k
+            stop = first_k is not None and n_attrs >= first_k
             if stop:
-                ellipses() 
+                ellipses()
                 break
-       
-
 
     tab.linebreak()
 
     tab.unindent()
-    tab.linebreak(" ")    
+    tab.linebreak(" ")
     q(syn("}"))
     tab.newline()
 
     latex_text = tab.to_latex()
     print("---- function [%s] ----" % fname)
     LatexNodes2Text().latex_to_text(latex_text)
-    write_file(lang.filename(fname,"tex"),latex_text)
-
+    write_file(lang.filename(fname, "tex"), latex_text)

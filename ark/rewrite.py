@@ -4,6 +4,7 @@ Ast rewrite classes to generate expression from production rules
 import ast
 from typing import Callable
 
+
 class RewriteGen(ast.NodeTransformer):
     """
     Base rewrite class

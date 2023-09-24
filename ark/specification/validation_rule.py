@@ -6,6 +6,7 @@ from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.range import Range
 from ark.specification.rule_keyword import Target, kw_name
 
+
 @dataclass
 class ValRuleId:
     """Validation Rule Identifier Class"""
@@ -15,23 +16,31 @@ class ValRuleId:
     node_type: NodeType
 
     def __hash__(self) -> int:
-        return repr([kw_name(self.val_tgt), self.edge_type.name, self.node_type.name]).__hash__()
+        return repr(
+            [kw_name(self.val_tgt), self.edge_type.name, self.node_type.name]
+        ).__hash__()
 
     def __str__(self) -> str:
         return str([kw_name(self.val_tgt), self.edge_type.name, self.node_type.name])
 
+
 @dataclass
 class ValPattern:
     """Pattern for a CDGNode.
-    
+
     target: Which side of the edge that the node under validation is on.
     edge_type: The type of the edge
     node_types: list of acceptable node types
     deg_range: The range of acceptable degrees of this pattern.
     """
 
-    def __init__(self, target: Target, edge_type: EdgeType,
-                 node_types: NodeType | list[NodeType], deg_range: Range) -> None:
+    def __init__(
+        self,
+        target: Target,
+        edge_type: EdgeType,
+        node_types: NodeType | list[NodeType],
+        deg_range: Range,
+    ) -> None:
         self._target = target
         self._edge_type = edge_type
         if isinstance(node_types, NodeType):
@@ -63,7 +72,7 @@ class ValPattern:
     @property
     def identifiers(self) -> set[ValRuleId]:
         """Set of uniqe identifiers for the subpatterns.
-        
+
         Will expand all the node types into subpatterns and return a set of
         unique identifiers for them."""
 
@@ -73,13 +82,15 @@ class ValPattern:
         return ids
 
     @staticmethod
-    def get_identifier(target: Target, edge_type: EdgeType, node_type: NodeType) -> ValRuleId:
+    def get_identifier(
+        target: Target, edge_type: EdgeType, node_type: NodeType
+    ) -> ValRuleId:
         """Returns a unique identifier for the pattern"""
         return ValRuleId(target, edge_type, node_type)
 
     def check_match(self, tgt: Target, edge: CDGEdge, node: CDGNode) -> bool:
         """check if the edge and node match the pattern
-        
+
         Will check all the base types of the edge and node against the pattern."""
         edge_type: EdgeType = edge.cdg_type
         node_type: NodeType = node.cdg_type
@@ -96,17 +107,20 @@ class ValPattern:
         return False
 
     def __repr__(self) -> str:
-        return f'{self.__class__.__name__}({kw_name(self.target)} \
-            {self.edge_type} {self.node_types} {self.deg_range})'
+        return f"{self.__class__.__name__}({kw_name(self.target)} \
+            {self.edge_type} {self.node_types} {self.deg_range})"
+
 
 class ValRule:
     """Validation rule for a CDGNode."""
 
-    def __init__(self, tgt_node_type: NodeType,
-                 acc_pats: Optional[list[ValPattern]]=None,
-                 rej_pats: Optional[list[ValPattern]]=None,
-                 checking_fns: Optional[list[Callable[[CDGNode], bool]]]=None
-                 ) -> None:
+    def __init__(
+        self,
+        tgt_node_type: NodeType,
+        acc_pats: Optional[list[ValPattern]] = None,
+        rej_pats: Optional[list[ValPattern]] = None,
+        checking_fns: Optional[list[Callable[[CDGNode], bool]]] = None,
+    ) -> None:
         self._tgt_node_type = tgt_node_type
         if acc_pats is None:
             acc_pats = []
@@ -141,5 +155,5 @@ class ValRule:
         return self._checking_fns
 
     def __repr__(self) -> str:
-        return f'{self.__class__.__name__}({self.tgt_node_type} \
-            {self.acc_pats} {self.rej_pats} {self.checking_fns})'
+        return f"{self.__class__.__name__}({self.tgt_node_type} \
+            {self.acc_pats} {self.rej_pats} {self.checking_fns})"

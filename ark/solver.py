@@ -6,17 +6,18 @@ from ark.specification.range import Range
 
 
 class Solver(ABC):
-
     def __init__(self) -> None:
         pass
-    
+
     @abstractmethod
     def solve_validation_matrix(self, matrix, constraints):
         pass
 
-class SMTSolver(Solver):
 
-    def solve_validation_matrix(self, matrix: list[list[bool]], constraints: list[Range]):
+class SMTSolver(Solver):
+    def solve_validation_matrix(
+        self, matrix: list[list[bool]], constraints: list[Range]
+    ):
         """
         Solve the validation matrix using SMT solver.
         TODO: Prettify the code, e.g., rename "constraints"
@@ -26,7 +27,7 @@ class SMTSolver(Solver):
         for i, row in enumerate(matrix):
             for j, val in enumerate(row):
                 if val == 1:
-                    variables[i, j] = Symbol('var_{}_{}'.format(i, j), INT)
+                    variables[i, j] = Symbol("var_{}_{}".format(i, j), INT)
             row_constraints.append(Equals(Plus(variables[i, :].tolist()), Int(1)))
         col_constraints = []
         for j, constraint in enumerate(constraints):

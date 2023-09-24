@@ -11,7 +11,8 @@ AttrImpl = NewType('AttrImpl', Union[int, float, FunctionType]) # why pylint err
 
 class AttrDef:
     """Ａttribute Definition for a CDGType."""
-    def __init__(self, name: str, attr_type: type, attr_range: Optional[Range]=None, nargs:Optional[int]=None):
+    def __init__(self, name: str, attr_type: type, attr_range: Optional[Range]=None,
+                 nargs:Optional[int]=None):
         self.name = name
         self.type = attr_type
         self.valid_range = attr_range

@@ -11,7 +11,7 @@ from ark.specification.validation_rule import ValRule, ValPattern
 from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME
 
 N_GROUP = 2
-obc_intercon_spec = CDGSpec()
+obc_intercon_spec = CDGSpec(name='obc-intercon')
 
 #### Type definitions start ####
 Osc = NodeType(name='Osc', order=1)
@@ -36,7 +36,7 @@ r_cp_src = ProdRule(Coupling, Osc, Osc, SRC, - EDGE.k * SRC.osc_fn(VAR(SRC) - VA
 r_cp_dst = ProdRule(Coupling, Osc, Osc, DST, - EDGE.k * DST.osc_fn(VAR(DST) - VAR(SRC)))
 r_lock = ProdRule(Coupling, Osc, Osc, SELF, - SRC.lock_fn(TIME, VAR(SRC)))
 production_rules = [r_cp_src, r_cp_dst, r_lock]
-obc_intercon_spec.add_production_rules(*production_rules)
+obc_intercon_spec.add_production_rules(production_rules)
 #### Production rules end ####
 
 #### Validation rules start ####
@@ -56,3 +56,7 @@ for i in range(N_GROUP):
                             ))
 obc_intercon_spec.add_validation_rules(val_rules)
 #### Validation rules end ####
+
+if __name__ == '__main__':
+    import ark.visualize.latex_gen as latexlib
+    latexlib.language_to_latex(obc_intercon_spec)

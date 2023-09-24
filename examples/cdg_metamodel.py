@@ -16,7 +16,6 @@ from ark.reduction import SUM
 import sys
 
 # visualization scripts
-from ark.cdg.cdg_lang import CDGLang
 import ark.visualize.latex_gen as latexlib
 import ark.visualize.graphviz_gen as graphvizlib
 
@@ -57,12 +56,12 @@ for name  in e_types:
     EdgeTypes[name] = EdgeType(name=name,
                   attr_def=[])
 
-cdg_lang = CDGLang("tln")
-cdg_lang.add_types(TargType)
-cdg_lang.add_types(*list(EdgeTypes.values()))
-cdg_lang.add_types(*list(EdgeTypesRev.values()))
-cdg_lang.add_types(*list(NodeTypes.values()))
-cdg_lang.add_types(*list(NodeTypesRev.values()))
+cdg_lang = CDGSpec("tln")
+cdg_lang.add_cdg_types(TargType)
+cdg_lang.add_cdg_types(list(EdgeTypes.values()))
+cdg_lang.add_cdg_types(list(EdgeTypesRev.values()))
+cdg_lang.add_cdg_types(list(NodeTypes.values()))
+cdg_lang.add_cdg_types(list(NodeTypesRev.values()))
 
 graph = CDG()
 targ = TargType() 

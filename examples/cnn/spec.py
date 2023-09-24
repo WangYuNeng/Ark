@@ -14,6 +14,7 @@ from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR
 from ark.specification.validation_rule import ValRule, ValPattern
 
 cnn_spec = CDGSpec()
+mm_cnn_spec = CDGSpec('mm-cnn', inherit=cnn_spec)
 
 def saturation(sig):
     """Saturate the value at 1"""
@@ -49,8 +50,10 @@ fEm_1p = EdgeType(name='fEm_1p', base=FlowE,
 fEm_10p = EdgeType(name='fEm_10p', base=FlowE,
                    attr_def=[AttrDefMismatch('g', attr_type=float, rstd=0.1,
                                              attr_range=Range(min=-10, max=10))])
-cdg_types = [IdealV, Out, Inp, MapE, FlowE, Vm, fEm_1p, fEm_10p]
+cdg_types = [IdealV, Out, Inp, MapE, FlowE]
+mm_cdg_types = [Vm, fEm_1p, fEm_10p]
 cnn_spec.add_cdg_types(cdg_types)
+mm_cnn_spec.add_cdg_types(mm_cdg_types)
 #### Type definitions end ####
 
 #### Production rules start ####
@@ -63,9 +66,10 @@ Amat = ProdRule(FlowE, Out, IdealV, DST, EDGE.g * VAR(SRC))
 Bmat_mm = ProdRule(FlowE, Inp, Vm, DST, DST.mm * EDGE.g * VAR(SRC))
 SelfFeedback_mm = ProdRule(MapE, Vm, Vm, SELF, SRC.mm * (-VAR(SRC) + SRC.z))
 Amat_mm = ProdRule(FlowE, Out, Vm, DST, DST.mm * EDGE.g * VAR(SRC))
-prod_rules = [Bmat, Dummy, ReadOut, SelfFeedback, Amat, Bmat_mm,
-              SelfFeedback_mm, Amat_mm]
+prod_rules = [Bmat, Dummy, ReadOut, SelfFeedback, Amat, Bmat_mm]
+mm_prod_rules = [SelfFeedback_mm, Amat_mm]
 cnn_spec.add_production_rules(prod_rules)
+mm_cnn_spec.add_production_rules(mm_prod_rules)
 #### Production rules end ####
 
 #### Validation rules start ####

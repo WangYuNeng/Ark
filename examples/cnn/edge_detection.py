@@ -16,10 +16,10 @@ from ark.solver import SMTSolver
 from ark.validator import ArkValidator
 from ark.cdg.cdg import CDG, CDGNode
 from ark.specification.cdg_types import NodeType, EdgeType
-from spec import cnn_spec, saturation, saturation_diffpair
+from spec import mm_cnn_spec, saturation, saturation_diffpair
 
 
-
+cnn_spec = mm_cnn_spec
 help_fn = [saturation, saturation_diffpair]
 IdealV = cnn_spec.node_type('IdealV')
 Out, Inp = cnn_spec.node_type('Out'), cnn_spec.node_type('Inp')

@@ -293,7 +293,7 @@ class ArkCompiler():
         gen_rule: ProdRule
         reduction: Reduction
 
-        rule_dict = cdg_spec.prod_rule_dict
+        rule_dict = cdg_spec.prod_rule_dict()
         if cdg.ds_order != 1:
             raise NotImplementedError('only support first order dynamical system now')
 

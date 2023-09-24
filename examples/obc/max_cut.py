@@ -13,8 +13,9 @@ from ark.compiler import ArkCompiler
 from ark.rewrite import RewriteGen
 from ark.cdg.cdg import CDG
 from ark.specification.cdg_types import NodeType, EdgeType
-from spec import obc_spec, calc_offset_std, locking_fn, coupling_fn, T
+from spec import hw_obc_spec, calc_offset_std, locking_fn, coupling_fn, T
 
+obc_spec = hw_obc_spec
 help_fn = [locking_fn, coupling_fn]
 Osc, Coupling = obc_spec.node_type('Osc'), obc_spec.edge_type('Coupling')
 Coupling_offset = obc_spec.edge_type('Coupling_offset')

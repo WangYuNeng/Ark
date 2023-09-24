@@ -33,7 +33,7 @@ class ArkValidator:
 
         node_type: NodeType
 
-        rule_dict = cdg_spec.val_rule_dict
+        rule_dict = cdg_spec.val_rule_dict()
 
         for node in cdg.nodes:
             node_type = node.cdg_type

@@ -16,7 +16,8 @@ from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME
 from ark.specification.validation_rule import ValRule, ValPattern
 from ark.reduction import SUM
 
-tln_spec = CDGSpec()
+tln_spec = CDGSpec('tln')
+mm_tln_spec = CDGSpec('mm-tln', inherit=tln_spec)
 
 # Example input function
 def pulse(t, amplitude=1, delay=0, rise_time=5e-9, fall_time=5e-9, pulse_width=10e-9, period=1):
@@ -62,19 +63,21 @@ InpI = NodeType(name='InpI',
                           AttrDef('g', attr_type=float, attr_range=gr_range)
                           ])
 # Mismatched implementation (c, l and gm (modeled with edge weights))
-MmV = NodeType(name='Vm', base=IdealV,
+MmV = NodeType(name='MmV', base=IdealV,
                attr_def=[AttrDefMismatch('c', attr_type=float,
                                          attr_range=lc_range, rstd=0.1)])
-MmI = NodeType(name='Im', base=IdealI,
+MmI = NodeType(name='MmI', base=IdealI,
                attr_def=[AttrDefMismatch('l', attr_type=float,
                                          attr_range=lc_range, rstd=0.1)])
-MmE = EdgeType(name='Em', base=IdealE,
+MmE = EdgeType(name='MmE', base=IdealE,
                attr_def=[AttrDefMismatch('ws', attr_type=float,
                                          attr_range=w_range, rstd=0.1),
                          AttrDefMismatch('wt', attr_type=float,
                                          attr_range=w_range, rstd=0.1)])
-cdg_types = [IdealV, IdealI, IdealE, InpV, InpI, MmV, MmI, MmE]
+cdg_types = [IdealV, IdealI, IdealE, InpV, InpI]
+hw_cdg_types = [MmV, MmI, MmE]
 tln_spec.add_cdg_types(cdg_types)
+mm_tln_spec.add_cdg_types(hw_cdg_types)
 #### Type definitions end ####
 
 #### Production rules start ####
@@ -104,8 +107,8 @@ inpi2_i_mm = ProdRule(MmE, InpI, IdealI, DST,
                       EDGE.wt*(SRC.fn(TIME)-VAR(DST))/DST.l/SRC.g)
 hw_prod_rules = [_v2i_mm, v2_i_mm, _i2v_mm, i2_v_mm,
                  inpv2_v_mm, inpv2_i_mm, inpi2_v_mm, inpi2_i_mm]
-prod_rules += hw_prod_rules
 tln_spec.add_production_rules(prod_rules)
+mm_tln_spec.add_production_rules(hw_prod_rules)
 #### Production rules end ####
 
 #### Validation rules start ####
@@ -124,3 +127,9 @@ inpi_val = ValRule(InpI, [ValPattern(SRC, IdealE, IdealV, Range(min=0, max=1)),
 val_rules = [v_val, i_val, inpv_val, inpi_val]
 tln_spec.add_validation_rules(val_rules)
 #### Validation rules end ####
+
+
+if __name__ == '__main__':
+    import ark.visualize.latex_gen as latexlib
+    latexlib.language_to_latex(tln_spec)
+    latexlib.language_to_latex(mm_tln_spec)

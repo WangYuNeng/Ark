@@ -2,10 +2,18 @@
 Ast rewrite classes to generate expression from production rules
 """
 import ast
+from abc import ABC, abstractmethod
 from typing import Callable
+import sympy
 
 
-class RewriteGen(ast.NodeTransformer):
+class BaseRewriteGen(ABC):
+    @abstractmethod
+    def visit(self, expr):
+        raise NotImplementedError
+
+
+class RewriteGen(ast.NodeTransformer, BaseRewriteGen):
     """
     Base rewrite class
     - name_mapping: dict[str, str], map name to another name
@@ -14,10 +22,10 @@ class RewriteGen(ast.NodeTransformer):
     """
 
     def __init__(self) -> None:
+        super().__init__()
         self._name_mapping = None
         self._attr_mapping = None
         self._attr_rn_fn = None
-        super().__init__()
 
     @property
     def name_mapping(self) -> dict[str, str]:
@@ -25,7 +33,7 @@ class RewriteGen(ast.NodeTransformer):
         return self._name_mapping
 
     @name_mapping.setter
-    def mapping(self, val: dict[str, str]) -> None:
+    def name_mapping(self, val: dict[str, str]) -> None:
         self._name_mapping = val
 
     @property
@@ -44,7 +52,7 @@ class RewriteGen(ast.NodeTransformer):
     def visit_Name(self, node: ast.Name):
         """rewrite the name in the ast with name_mapping"""
         type_name, ctx = node.id, node.ctx
-        return ast.Name(id=self.mapping[type_name], ctx=ctx)
+        return ast.Name(id=self.name_mapping[type_name], ctx=ctx)
 
     def visit_Attribute(self, node: ast.Attribute):
         """rewrite the attribute in the ast with attr_mapping"""
@@ -54,3 +62,38 @@ class RewriteGen(ast.NodeTransformer):
         ast_node = self.attr_mapping[new_name]
         ast_node.ctx = ctx
         return ast_node
+
+
+class SympyRewriteGen(BaseRewriteGen):
+    def __init__(self) -> None:
+        super().__init__()
+        self._mapping = None
+
+    @property
+    def mapping(self) -> dict[sympy.Symbol, sympy.Symbol]:
+        """mapping between names"""
+        return self._mapping
+
+    @mapping.setter
+    def mapping(self, val: dict[sympy.Symbol, sympy.Symbol]) -> None:
+        self._mapping = val
+
+    def visit(self, expr: sympy.Expr):
+        symbols = expr.atoms(sympy.Symbol)
+        functions = expr.atoms(sympy.Function)
+
+        sympy_mapping = set()
+        for sym in symbols:
+            sym_name = sym.name
+            if sym_name in self.mapping:
+                sympy_mapping.add((sym, sympy.Symbol(self.mapping[sym_name])))
+            else:  # not a name then it is an attribute
+                [ele_name, attr_name] = sym_name.split(".")
+                new_sym_name = f"{self.mapping[ele_name]}_{attr_name}"
+                sympy_mapping.add((sym, sympy.Symbol(new_sym_name)))
+        for fn in functions:
+            fn_name = fn.name
+            [ele_name, attr_name] = fn_name.split(".")
+            new_fn_name = f"{self.mapping[ele_name]}_{attr_name}"
+            sympy_mapping.add((sympy.Function(fn_name), sympy.Function(new_fn_name)))
+        return expr.subs(list(sympy_mapping))

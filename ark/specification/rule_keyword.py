@@ -45,7 +45,7 @@ class Expression:
             other = Constant(other)
         return Power(self, other)
 
-    def __call__(self, *args: "List[Expression | float | int]") -> "FunctionCall":
+    def __call__(self, *args: "list[Expression | float | int]") -> "FunctionCall":
         converted_args = []
         for arg in args:
             if isinstance(arg, int):
@@ -72,7 +72,7 @@ class Variable(Expression):
 
     @property
     def sympy(self) -> sympy.Expr:
-        return sympy.Symbol(self.name, real=True)
+        return sympy.Symbol(self.name)
 
 
 @dataclass
@@ -190,7 +190,7 @@ class FunctionCall(Expression):
 
     @property
     def sympy(self) -> sympy.Expr:
-        sympy_fn = sympy.Function(self.fn.sympy, real=True)
+        sympy_fn = sympy.Function(self.fn.name)
         return sympy_fn(*[arg.sympy for arg in self.args])
 
 

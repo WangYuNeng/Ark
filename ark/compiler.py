@@ -6,9 +6,10 @@ from types import FunctionType
 import copy
 from itertools import product
 import numpy as np
+import sympy
 from tqdm import tqdm
 import scipy
-from ark.rewrite import RewriteGen
+from ark.rewrite import BaseRewriteGen
 from ark.cdg.cdg import CDG, CDGNode, CDGEdge, CDGElement
 from ark.specification.specification import CDGSpec
 from ark.specification.cdg_types import NodeType, EdgeType
@@ -32,8 +33,10 @@ def switch_attr(name: str) -> str:
     return rn_attr(name, "switch")
 
 
-def mk_var(name: str) -> ast.Name:
+def mk_var(name: str, to_sympy: bool = False) -> ast.Name:
     """convert name to an ast.Name"""
+    if to_sympy:
+        return sympy.Symbol(name)
     return ast.Name(name)
 
 
@@ -68,22 +71,32 @@ def set_ctx(expr: ast.expr, ctx: ast.expr_context) -> ast.expr:
     return expr
 
 
-def concat_expr(exprs: ast.expr, operator: ast.BinOp) -> ast.BinOp:
+def concat_expr(
+    exprs: list[ast.expr] | list[sympy.Expr], operator: ast.operator | type
+) -> ast.operator | sympy.Expr:
     """concatenate expressions with the given operator"""
-    if len(exprs) == 1:
-        return exprs[0].body
-    if len(exprs) == 2:
-        return ast.BinOp(left=exprs[0].body, op=operator, right=exprs[1].body)
-    return ast.BinOp(
-        left=exprs[0].body, op=operator, right=concat_expr(exprs[1:], operator)
-    )
+    if isinstance(operator, ast.operator):
+        if len(exprs) == 1:
+            return exprs[0].body
+        if len(exprs) == 2:
+            return ast.BinOp(left=exprs[0].body, op=operator, right=exprs[1].body)
+        return ast.BinOp(
+            left=exprs[0].body, op=operator, right=concat_expr(exprs[1:], operator)
+        )
+    else:
+        return operator(*exprs)
 
 
-def apply_gen_rule(rule: ProdRule, transformer: RewriteGen) -> ast.expr:
+def apply_gen_rule(
+    rule: ProdRule, transformer: BaseRewriteGen, to_sympy: bool = False
+) -> ast.expr | sympy.Expr:
     """Return the rewritten ast from the given rule"""
-    gen_ast = copy.deepcopy(rule.fn_ast)
-    transformer.visit(gen_ast)
-    return gen_ast
+    if not to_sympy:
+        gen_expr = copy.deepcopy(rule.fn_ast)
+    else:
+        gen_expr = rule.fn_sympy
+    rr_expr = transformer.visit(gen_expr)
+    return rr_expr
 
 
 def match_prod_rule(
@@ -155,9 +168,8 @@ class ArkCompiler:
     )
     PROG_NAME = "dynamics"
 
-    def __init__(self, rewrite: RewriteGen) -> None:
+    def __init__(self, rewrite: BaseRewriteGen) -> None:
         self._rewrite = rewrite
-        self._rewrite.set_attr_rn_fn(rn_attr)
         self._var_mapping = {}
         self._switch_mapping = {}
         self._namespace = {"np": np, "scipy": scipy}
@@ -252,6 +264,7 @@ class ArkCompiler:
                     Note that this will cause bug if the attributes are random variable.
         """
 
+        self._rewrite.set_attr_rn_fn(rn_attr)
         self._verbose = verbose
         user_def_fns = self._compile_user_def_fn(help_fn)
         attr_var_def, attr_mapping = self._compile_attribute_var(
@@ -276,6 +289,68 @@ class ArkCompiler:
 
         if verbose:
             print("Compilation finished")
+
+    def compile_sympy(
+        self,
+        cdg: CDG,
+        cdg_spec: CDGSpec,
+        help_fn: list[FunctionType],
+    ) -> list[sympy.Expr]:
+        """Compile a CDG to sympy expressions
+
+        Args:
+            cdg (CDG): The input CDG
+            cdg_spec (CDGSpec): Specification
+            help_fn (list[FunctionType]): List of non-built-in functions
+        """
+        node: CDGNode
+        src: CDGNode
+        dst: CDGNode
+        edge: CDGEdge
+        gen_rule: ProdRule
+        reduction: Reduction
+
+        rule_dict = cdg_spec.prod_rule_dict()
+        if cdg.ds_order != 1:
+            raise NotImplementedError("only support first order dynamical system now")
+
+        stmts = []
+
+        # Generate the ddt_var = f(var) statements
+        for order in range(cdg.ds_order + 1):
+            nodes = tqdm(
+                cdg.nodes_in_order(order), desc=f"Compiling order {order} nodes"
+            )
+
+            for node in nodes:
+                vname = ddt(node.name, order=order)
+                reduction = node.reduction
+                rhs = []
+                for edge in node.edges:
+                    src, dst = edge.src, edge.dst
+                    gen_rule = match_prod_rule(
+                        rule_dict=rule_dict,
+                        edge=edge,
+                        src=src,
+                        dst=dst,
+                        tgt=node.which_tgt(edge),
+                    )
+                    if gen_rule is not None:
+                        self._rewrite.mapping = gen_rule.get_rewrite_mapping(edge=edge)
+                        rhs_expr = apply_gen_rule(
+                            rule=gen_rule, transformer=self._rewrite, to_sympy=True
+                        )
+                        if edge.switchable:
+                            raise NotImplementedError
+                        rhs.append(rhs_expr)
+                if rhs:
+                    stmts.append(
+                        (
+                            mk_var(vname, to_sympy=True),
+                            concat_expr(rhs, reduction.sympy_op),
+                        )
+                    )
+        return stmts
 
     def _compile_user_def_fn(self, funcs: list[FunctionType]) -> list[ast.FunctionDef]:
         """Compile user defined functions to ast.FunctionDef"""
@@ -397,7 +472,9 @@ class ArkCompiler:
                         tgt=node.which_tgt(edge),
                     )
                     if gen_rule is not None:
-                        self._rewrite.mapping = gen_rule.get_rewrite_mapping(edge=edge)
+                        self._rewrite.name_mapping = gen_rule.get_rewrite_mapping(
+                            edge=edge
+                        )
                         rhs_expr = apply_gen_rule(
                             rule=gen_rule, transformer=self._rewrite
                         )

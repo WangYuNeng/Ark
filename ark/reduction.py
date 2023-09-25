@@ -3,6 +3,7 @@ Reduction functions for the dynamical system.
 """
 import ast
 from dataclasses import dataclass
+import sympy
 
 
 @dataclass
@@ -19,8 +20,22 @@ class Reduction:
 
     ast_op: ast.operator
     ast_switch: ast.operator
+    sympy_op: type  # sympy.Mul is a type obj not a sympy.Expr obj (but sympy.Mul() is)
+    sympy_switch: type
     name: str
 
 
-SUM = Reduction(name="sum", ast_op=ast.Add(), ast_switch=ast.Mult())
-PRODUCT = Reduction(name="mul", ast_op=ast.Mult(), ast_switch=ast.Pow())
+SUM = Reduction(
+    name="sum",
+    ast_op=ast.Add(),
+    ast_switch=ast.Mult(),
+    sympy_op=sympy.Add,
+    sympy_switch=sympy.Mul,
+)
+PRODUCT = Reduction(
+    name="mul",
+    ast_op=ast.Mult(),
+    ast_switch=ast.Pow(),
+    sympy_op=sympy.Mul,
+    sympy_switch=sympy.Pow,
+)

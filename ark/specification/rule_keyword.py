@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import sympy
 
+
 class Expression:
     """Expression for writing production rules
     Ref: https://github.com/ncsys-lab/analog-verification/blob/new-modelspec/core/expr.py
@@ -44,7 +45,7 @@ class Expression:
             other = Constant(other)
         return Power(self, other)
 
-    def __call__(self, *args: "List[Expression | float | int]") -> "FunctionCall":
+    def __call__(self, *args: "list[Expression | float | int]") -> "FunctionCall":
         converted_args = []
         for arg in args:
             if isinstance(arg, int):
@@ -59,9 +60,11 @@ class Expression:
         """Convert to sympy expression"""
         raise NotImplementedError
 
+
 @dataclass
 class Variable(Expression):
     """Variable expression"""
+
     name: str
 
     def __str__(self) -> str:
@@ -69,11 +72,13 @@ class Variable(Expression):
 
     @property
     def sympy(self) -> sympy.Expr:
-        return sympy.Symbol(self.name, real=True)
+        return sympy.Symbol(self.name)
+
 
 @dataclass
 class Constant(Expression):
     """Constant expression"""
+
     value: float
 
     def __str__(self) -> str:
@@ -83,86 +88,100 @@ class Constant(Expression):
     def sympy(self) -> sympy.Expr:
         return sympy.RealNumber(self.value)
 
+
 @dataclass
 class Sum(Expression):
     """Sum expression"""
+
     left: Expression
     right: Expression
 
     def __str__(self) -> str:
-        return f'({self.left} + {self.right})'
+        return f"({self.left} + {self.right})"
 
     @property
     def sympy(self) -> sympy.Expr:
         return self.left.sympy + self.right.sympy
 
+
 @dataclass
 class Difference(Expression):
     """Difference expression"""
+
     left: Expression
     right: Expression
 
     def __str__(self) -> str:
-        return f'({self.left} - {self.right})'
+        return f"({self.left} - {self.right})"
 
     @property
     def sympy(self) -> sympy.Expr:
         return self.left.sympy - self.right.sympy
 
+
 @dataclass
 class Product(Expression):
     """Product expression"""
+
     left: Expression
     right: Expression
 
     def __str__(self) -> str:
-        return f'({self.left} * {self.right})'
+        return f"({self.left} * {self.right})"
 
     @property
     def sympy(self) -> sympy.Expr:
         return self.left.sympy * self.right.sympy
 
+
 @dataclass
 class Quotient(Expression):
     """Quotient expression"""
+
     left: Expression
     right: Expression
 
     def __str__(self) -> str:
-        return f'({self.left} / {self.right})'
+        return f"({self.left} / {self.right})"
 
     @property
     def sympy(self) -> sympy.Expr:
         return self.left.sympy / self.right.sympy
 
+
 @dataclass
 class Negation(Expression):
     """Negation expression"""
+
     expr: Expression
 
     def __str__(self) -> str:
-        return f'(-{self.expr})'
+        return f"(-{self.expr})"
 
     @property
     def sympy(self) -> sympy.Expr:
         return -self.expr.sympy
 
+
 @dataclass
 class Power(Expression):
     """Power expression"""
+
     base: Expression
     exp: Expression
 
     def __str__(self) -> str:
-        return f'({self.base} ** {self.exp})'
+        return f"({self.base} ** {self.exp})"
 
     @property
     def sympy(self) -> sympy.Expr:
-        return self.base.sympy ** self.exp.sympy
+        return self.base.sympy**self.exp.sympy
+
 
 @dataclass
 class FunctionCall(Expression):
     """Function call expression"""
+
     fn: Expression
     args: list[Expression]
 
@@ -171,21 +190,23 @@ class FunctionCall(Expression):
 
     @property
     def sympy(self) -> sympy.Expr:
-        sympy_fn = sympy.Function(self.fn.sympy, real=True)
-        return sympy_fn(*[arg.sympy for arg in self.args])  
+        sympy_fn = sympy.Function(self.fn.name)
+        return sympy_fn(*[arg.sympy for arg in self.args])
+
 
 @dataclass
 class RuleKeyword:
     """Keyword class for writing production rules"""
+
     name: str
 
     def __getattribute__(self, __name: str) -> Variable:
-        if __name.startswith('__') and __name.endswith('__'):
+        if __name.startswith("__") and __name.endswith("__"):
             # Handle python default attributes
             return object.__getattribute__(self, __name)
         else:
-            self_name = object.__getattribute__(self, 'name')
-            named_attr = f'{self_name}.{__name}'
+            self_name = object.__getattribute__(self, "name")
+            named_attr = f"{self_name}.{__name}"
             return Variable(named_attr)
 
     def __repr__(self) -> str:
@@ -193,6 +214,7 @@ class RuleKeyword:
 
     def __str__(self) -> str:
         return str(self.name)
+
 
 class Target(RuleKeyword):
     """Target keyword denoting the posistion of a node in the edge"""
@@ -203,17 +225,22 @@ class Target(RuleKeyword):
     def is_dest(self):
         return self.__name__ == "t"
 
-    
+
 def var(rule_keyword: RuleKeyword) -> Variable:
     """Returns a state variable for writing production rules"""
-    name = object.__getattribute__(rule_keyword, 'name')
+    name = object.__getattribute__(rule_keyword, "name")
     return Variable(name)
 
-SRC, DST = Target('s'), Target('t'),
-EDGE, SELF = RuleKeyword('e'), Target('SELF')
-TIME = Variable('time')
+
+SRC, DST = (
+    Target("s"),
+    Target("t"),
+)
+EDGE, SELF = RuleKeyword("e"), Target("SELF")
+TIME = Variable("time")
 VAR = var
+
 
 def kw_name(keyword: RuleKeyword):
     """Returns the name of the keyword"""
-    return object.__getattribute__(keyword, 'name')
+    return object.__getattribute__(keyword, "name")

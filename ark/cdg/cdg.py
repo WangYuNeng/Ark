@@ -2,13 +2,18 @@ from typing import Mapping
 from ark.specification.rule_keyword import SRC, DST, SELF, Target
 from ark.specification.attribute_def import AttrDef, AttrImpl
 from ark.reduction import Reduction
+
 # from ark.specification.types import CDGType, NodeType, EdgeType
+
 
 class CDGElement:
     """Base class for CDG nodes and edges."""
+
     attr_def: Mapping[str, AttrDef]
 
-    def __init__(self, cdg_type: "CDGType", name: str, **attrs: Mapping[str, AttrImpl]) -> None:
+    def __init__(
+        self, cdg_type: "CDGType", name: str, **attrs: Mapping[str, AttrImpl]
+    ) -> None:
         self.cdg_type = cdg_type
         self.name = name
         self.attrs = attrs
@@ -21,9 +26,11 @@ class CDGElement:
         val = self.attrs[attr_name]
         return self.attr_def[attr_name].attr_str(val)
 
+
 def sort_element(elements: list[CDGElement]) -> list[CDGElement]:
     """Sort CDG elements by their names."""
     return sorted(elements, key=lambda x: x.name)
+
 
 class CDGNode(CDGElement):
     """Constrained Dynamic Graph (CDG) node class."""
@@ -85,24 +92,25 @@ class CDGNode(CDGElement):
 
         return False
 
-    def get_neighbor(self, edge: 'CDGEdge'):
+    def get_neighbor(self, edge: "CDGEdge"):
         """Return the neighbor of this node."""
         if self.is_src(edge):
             return edge.dst
         elif self.is_dst(edge):
             return edge.src
         else:
-            assert False, f'{self} does not connect to {edge}'
+            assert False, f"{self} does not connect to {edge}"
 
     def print_local(self):
         """Print the local view of this node."""
         print(self.name)
         for edge in self.edges:
             if self.is_src(edge=edge):
-                arrow = f'-{edge.name}>'
+                arrow = f"-{edge.name}>"
             else:
-                arrow = f'<{edge.name}-'
-            print('\t', arrow, self.get_neighbor(edge=edge).name)
+                arrow = f"<{edge.name}-"
+            print("\t", arrow, self.get_neighbor(edge=edge).name)
+
 
 class CDGEdge(CDGElement):
     """Constrained Dynamic Graph (CDG) edge class."""
@@ -114,7 +122,7 @@ class CDGEdge(CDGElement):
     def connect(self, src: CDGNode, dst: CDGNode) -> None:
         """Connect this edge to two nodes."""
         if self._src is not None or self._dst is not None:
-            raise RuntimeError('Edge already connected')
+            raise RuntimeError("Edge already connected")
         self._src, self._dst = src, dst
 
     @property
@@ -135,6 +143,7 @@ class CDGEdge(CDGElement):
     @switchable.setter
     def switchable(self, switchable: bool) -> None:
         self._switchable = switchable
+
 
 class CDG:
     """

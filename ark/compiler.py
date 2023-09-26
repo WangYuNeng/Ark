@@ -23,6 +23,11 @@ def ddt(name: str, order: int) -> str:
     return f"{'ddt_' * order}{name}"
 
 
+def n_state(name: str) -> str:
+    """return the name of the next state"""
+    return f"next_{name}"
+
+
 def rn_attr(name: str, attr: str) -> str:
     """return the variable name of the named attribute"""
     return f"{name}_{attr}"
@@ -240,10 +245,14 @@ class ArkCompiler:
     ) -> list[Any]:
         """map the values to the corresponding index"""
         assert ele_to_idx is not None, "Mapping is not generated yet!"
-        assert len(ele_to_val) == len(ele_to_idx), "Elements mismatch!"
+        assert ele_to_val.keys() == ele_to_idx.keys(), "Elements mismatch!"
         vals = [None for _ in ele_to_idx]
         for ele, val in ele_to_val.items():
             vals[ele_to_idx[ele]] = val
+
+        # Initialize the higher-order derivatives of variables to 0
+        if len(ele_to_val) != len(self._ode_fn_io_names):
+            vals.extend([0 for _ in range(len(self._ode_fn_io_names) - len(vals))])
         return vals
 
     def compile(
@@ -266,6 +275,10 @@ class ArkCompiler:
 
         self._rewrite.set_attr_rn_fn(rn_attr)
         self._verbose = verbose
+
+        self._var_mapping, self._ode_fn_io_names = self._collect_ode_fn_io(cdg)
+        self._switch_mapping = {edge: i for i, edge in enumerate(cdg.switches)}
+
         user_def_fns = self._compile_user_def_fn(help_fn)
         attr_var_def, attr_mapping = self._compile_attribute_var(
             cdg, inline=inline_attr
@@ -362,10 +375,6 @@ class ArkCompiler:
         ele: CDGElement
 
         stmts = [self.INIT_RAND_EXPT]
-        if cdg.ds_order != 1:
-            raise NotImplementedError("only support first order dynamical system now")
-        self._var_mapping = {node: i for i, node in enumerate(cdg.nodes_in_order(1))}
-        self._switch_mapping = {edge: i for i, edge in enumerate(cdg.switches)}
 
         # Map the input vector to the state variables
         if cdg.switches:
@@ -416,6 +425,21 @@ class ArkCompiler:
                     )
         return stmts, attr_to_ast_node
 
+    def _collect_ode_fn_io(self, cdg: CDG) -> tuple[dict[CDGNode, int], list]:
+        """Collect the input/output node mapping and var names of the ode function"""
+        zeroth_order_var_pos = 0
+        var_mapping = {}
+        order_node_names = [[] for _ in range(1, cdg.ds_order + 1)]
+        for node_order in range(1, cdg.ds_order + 1):
+            for node in cdg.nodes_in_order(node_order):
+                var_mapping[node] = zeroth_order_var_pos
+                zeroth_order_var_pos += 1
+                for order in range(node_order):
+                    order_node_names[order].append(ddt(node.name, order=order))
+        # sum the lists in order_node_names
+        input_return_names = [n for names in order_node_names for n in names]
+        return var_mapping, input_return_names
+
     def _compile_ode_fn(self, cdg: CDG, cdg_spec: CDGSpec) -> ast.FunctionDef:
         """Compile the cdg to the ode function for scipy.integrate.solve_ivp simulation"""
 
@@ -427,21 +451,19 @@ class ArkCompiler:
         reduction: Reduction
 
         rule_dict = cdg_spec.prod_rule_dict()
-        if cdg.ds_order != 1:
-            raise NotImplementedError("only support first order dynamical system now")
+        # if cdg.ds_order != 1:
+        # raise NotImplementedError("only support first order dynamical system now")
 
         stmts = []
         input_vec = self.ODE_INPUT_VAR
         ode_fn_name = self.ODE_FN_NAME
+        input_return_names = self._ode_fn_io_names
 
-        # Map the input vector to the state variables
         stmts.append(
             ast.Assign(
                 [
                     set_ctx(
-                        ast.Tuple(
-                            [mk_var(node.name) for node in cdg.nodes_in_order(1)]
-                        ),
+                        ast.Tuple([mk_var(name) for name in input_return_names]),
                         ast.Store,
                     )
                 ],
@@ -458,8 +480,21 @@ class ArkCompiler:
             else:
                 nodes = cdg.nodes_in_order(order)
 
+            # 0th order: var = f(vars)
+            # 1th order: ddt_var = f(vars)
+            # 2th order: ddt_var = ddt_var_cur, ddt_ddt_var = f(vars)
+            # ...
             for node in nodes:
-                vname = ddt(node.name, order=order)
+                for sub_order in range(1, order):
+                    vname = n_state(ddt(node.name, order=sub_order))
+                    cur_vname = ddt(node.name, order=sub_order)
+                    stmts.append(
+                        ast.Assign(
+                            targets=[set_ctx(mk_var(vname), ast.Store)],
+                            value=set_ctx(mk_var(cur_vname), ast.Load),
+                        )
+                    )
+                vname = n_state(ddt(node.name, order=order))
                 reduction = node.reduction
                 rhs = []
                 for edge in node.edges:
@@ -500,8 +535,8 @@ class ArkCompiler:
                 ast.Return(
                     ast.List(
                         [
-                            mk_var(ddt(node.name, order=1))
-                            for node in cdg.nodes_in_order(1)
+                            mk_var(n_state(ddt(name, order=1)))
+                            for name in input_return_names
                         ]
                     )
                 ),

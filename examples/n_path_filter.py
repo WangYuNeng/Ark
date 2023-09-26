@@ -7,16 +7,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 from ark.compiler import ArkCompiler
 from ark.rewrite import RewriteGen
-from ark.solver import SMTSolver
-from ark.validator import ArkValidator
-from ark.specification.attribute_def import AttrDef, AttrDefMismatch
+from ark.specification.attribute_def import AttrDef
 from ark.specification.range import Range
 from ark.specification.specification import CDGSpec
-from ark.cdg.cdg import CDG, CDGNode
+from ark.cdg.cdg import CDG
 from ark.specification.cdg_types import NodeType, EdgeType
 from ark.specification.production_rule import ProdRule
-from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME
-from ark.specification.validation_rule import ValRule, ValPattern
+from ark.specification.rule_keyword import SRC, DST, EDGE, VAR, TIME
 from ark.reduction import SUM
 
 # Capacitors
@@ -76,8 +73,8 @@ switch_cap_conn = ProdRule(
 )
 prod_rules = [switch_cap_conn]
 cdg_types = [Cap, InpV, SwE]
-help_fn = [ctrl_clk, sinosoidal]
-spec = CDGSpec(cdg_types, prod_rules, None)
+import_fn = {"ctrl_clk": ctrl_clk, "sinosoidal": sinosoidal}
+spec = CDGSpec(cdg_types=cdg_types, production_rules=prod_rules, validation_rules=None)
 
 # N-path filter implementation
 N_PATH = 8
@@ -100,7 +97,8 @@ for i in range(N_PATH):
     n_path_filter.connect(switches[i], inp_v, caps[i])
 
 compiler = ArkCompiler(rewrite=RewriteGen())
-compiler.compile(cdg=n_path_filter, cdg_spec=spec, help_fn=help_fn, import_lib={})
+compiler.compile(cdg=n_path_filter, cdg_spec=spec, import_lib=import_fn)
+compiler.print_prog()
 mapping = compiler.var_mapping
 init_states = compiler.map_init_state({node: 0 for node in mapping.keys()})
 

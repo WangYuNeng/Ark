@@ -20,7 +20,7 @@ from spec import mm_cnn_spec, saturation, saturation_diffpair
 
 
 cnn_spec = mm_cnn_spec
-help_fn = [saturation, saturation_diffpair]
+import_fn = {"saturation": saturation, "saturation_diffpair": saturation_diffpair}
 IdealV = cnn_spec.node_type("IdealV")
 Out, Inp = cnn_spec.node_type("Out"), cnn_spec.node_type("Inp")
 MapE, FlowE = cnn_spec.edge_type("MapE"), cnn_spec.edge_type("FlowE")
@@ -148,8 +148,7 @@ def sim_cnn(
         compiler.compile(
             graph,
             cnn_spec,
-            help_fn=help_fn,
-            import_lib={},
+            import_lib=import_fn,
             inline_attr=True,
             verbose=True,
         )
@@ -157,8 +156,7 @@ def sim_cnn(
         compiler.compile(
             graph,
             cnn_spec,
-            help_fn=help_fn,
-            import_lib={},
+            import_lib=import_fn,
             inline_attr=False,
             verbose=True,
         )

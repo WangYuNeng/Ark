@@ -30,7 +30,7 @@ IdealE = spec.edge_type("IdealE")
 InpV, InpI = spec.node_type("InpV"), spec.node_type("InpI")
 MmV, MmI = spec.node_type("MmV"), spec.node_type("MmI")
 MmE = spec.edge_type("MmE")
-help_fn = [pulse]
+import_fn = {"pulse": pulse}
 
 validator = ArkValidator(solver=SMTSolver())
 compiler = ArkCompiler(rewrite=RewriteGen())
@@ -195,7 +195,7 @@ def create_linear_tline(
 
 def nominal_simulation(cdg, time_range, name, post_process_hook=None):
     validator.validate(cdg=cdg, cdg_spec=spec)
-    compiler.compile(cdg=cdg, cdg_spec=spec, help_fn=help_fn, import_lib={})
+    compiler.compile(cdg=cdg, cdg_spec=spec, import_lib=import_fn)
     mapping = compiler.var_mapping
     init_states = compiler.map_init_state({node: 0 for node in mapping.keys()})
     sol = compiler.prog(
@@ -237,7 +237,7 @@ def mismatch_simulation(cdg, time_range, name, post_process_hook=None):
     N_RAND_SIM = 100
 
     validator.validate(cdg=cdg, cdg_spec=spec)
-    compiler.compile(cdg=cdg, cdg_spec=spec, help_fn=help_fn, import_lib={})
+    compiler.compile(cdg=cdg, cdg_spec=spec, import_lib=import_fn)
     mapping = compiler.var_mapping
 
     fig, ax = plt.subplots(1, 1, sharex=True)

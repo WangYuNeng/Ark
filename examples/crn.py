@@ -101,11 +101,13 @@ graph.connect(e_2d, r2, d)
 
 cdg_types = [A, B, C, D, R1, R2]
 production_rules = [rule1, rule2, rule3]
-spec = CDGSpec(cdg_types, production_rules, val_rules)
+spec = CDGSpec(
+    cdg_types=cdg_types, production_rules=production_rules, validation_rules=val_rules
+)
 validator = ArkValidator(solver=SMTSolver())
 validator.validate(cdg=graph, cdg_spec=spec)
 compiler = ArkCompiler(rewrite=RewriteGen())
-compiler.compile(cdg=graph, cdg_spec=spec, help_fn=[], import_lib={})
+compiler.compile(cdg=graph, cdg_spec=spec, import_lib={})
 
 time_range = [0, 15]
 time_points = np.linspace(*time_range, 1000)

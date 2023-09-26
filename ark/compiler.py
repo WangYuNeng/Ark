@@ -259,7 +259,6 @@ class ArkCompiler:
         self,
         cdg: CDG,
         cdg_spec: CDGSpec,
-        help_fn: list[FunctionType],
         import_lib: dict,
         verbose: int = 0,
         inline_attr: bool = False,
@@ -267,7 +266,7 @@ class ArkCompiler:
         """
         Compile the cdg to a function for dynamical system simulation
         help_fn: list of non-built-in function written in attributes, e.g., [sin, trapezoidal]
-        import_lib: additional libraries, e.g., {'np': np}
+        import_lib: additional functions or libraries, e.g., {'sin': sin, 'np': np}
         verbose: 0: no verbose, 1: print the compilation progress
         inline_attr: inline the attribute definitions into dynamical system function.
                     Note that this will cause bug if the attributes are random variable.
@@ -279,7 +278,6 @@ class ArkCompiler:
         self._var_mapping, self._ode_fn_io_names = self._collect_ode_fn_io(cdg)
         self._switch_mapping = {edge: i for i, edge in enumerate(cdg.switches)}
 
-        user_def_fns = self._compile_user_def_fn(help_fn)
         attr_var_def, attr_mapping = self._compile_attribute_var(
             cdg, inline=inline_attr
         )
@@ -287,7 +285,7 @@ class ArkCompiler:
         ode_fn = self._compile_ode_fn(cdg, cdg_spec)
         solv_ivp_stmts = self._compile_solve_ivp()
 
-        stmts = user_def_fns + attr_var_def + [ode_fn] + solv_ivp_stmts
+        stmts = attr_var_def + [ode_fn] + solv_ivp_stmts
         top_stmt = self._compile_top_stmt(stmts)
 
         module = ast.Module([top_stmt], type_ignores=[])
@@ -494,7 +492,9 @@ class ArkCompiler:
                             value=set_ctx(mk_var(cur_vname), ast.Load),
                         )
                     )
-                vname = n_state(ddt(node.name, order=order))
+                vname = ddt(node.name, order=order)
+                if order != 0:
+                    vname = n_state(vname)
                 reduction = node.reduction
                 rhs = []
                 for edge in node.edges:

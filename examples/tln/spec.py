@@ -8,14 +8,16 @@ Provide specification for
 """
 from types import FunctionType
 
-import numpy as np
 import sympy as sp
 
 from ark.reduction import SUM
 from ark.specification.attribute_def import AttrDef, AttrDefMismatch
-from ark.specification.cdg_types import NodeType, EdgeType
+from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule
 from ark.specification.range import Range
+from ark.specification.rule_keyword import DST, EDGE, SELF, SRC, TIME, VAR
+from ark.specification.specification import CDGSpec
+from ark.specification.validation_rule import ValPattern, ValRule
 from ark.specification.rule_keyword import (
     SRC,
     DST,
@@ -25,8 +27,8 @@ from ark.specification.rule_keyword import (
     TIME,
     sympy_function,
 )
-from ark.specification.specification import CDGSpec
 from ark.specification.validation_rule import ValRule, ValPattern
+from ark.reduction import SUM
 
 tln_spec = CDGSpec("tln")
 mm_tln_spec = CDGSpec("mm-tln", inherit=tln_spec)
@@ -46,23 +48,27 @@ def pulse(
         return amplitude * (1 - (t - pulse_width - rise_time) / fall_time)
     return 0
 
+
 @sympy_function
 def pulse_sympy(
-        t,
-        amplitude=1, delay=0, rise_time=5e-9, fall_time=5e-9, pulse_width=10e-9, period=1
+    t, amplitude=1, delay=0, rise_time=5e-9, fall_time=5e-9, pulse_width=10e-9, period=1
 ):
     t = (t - delay) % period
     # Use a sympy piecewise function to represent the pulse
     return sp.Piecewise(
         (0, t < rise_time),
         (amplitude * t / rise_time, t < rise_time + pulse_width),
-        (amplitude * (1 - (t - pulse_width - rise_time) / fall_time), t < rise_time + pulse_width + fall_time),
-        (0, True)
+        (
+            amplitude * (1 - (t - pulse_width - rise_time) / fall_time),
+            t < rise_time + pulse_width + fall_time,
+        ),
+        (0, True),
     )
 
-t = sp.symbols('t')
-print(pulse_sympy(t))
-print(sp.lambdify(t, pulse_sympy(t), 'numpy')(np.linspace(0.0, 1.0, 1000)))
+
+# t = sp.symbols("t")
+# print(pulse_sympy(t))
+# print(sp.lambdify(t, pulse_sympy(t), "numpy")(np.linspace(0.0, 1.0, 1000)))
 
 
 lc_range, gr_range = Range(min=0.1e-9, max=10e-9), Range(min=0.0)

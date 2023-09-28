@@ -125,6 +125,10 @@ class NodeType(CDGType):
         bases = (base,)
         return super().__new__(mcs, name, bases, class_attrs)
 
+    def __call__(cls, **attrs: Mapping[str, AttrImpl]) -> CDGNode:
+        node: CDGNode = super().__call__(**attrs)
+        return node
+
     def base_cdg_types(cls) -> "list[NodeType]":
         base_types = filter(lambda x: isinstance(x, NodeType), inspect.getmro(cls))
         return list(base_types)
@@ -158,9 +162,7 @@ class EdgeType(CDGType):
         bases = (base,)
         return super().__new__(mcs, name, bases, class_attrs)
 
-    def __call__(
-        cls, switchable: bool = False, **attrs: Mapping[str, Any]
-    ) -> CDGElement:
+    def __call__(cls, switchable: bool = False, **attrs: Mapping[str, Any]) -> CDGEdge:
         edge: CDGEdge = super().__call__(**attrs)
         edge.switchable = switchable
         return edge

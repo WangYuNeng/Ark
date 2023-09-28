@@ -106,7 +106,20 @@ hw_obc_spec.add_production_rules(hw_production_rules)
 #### Validation rules end ####
 
 if __name__ == "__main__":
-    import ark.visualize.latex_gen as latexlib
+    # import ark.visualize.latex_gen as latexlib
 
-    latexlib.language_to_latex(obc_spec)
-    latexlib.language_to_latex(hw_obc_spec)
+    # latexlib.language_to_latex(obc_spec)
+    # latexlib.language_to_latex(hw_obc_spec)
+    import sympy
+
+    print(r_cp_dst.fn_sympy)
+    f = r_cp_dst.fn_sympy
+    e_k = f.args[1]
+    fn = f.args[2]
+    s = sympy.Symbol("e.k")
+    sek = sympy.Symbol("e.k")
+    print(s == e_k)
+    print(s == sek)
+    s2 = sympy.Symbol("sss")
+    f1 = f.subs(e_k, s2)
+    print(f1)

@@ -1,16 +1,16 @@
 """
 Coupled oscillator governed by the Law of Motion
 """
-import numpy as np
 import matplotlib.pyplot as plt
-from ark.specification.attribute_def import AttrDef
-from ark.specification.specification import CDGSpec
-from ark.specification.cdg_types import NodeType, EdgeType
-from ark.specification.production_rule import ProdRule
-from ark.specification.rule_keyword import SRC, DST, EDGE, VAR
-from ark.compiler import ArkCompiler
-from ark.rewrite import RewriteGen
+import numpy as np
+
+from ark.ark import Ark
 from ark.cdg.cdg import CDG
+from ark.specification.attribute_def import AttrDef
+from ark.specification.cdg_types import EdgeType, NodeType
+from ark.specification.production_rule import ProdRule
+from ark.specification.rule_keyword import DST, EDGE, SRC, VAR
+from ark.specification.specification import CDGSpec
 
 co_spec = CDGSpec("co")
 
@@ -39,25 +39,24 @@ co_spec.add_production_rules(production_rules)
 
 
 if __name__ == "__main__":
-    compiler = ArkCompiler(rewrite=RewriteGen())
+    system = Ark(cdg_spec=co_spec)
     node1 = Osc(mass=1.0)
-    node2 = Osc(mass=2.0)
+    node2 = Osc(mass=1.0)
     cpl = Coupling(k=2.0)
 
     graph = CDG()
     graph.connect(cpl, node1, node2)
 
-    compiler.compile(cdg=graph, cdg_spec=co_spec, help_fn=[], import_lib={})
-    compiler.print_prog()
+    system.compile(cdg=graph, import_lib={})
     time_range = [0, 10]
     time_points = np.linspace(*time_range, 1000)
-    mapping = compiler.var_mapping
-    init_states = compiler.map_init_state(
-        {node: np.random.rand() * 10 for node in mapping.keys()}
-    )
-    print(init_states)
-    sol = compiler.prog(time_range, init_states=init_states, dense_output=True)
-    for node, idx in mapping.items():
-        phi = sol.sol(time_points)[idx].T
+    # mapping = compiler.var_mapping
+    node1.set_init_val(val=0, n=0)
+    node1.set_init_val(val=0.0, n=1)
+    node2.set_init_val(val=1, n=0)
+    node2.set_init_val(val=0.0, n=1)
+    system.execute(cdg=graph, time_eval=time_points)
+    for node in [node1, node2]:
+        phi = node.get_trace(n=0)
         plt.plot(time_points, phi)
     plt.show()

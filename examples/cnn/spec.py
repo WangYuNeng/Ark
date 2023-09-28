@@ -96,7 +96,8 @@ v_val = ValRule(
     [
         ValPattern(SRC, MapE, Out, Range(exact=1)),
         ValPattern(DST, FlowE, Out, Range(min=4, max=9)),
-        ValPattern(SELF, FlowE, IdealV, Range(exact=1)),
+        ValPattern(DST, FlowE, Inp, Range(min=4, max=9)),
+        ValPattern(SELF, MapE, IdealV, Range(exact=1)),
     ],
 )
 out_val = ValRule(

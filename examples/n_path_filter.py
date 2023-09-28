@@ -99,7 +99,7 @@ for i in range(N_PATH):
     )
     n_path_filter.connect(switches[i], inp_v, caps[i])
 
-system.compile(cdg=n_path_filter, import_lib=import_fn)
+system.compile(cdg=n_path_filter)
 n_path_filter.initialize_all_states(val=0)
 time_points = np.linspace(*TIME_RANGE, 1000)
 system.execute(

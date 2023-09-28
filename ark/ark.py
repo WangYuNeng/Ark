@@ -1,5 +1,8 @@
 """Wrapper class for the ARK framework"""
+from types import FunctionType
 from typing import Optional
+
+import numpy as np
 
 from ark.cdg.cdg import CDG
 from ark.compiler import ArkCompiler
@@ -37,7 +40,12 @@ class Ark:
         self._validator = validator
         self._compiler = compiler
         self._cdg_spec = cdg_spec
-        self._prog, self._node_mapping, self._edge_mapping = None, None, None
+        self._prog, self._node_mapping, self._edge_mapping, self._attr_mapping = (
+            None,
+            None,
+            None,
+            None,
+        )
 
     def validate(self, cdg: CDG) -> bool:
         """Validate the given CDG against the specification
@@ -56,8 +64,6 @@ class Ark:
     def compile(
         self,
         cdg: CDG,
-        import_lib: Optional[dict] = None,
-        inline: bool = False,
         verbose: int = 0,
     ) -> None:
         """Compile the given CDG to a program
@@ -65,17 +71,18 @@ class Ark:
         Args:
             cdg (CDG): The CDG to compile
         """
-        if import_lib is None:
-            import_lib = {}
-        self._prog, self._node_mapping, self._edge_mapping = self.compiler.compile(
-            cdg, self.cdg_spec, import_lib, verbose, inline
-        )
+        (
+            self._prog,
+            self._node_mapping,
+            self._edge_mapping,
+            self._attr_mapping,
+        ) = self.compiler.compile(cdg, self.cdg_spec, verbose)
 
     def execute(
         self,
         cdg: CDG,
         time_eval: list[float],
-        init_seed: Optional[int] = 0,
+        init_seed: Optional[int] = None,
         sim_seed: Optional[int] = 0,
         **kwargs,
     ) -> None:
@@ -93,11 +100,12 @@ class Ark:
         assert self._prog is not None, "Program is not compiled."
         init_states = self._map_init_state(cdg)
         switch_vals = self._map_switch_val(cdg)
+        attr_vals = self._map_attr_val(cdg, seed=init_seed)
         sol = self._prog(
             time_range=[time_eval[0], time_eval[-1]],
             init_states=init_states,
             switch_vals=switch_vals,
-            init_seed=init_seed,
+            attr_vals=attr_vals,
             sim_seed=sim_seed,
             t_eval=time_eval,
             **kwargs,
@@ -190,3 +198,27 @@ class Ark:
         for switch in switches:
             switch_vals[self._edge_mapping[switch]] = switch.val
         return switch_vals
+
+    def _map_attr_val(self, cdg: CDG, seed: int) -> list[int | float | FunctionType]:
+        """Map the attribute values to the corresponding position
+
+        Args:
+            cdg (CDG): The input CDG contains the attribute values
+            seed (int): Seed for random sampling of mismatched attributes
+
+        Returns:
+            list[int | float | FunctionType]: list of attribute values
+            arranged for the compiled ode simulation
+        """
+        elements = cdg.nodes + cdg.edges
+        assert self._attr_mapping is not None, "Attribute mapping is not constructed."
+        assert len(elements) == len(self._attr_mapping)
+        attr_vals = [
+            0 for _ in range(sum(len(attrs) for attrs in self._attr_mapping.values()))
+        ]
+        if seed is not None:
+            np.random.seed(seed)
+        for ele in elements:
+            for attr, val in ele.attr_sample().items():
+                attr_vals[self._attr_mapping[ele][attr]] = val
+        return attr_vals

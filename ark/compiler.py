@@ -160,12 +160,12 @@ class ArkCompiler:
     RewriteGen: ast rewrite class
     """
 
-    INIT_SEED, SIM_SEED = "init_seed", "sim_seed"
-    INIT_RAND_EXPT = parse_expr(f"np.random.rand({INIT_SEED})")
+    SIM_SEED = "sim_seed"
     SIM_RAND_EXPT = parse_expr(f"np.random.rand({SIM_SEED})")
     ODE_FN_NAME, ODE_INPUT_VAR = "__ode_fn", "__variables"
     INIT_STATE, TIME_RANGE = "init_states", "time_range"
     SWITCH_VAL = "switch_vals"
+    ATTR_VAL = "attr_vals"
     KWARGS = "kwargs"
     SIM_SOL = "__sol"
     SOLVE_IVP_EXPR = parse_expr(
@@ -205,26 +205,14 @@ class ArkCompiler:
         with open(file_name, "w") as f:
             f.write(ast.unparse(self._prog_ast))
 
-    def compile(
-        self,
-        cdg: CDG,
-        cdg_spec: CDGSpec,
-        import_lib: dict,
-        verbose: int = 0,
-        inline_attr: bool = False,
-    ):
+    def compile(self, cdg: CDG, cdg_spec: CDGSpec, verbose: int = 0):
         """Compile the cdg to a function for dynamical system simulation.
 
         Args:
             cdg (CDG): The input graph to compile
             cdg_spec (CDGSpec): Specification containing the production rules
-            import_lib (dict): additional functions or libraries, e.g., {'sin': sin,
-            'np': np}
             verbose (int): level of status printing, 0 -- no printing,
-            1 -- print the compilation progress
-            inline_attr (bool): flag to inline the attribute definitions into  the
-            ode function. Note that this will cause incorrect behaviors if the
-            attributes are random variable.
+            1 -- print the compilation progress.
 
         Returns:
             prog (FunctionType): The compiled function.
@@ -234,6 +222,9 @@ class ArkCompiler:
             is node_mapping[node] + n.
             switch_mapping (dict[CDGEdge, int]): map the CDGEdge to the corresponding
             index in the switch variables.
+            attr_mapping (dict[CDGElement, dict[str, int]]): map the CDGElement to the
+            corresponding index in the attribute variables. The attr_mapping[ele][attr]
+            points to the index of the attribute.
         """
 
         self._rewrite.set_attr_rn_fn(rn_attr)
@@ -241,11 +232,14 @@ class ArkCompiler:
 
         node_mapping, ode_fn_io_names = self._collect_ode_fn_io(cdg)
         switch_mapping = {edge: i for i, edge in enumerate(cdg.switches)}
+        attr_mapping, attr_idx = {}, 0
+        for ele in cdg.nodes + cdg.edges:
+            attr_mapping[ele] = {}
+            for attr_name in ele.attrs.keys():
+                attr_mapping[ele][attr_name] = attr_idx
+                attr_idx += 1
 
-        attr_var_def, attr_mapping = self._compile_attribute_var(
-            cdg, switch_mapping, inline=inline_attr
-        )
-        self._rewrite.attr_mapping = attr_mapping
+        attr_var_def = self._compile_attribute_var(switch_mapping, attr_mapping)
         ode_fn = self._compile_ode_fn(cdg, cdg_spec, ode_fn_io_names)
         solv_ivp_stmts = self._compile_solve_ivp()
 
@@ -259,7 +253,6 @@ class ArkCompiler:
         if verbose:
             print("Compiling the program...")
         code = compile(source=module, filename=self.tmp_file_name, mode="exec")
-        self._namespace.update(import_lib)
         exec(code, self._namespace)
 
         if verbose:
@@ -269,6 +262,7 @@ class ArkCompiler:
             self._namespace[self.prog_name],
             node_mapping,
             switch_mapping,
+            attr_mapping,
         )
 
     def compile_sympy(
@@ -338,13 +332,15 @@ class ArkCompiler:
         return [ast.parse(inspect.getsource(fn)).body[0] for fn in funcs]
 
     def _compile_attribute_var(
-        self, cdg: CDG, switch_mapping: dict[CDGEdge, int], inline: bool
+        self,
+        switch_mapping: dict[CDGEdge, int],
+        attr_mapping: dict[CDGElement, dict[str, int]],
     ) -> list[ast.Assign]:
         """Compile the attributes of nodes and edges to variables"""
 
         ele: CDGElement
 
-        stmts = [self.INIT_RAND_EXPT]
+        stmts = []
 
         # Map the input vector to the state variables
         if switch_mapping:
@@ -368,35 +364,25 @@ class ArkCompiler:
                 )
             )
 
-        attr_to_ast_node = {}
-        if self._verbose:
-            eles = tqdm(cdg.nodes + cdg.edges, desc="Compiling attributes")
-        else:
-            eles = cdg.nodes + cdg.edges
-
-        for ele in eles:
-            vname = ele.name
-            lhs, rhs = [], []
-            if ele.attrs.items():
-                for attr_name in ele.attrs.keys():
-                    renamed_attr = rn_attr(vname, attr_name)
-                    attr_expr_str = ele.get_attr_str(attr_name)
-                    attr_expr = parse_expr(attr_expr_str).value
-                    if inline:
-                        attr_to_ast_node[renamed_attr] = attr_expr
-                    else:
-                        attr_var = mk_var(renamed_attr)
-                        lhs.append(attr_var)
-                        rhs.append(attr_expr)
-                        attr_to_ast_node[renamed_attr] = mk_var(renamed_attr)
-                if lhs and rhs:
-                    stmts.append(
-                        ast.Assign(
-                            [set_ctx(ast.Tuple(lhs), ast.Store)],
-                            set_ctx(ast.Tuple(rhs), ast.Load),
+        if attr_mapping:
+            attr_names = [
+                None for _ in range(sum(len(attrs) for attrs in attr_mapping.values()))
+            ]
+            for ele, attrs in attr_mapping.items():
+                for attr_name, idx in attrs.items():
+                    attr_names[idx] = rn_attr(ele.name, attr_name)
+            stmts.append(
+                ast.Assign(
+                    [
+                        set_ctx(
+                            ast.Tuple([mk_var(attr_name) for attr_name in attr_names]),
+                            ast.Store,
                         )
-                    )
-        return stmts, attr_to_ast_node
+                    ],
+                    set_ctx(mk_var(self.ATTR_VAL), ast.Load),
+                )
+            )
+        return stmts
 
     def _collect_ode_fn_io(self, cdg: CDG) -> tuple[dict[CDGNode, int], list]:
         """Collect the input/output node mapping and var names of the ode function
@@ -550,7 +536,7 @@ class ArkCompiler:
             mk_arg(self.TIME_RANGE),
             mk_arg(self.INIT_STATE),
             mk_arg(self.SWITCH_VAL),
-            mk_arg(self.INIT_SEED),
+            mk_arg(self.ATTR_VAL),
             mk_arg(self.SIM_SEED),
         ]
         kwarg = mk_arg(self.KWARGS)

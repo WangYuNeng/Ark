@@ -7,14 +7,15 @@ Provide specification for
 - Gain mismatched ladder
 """
 from types import FunctionType
-from ark.specification.attribute_def import AttrDef, AttrDefMismatch
-from ark.specification.range import Range
-from ark.specification.specification import CDGSpec
-from ark.specification.cdg_types import NodeType, EdgeType
-from ark.specification.production_rule import ProdRule
-from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME
-from ark.specification.validation_rule import ValRule, ValPattern
+
 from ark.reduction import SUM
+from ark.specification.attribute_def import AttrDef, AttrDefMismatch
+from ark.specification.cdg_types import EdgeType, NodeType
+from ark.specification.production_rule import ProdRule
+from ark.specification.range import Range
+from ark.specification.rule_keyword import DST, EDGE, SELF, SRC, TIME, VAR
+from ark.specification.specification import CDGSpec
+from ark.specification.validation_rule import ValPattern, ValRule
 
 tln_spec = CDGSpec("tln")
 mm_tln_spec = CDGSpec("mm-tln", inherit=tln_spec)

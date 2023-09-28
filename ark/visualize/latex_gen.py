@@ -1,12 +1,19 @@
-from types import FunctionType
 from dataclasses import dataclass
+from types import FunctionType
+
 import sympy
-from ark.specification.specification import CDGSpec
-from ark.visualize.latex_util import LatexPrettyPrinter, Terms, EscapeStyle
-from ark.visualize.latex_util import LatexVerbatim, write_file
-from ark.specification.attribute_def import AttrDefMismatch
-from ark.specification.rule_keyword import SRC, DST, SELF
 from pylatexenc.latex2text import LatexNodes2Text
+
+from ark.specification.attribute_def import AttrDefMismatch
+from ark.specification.rule_keyword import DST, SELF, SRC
+from ark.specification.specification import CDGSpec
+from ark.visualize.latex_util import (
+    EscapeStyle,
+    LatexPrettyPrinter,
+    LatexVerbatim,
+    Terms,
+    write_file,
+)
 
 
 def syn(x):

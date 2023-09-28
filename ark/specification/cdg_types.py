@@ -1,11 +1,12 @@
 """
 Meta classes for CDG types.
 """
-from abc import abstractmethod
-from typing import Optional, Mapping, Any
 import inspect
-from ark.reduction import Reduction, SUM
-from ark.cdg.cdg import CDGElement, CDGNode, CDGEdge
+from abc import abstractmethod
+from typing import Any, Mapping, Optional
+
+from ark.cdg.cdg import CDGEdge, CDGElement, CDGNode
+from ark.reduction import SUM, Reduction
 from ark.specification.attribute_def import AttrDef, AttrImpl
 
 
@@ -125,6 +126,10 @@ class NodeType(CDGType):
         bases = (base,)
         return super().__new__(mcs, name, bases, class_attrs)
 
+    def __call__(cls, **attrs: Mapping[str, AttrImpl]) -> CDGNode:
+        node: CDGNode = super().__call__(**attrs)
+        return node
+
     def base_cdg_types(cls) -> "list[NodeType]":
         base_types = filter(lambda x: isinstance(x, NodeType), inspect.getmro(cls))
         return list(base_types)
@@ -158,9 +163,7 @@ class EdgeType(CDGType):
         bases = (base,)
         return super().__new__(mcs, name, bases, class_attrs)
 
-    def __call__(
-        cls, switchable: bool = False, **attrs: Mapping[str, Any]
-    ) -> CDGElement:
+    def __call__(cls, switchable: bool = False, **attrs: Mapping[str, Any]) -> CDGEdge:
         edge: CDGEdge = super().__call__(**attrs)
         edge.switchable = switchable
         return edge

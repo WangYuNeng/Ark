@@ -4,6 +4,7 @@ Ast rewrite classes to generate expression from production rules
 import ast
 from abc import ABC, abstractmethod
 from typing import Callable
+
 import sympy
 
 
@@ -59,8 +60,7 @@ class RewriteGen(ast.NodeTransformer, BaseRewriteGen):
         value, attr, ctx = node.value, node.attr, node.ctx
         id = self.visit_Name(value).id
         new_name = self._attr_rn_fn(id, attr)
-        ast_node = self.attr_mapping[new_name]
-        ast_node.ctx = ctx
+        ast_node = ast.Name(id=new_name, ctx=ctx)
         return ast_node
 
 

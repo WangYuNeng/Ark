@@ -4,14 +4,16 @@ ref: https://onlinelibrary.wiley.com/doi/abs/10.1002/cta.564
 """
 
 from types import FunctionType
+
 import numpy as np
+
 from ark.specification.attribute_def import AttrDef, AttrDefMismatch
-from ark.specification.range import Range
-from ark.specification.specification import CDGSpec
-from ark.specification.cdg_types import NodeType, EdgeType
+from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule
-from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR
-from ark.specification.validation_rule import ValRule, ValPattern
+from ark.specification.range import Range
+from ark.specification.rule_keyword import DST, EDGE, SELF, SRC, VAR
+from ark.specification.specification import CDGSpec
+from ark.specification.validation_rule import ValPattern, ValRule
 
 cnn_spec = CDGSpec()
 mm_cnn_spec = CDGSpec("mm-cnn", inherit=cnn_spec)
@@ -96,7 +98,8 @@ v_val = ValRule(
     [
         ValPattern(SRC, MapE, Out, Range(exact=1)),
         ValPattern(DST, FlowE, Out, Range(min=4, max=9)),
-        ValPattern(SELF, FlowE, IdealV, Range(exact=1)),
+        ValPattern(DST, FlowE, Inp, Range(min=4, max=9)),
+        ValPattern(SELF, MapE, IdealV, Range(exact=1)),
     ],
 )
 out_val = ValRule(

@@ -5,13 +5,15 @@ ref: https://ieeexplore.ieee.org/document/9531734
 """
 
 from types import FunctionType
+
 import numpy as np
+
 from ark.specification.attribute_def import AttrDef, AttrDefMismatch
-from ark.specification.specification import CDGSpec
-from ark.specification.cdg_types import NodeType, EdgeType
+from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule
-from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR
 from ark.specification.range import Range
+from ark.specification.rule_keyword import DST, EDGE, SELF, SRC, VAR
+from ark.specification.specification import CDGSpec
 
 obc_spec = CDGSpec("obc")
 hw_obc_spec = CDGSpec("hw-obc", inherit=obc_spec)
@@ -106,7 +108,20 @@ hw_obc_spec.add_production_rules(hw_production_rules)
 #### Validation rules end ####
 
 if __name__ == "__main__":
-    import ark.visualize.latex_gen as latexlib
+    # import ark.visualize.latex_gen as latexlib
 
-    latexlib.language_to_latex(obc_spec)
-    latexlib.language_to_latex(hw_obc_spec)
+    # latexlib.language_to_latex(obc_spec)
+    # latexlib.language_to_latex(hw_obc_spec)
+    import sympy
+
+    print(r_cp_dst.fn_sympy)
+    f = r_cp_dst.fn_sympy
+    e_k = f.args[1]
+    fn = f.args[2]
+    s = sympy.Symbol("e.k")
+    sek = sympy.Symbol("e.k")
+    print(s == e_k)
+    print(s == sek)
+    s2 = sympy.Symbol("sss")
+    f1 = f.subs(e_k, s2)
+    print(f1)

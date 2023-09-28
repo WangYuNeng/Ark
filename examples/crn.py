@@ -8,22 +8,19 @@ Idea maybe? https://pubs.acs.org/doi/10.1021/acssynbio.0c00050
   that are geared specificallyfor modeling computational nucleic acid
   devices such as thosereviewed above.
 """
-import numpy as np
-from scipy.integrate import solve_ivp
 import matplotlib.pyplot as plt
-from ark.compiler import ArkCompiler
-from ark.rewrite import RewriteGen
-from ark.solver import SMTSolver
-from ark.validator import ArkValidator
-from ark.specification.specification import CDGSpec
+import numpy as np
+
+from ark.ark import Ark
 from ark.cdg.cdg import CDG
+from ark.reduction import PRODUCT
 from ark.specification.attribute_def import AttrDef
-from ark.specification.range import Range
-from ark.specification.cdg_types import NodeType, EdgeType
+from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule
-from ark.specification.validation_rule import ValRule, ValPattern
-from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME
-from ark.reduction import SUM, PRODUCT
+from ark.specification.range import Range
+from ark.specification.rule_keyword import DST, EDGE, SRC, VAR
+from ark.specification.specification import CDGSpec
+from ark.specification.validation_rule import ValPattern, ValRule
 
 Cpd = NodeType(name="Cpd", order=1)
 Rct = NodeType(
@@ -104,23 +101,25 @@ production_rules = [rule1, rule2, rule3]
 spec = CDGSpec(
     cdg_types=cdg_types, production_rules=production_rules, validation_rules=val_rules
 )
-validator = ArkValidator(solver=SMTSolver())
-validator.validate(cdg=graph, cdg_spec=spec)
-compiler = ArkCompiler(rewrite=RewriteGen())
-compiler.compile(cdg=graph, cdg_spec=spec, import_lib={})
+system = Ark(
+    cdg_spec=spec,
+)
+assert system.validate(cdg=graph)
+system.compile(cdg=graph)
 
 time_range = [0, 15]
 time_points = np.linspace(*time_range, 1000)
-mapping = compiler.var_mapping
-init_states = compiler.map_init_state({a: 6, b: 2, c: 0, d: 0})
-compiler.print_prog()
-sol = compiler.prog(time_range, init_states=init_states, dense_output=True)
+a.set_init_val(val=6, n=0)
+b.set_init_val(val=2, n=0)
+c.set_init_val(val=0, n=0)
+d.set_init_val(val=0, n=0)
+system.execute(cdg=graph, time_eval=time_points, init_seed=0, sim_seed=0)
 for node in [a, b, c]:
-    idx = mapping[node]
-    plt.plot(time_points, sol.sol(time_points)[idx].T, label=node.name)
+    trace = node.get_trace(n=0)
+    plt.plot(time_points, trace, label=node.name)
 plt.xlabel("time")
 plt.ylabel("Value")
 plt.grid()
 plt.legend()
-plt.savefig("examples/crn.png")
+plt.savefig("crn.png")
 plt.show()

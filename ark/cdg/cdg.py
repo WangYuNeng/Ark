@@ -1,22 +1,21 @@
 from typing import Mapping
-from ark.specification.rule_keyword import SRC, DST, SELF, Target
-from ark.specification.attribute_def import AttrDef, AttrImpl
-from ark.reduction import Reduction
 
-# from ark.specification.types import CDGType, NodeType, EdgeType
+import numpy as np
+
+from ark.reduction import Reduction
+from ark.specification.attribute_def import AttrDef, AttrDefMismatch, AttrImpl
+from ark.specification.rule_keyword import DST, SELF, SRC, Target
 
 
 class CDGElement:
     """Base class for CDG nodes and edges."""
 
-    attr_def: Mapping[str, AttrDef]
+    _attr_def: Mapping[str, AttrDef]
 
-    def __init__(
-        self, cdg_type: "CDGType", name: str, **attrs: Mapping[str, AttrImpl]
-    ) -> None:
-        self.cdg_type = cdg_type
-        self.name = name
-        self.attrs = attrs
+    def __init__(self, cdg_type: "CDGType", name: str, **attrs: AttrImpl) -> None:
+        self._cdg_type = cdg_type
+        self._name = name
+        self._attrs = attrs
 
     def __str__(self) -> str:
         return self.name
@@ -24,7 +23,80 @@ class CDGElement:
     def get_attr_str(self, attr_name: str) -> str:
         """Return the string representation of the attribute value."""
         val = self.attrs[attr_name]
-        return self.attr_def[attr_name].attr_str(val)
+        return self._attr_def[attr_name].attr_str(val)
+
+    def attr_sample(self) -> dict[str, AttrImpl]:
+        """Sample all the attributes.
+
+        Returns:
+            dict[str, AttrImpl]: A instance of sampled attributes
+        """
+        return {
+            attr_name: self.get_attr_val(attr_name) for attr_name in self._attrs.keys()
+        }
+
+    def get_attr_val(self, attr_name: str) -> AttrImpl:
+        """Return the concretized attribute value.
+
+        If the attribute is a mismatched attribute, sample a value from the
+        normal distribution. Otherwise, return the attribute value.
+
+        Args:
+            attr_name (str): the name of the attribute
+
+        Returns:
+            AttrImpl: the concretized attribute value
+        """
+        if not isinstance(self.attr_def[attr_name], AttrDefMismatch):
+            return self.attrs[attr_name]
+        return self.attr_def[attr_name].sample(self.attrs[attr_name])
+
+    @property
+    def cdg_type(self) -> "CDGType":
+        """Return the CDG type of the element.
+
+        Returns:
+            CDGType: the CDG type of the element
+        """
+        return self._cdg_type
+
+    @property
+    def name(self) -> str:
+        """Return the name of the element.
+
+        Returns:
+            str: the name of the element.
+        """
+        return self._name
+
+    @name.setter
+    def name(self, name: str) -> None:
+        """Set the name of the element.
+
+        Args:
+            name (str): the name of the element.
+        """
+        self._name = name
+
+    @property
+    def attrs(self) -> dict[str, AttrImpl]:
+        """Return the attributes of the element.
+
+        The value of a mismatched attribute is the mean of its distribution.
+
+        Returns:
+            dict[str, AttrImpl]: the attributes of the element
+        """
+        return self._attrs
+
+    @property
+    def attr_def(self) -> Mapping[str, AttrDef]:
+        """Return the attribute definitions of the element.
+
+        Returns:
+            Mapping[str, AttrDef]: the attribute definitions of the element
+        """
+        return self._attr_def
 
 
 def sort_element(elements: list[CDGElement]) -> list[CDGElement]:
@@ -37,10 +109,57 @@ class CDGNode(CDGElement):
 
     edges: set["CDGEdge"]
     reduction: Reduction
+    _init_vals: list[float]
+    _traces: list[np.ndarray]
 
     def __init__(self, cdg_type: "NodeType", name: str, **attrs) -> None:
         super().__init__(cdg_type, name, **attrs)
         self.edges = set()
+        self._init_vals = [None for _ in range(cdg_type.order)]
+        self._trace = [None for _ in range(cdg_type.order)]
+
+    @property
+    def init_vals(self) -> list[float]:
+        """Access all intitial values of the node.
+
+        Returns:
+            list[float]: Initial values listed by order (0~cdg_type.order-1)
+        """
+        return self._init_vals
+
+    @init_vals.setter
+    def init_vals(self, vals: list[float]) -> None:
+        node_order = self.cdg_type.order
+        if len(vals) != node_order:
+            raise RuntimeError(
+                f"Invalid initial value length. Expect {node_order} values."
+            )
+        self._init_vals = vals
+
+    def init_val(self, n: int) -> float:
+        """Access the initial value of the n-th order deravative of the node.
+
+        Args:
+            n (int): the order of the initial value to access
+
+        Returns:
+            float: The n-th order intitial value
+        """
+        return self._init_vals[n]
+
+    def set_init_val(self, val: float, n: int) -> None:
+        """Set the initial value of the n-th order deravative of the node.
+
+        Args:
+            val (float): the initial value
+            n (int): the order of the initial value to access
+        """
+        node_order = self.cdg_type.order
+        if n >= node_order:
+            raise RuntimeError(
+                f"Invalid initial value order. Expect order < {node_order}."
+            )
+        self._init_vals[n] = val
 
     @property
     def degree(self) -> int:
@@ -110,6 +229,29 @@ class CDGNode(CDGElement):
             else:
                 arrow = f"<{edge.name}-"
             print("\t", arrow, self.get_neighbor(edge=edge).name)
+
+    def get_trace(self, n: int) -> np.ndarray:
+        """Access the trace of the n-th order state of the node from simulation.
+
+        Args:
+            n (int): the order of the state to access
+        Returns:
+            np.ndarray: the trace of the n-th order state
+        """
+        if n > self.cdg_type.order:
+            raise RuntimeError("Invalid order")
+        elif self._trace[n] is None:
+            raise RuntimeError("Trace not available")
+        return self._trace[n]
+
+    def set_trace(self, n: int, trace: np.ndarray) -> None:
+        """Set the trace of the node from simulation.
+
+        Args:
+            n (int): the order of the state to set
+            trace (np.ndarray): the trace of the n-th order state
+        """
+        self._trace[n] = trace
 
 
 class CDGEdge(CDGElement):
@@ -206,6 +348,50 @@ class CDG:
             return sort_element(list(set.union(*self._order_to_nodes)))
         else:
             return sort_element(list(self._order_to_nodes[order]))
+
+    def stateful_nodes(self) -> list[CDGNode]:
+        """Access all stateful nodes, i.e., nodes with order > 0.
+
+        Returns:
+            list[CDGNode]: list of stateful nodes sorted by name
+        """
+
+        nodes = []
+        for order in range(1, self.ds_order + 1):
+            nodes += self.nodes_in_order(order)
+        return nodes
+
+    def total_1st_order_states(self) -> int:
+        """The total number of state variables in the system of
+        1st order differential equations.
+
+        Returns:
+            int: the number of state variables
+        """
+        return sum(
+            [
+                len(self.nodes_in_order(order)) * order
+                for order in range(1, self.ds_order + 1)
+            ]
+        )
+
+    def initialize_all_states(self, val: float = None, rand: bool = False) -> None:
+        """Initialize all state variables in the system of
+        1st order differential equations.
+
+        The function will set all the initial values of the stateful nodes with val or
+        random values if rand is True.
+
+        Args:
+            val (float): the initial value
+            rand (bool): whether to initialize with random values
+        """
+        if val and rand:
+            raise RuntimeError("Cannot specify both val and rand.")
+        for node in self.stateful_nodes():
+            node.init_vals = [
+                np.random.rand() if rand else val for _ in range(node.order)
+            ]
 
     @property
     def nodes(self) -> list[CDGNode]:

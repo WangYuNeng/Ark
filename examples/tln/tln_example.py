@@ -6,22 +6,16 @@ Provide specification for
 - LC mismatched ladder
 - Gain mismatched ladder
 """
-import matplotlib.pyplot as plt
 import matplotlib as mpl
-from ark.compiler import ArkCompiler
-from ark.rewrite import RewriteGen
-from ark.solver import SMTSolver
-from ark.validator import ArkValidator
-from ark.cdg.cdg import CDG, CDGNode
-from ark.specification.cdg_types import NodeType, EdgeType
-
+import matplotlib.pyplot as plt
 import numpy as np
+from spec import mm_tln_spec, pulse, tln_spec
 
-# visualization scripts
-import ark.visualize.latex_gen as latexlib
 import ark.visualize.graphviz_gen as graphvizlib
-
-from spec import tln_spec, mm_tln_spec, pulse
+import ark.visualize.latex_gen as latexlib
+from ark.ark import Ark
+from ark.cdg.cdg import CDG, CDGNode
+from ark.specification.cdg_types import EdgeType, NodeType
 
 tln_lang, hw_tln_lang = tln_spec, mm_tln_spec
 spec = mm_tln_spec
@@ -30,10 +24,8 @@ IdealE = spec.edge_type("IdealE")
 InpV, InpI = spec.node_type("InpV"), spec.node_type("InpI")
 MmV, MmI = spec.node_type("MmV"), spec.node_type("MmI")
 MmE = spec.edge_type("MmE")
-import_fn = {"pulse": pulse}
 
-validator = ArkValidator(solver=SMTSolver())
-compiler = ArkCompiler(rewrite=RewriteGen())
+system = Ark(cdg_spec=spec)
 
 fontsize = 25
 mpl.rcParams.update(mpl.rcParamsDefault)
@@ -62,6 +54,7 @@ def build_line(graph, e_nt, v_nt, i_nt, length, term_g=1.0, start_i=False):
 
         graph.connect(e_nt(), i_nodes[length], v_nodes[length])
         graph.connect(IdealE(), v_nodes[-1], v_nodes[-1])
+        graph.connect(IdealE(), i_nodes[-1], i_nodes[-1])
 
     else:
         v_nodes = [v_nt(c=tc, g=0.0) for _ in range(length)] + [v_nt(c=tc, g=term_g)]
@@ -193,28 +186,22 @@ def create_linear_tline(
     return graph, v_nodes, i_nodes
 
 
-def nominal_simulation(cdg, time_range, name, post_process_hook=None):
-    validator.validate(cdg=cdg, cdg_spec=spec)
-    compiler.compile(cdg=cdg, cdg_spec=spec, import_lib=import_fn)
-    mapping = compiler.var_mapping
-    init_states = compiler.map_init_state({node: 0 for node in mapping.keys()})
-    sol = compiler.prog(
-        time_range, init_states=init_states, init_seed=123, max_step=1e-10
-    )
-    time_points = sol.t
-    trajs = sol.y
-    in_node = list(filter(lambda n: n.name == "IN_V", cdg.nodes))[0]
+def nominal_simulation(cdg: CDG, time_range, name, post_process_hook=None):
+    assert system.validate(cdg=cdg)
+    system.compile(cdg=cdg)
+    cdg.initialize_all_states(val=0)
+    time_points = np.linspace(*time_range, 1000)
+    system.execute(cdg=cdg, time_eval=time_points, init_seed=123)
+    list(filter(lambda n: n.name == "IN_V", cdg.nodes))[0]
     out_node = list(filter(lambda n: n.name == "OUT_V", cdg.nodes))[0]
-    print(mapping)
-    mapping[in_node]
-    out_traj_idx = mapping[out_node]
+    out_traj = out_node.get_trace(n=0)
 
     fig, ax = plt.subplots(1, 1, sharex=True)
 
     linecolor = "black"
     linewidth = 2.0
 
-    plt.plot(time_points, trajs[out_traj_idx], color=linecolor, linewidth=linewidth)
+    plt.plot(time_points, out_traj, color=linecolor, linewidth=linewidth)
     ax = plt.gca()
     ax.get_xaxis().get_offset_text().set_visible(False)
     ax_max = max(ax.get_xticks())
@@ -236,31 +223,27 @@ def nominal_simulation(cdg, time_range, name, post_process_hook=None):
 def mismatch_simulation(cdg, time_range, name, post_process_hook=None):
     N_RAND_SIM = 100
 
-    validator.validate(cdg=cdg, cdg_spec=spec)
-    compiler.compile(cdg=cdg, cdg_spec=spec, import_lib=import_fn)
-    mapping = compiler.var_mapping
+    assert system.validate(cdg=cdg)
+    system.compile(cdg=cdg)
+    cdg.initialize_all_states(val=0)
 
     fig, ax = plt.subplots(1, 1, sharex=True)
 
-    init_states = compiler.map_init_state({node: 0 for node in mapping.keys()})
-    in_node = list(filter(lambda n: n.name == "IN_V", cdg.nodes))[0]
+    list(filter(lambda n: n.name == "IN_V", cdg.nodes))[0]
     out_node = list(filter(lambda n: n.name == "OUT_V", cdg.nodes))[0]
-    mapping[in_node]
-    out_traj_idx = mapping[out_node]
 
     alpha = 0.5
     linecolor = "black"
     linewidth = 2.0
+    time_points = np.linspace(*time_range, 1000)
+
     for seed in range(N_RAND_SIM):
-        sol = compiler.prog(
-            TIME_RANGE, init_states=init_states, init_seed=seed, max_step=1e-10
-        )
-        time_points = sol.t
-        trajs = sol.y
+        system.execute(cdg=cdg, time_eval=time_points, init_seed=seed)
+        out_traj = out_node.get_trace(n=0)
         if seed == 0:
             ax.plot(
                 time_points,
-                trajs[out_traj_idx],
+                out_traj,
                 alpha=alpha,
                 color=linecolor,
                 linewidth=linewidth,
@@ -268,7 +251,7 @@ def mismatch_simulation(cdg, time_range, name, post_process_hook=None):
         else:
             ax.plot(
                 time_points,
-                trajs[out_traj_idx],
+                out_traj,
                 alpha=alpha,
                 color=linecolor,
                 linewidth=linewidth,

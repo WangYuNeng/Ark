@@ -3,18 +3,19 @@ Example: N-Path Filter implemented with a switch-capacitor network
 Single input single output, assume ideal switches
 """
 from types import FunctionType
+
 import matplotlib.pyplot as plt
 import numpy as np
-from ark.compiler import ArkCompiler
-from ark.rewrite import RewriteGen
-from ark.specification.attribute_def import AttrDef
-from ark.specification.range import Range
-from ark.specification.specification import CDGSpec
-from ark.cdg.cdg import CDG
-from ark.specification.cdg_types import NodeType, EdgeType
-from ark.specification.production_rule import ProdRule
-from ark.specification.rule_keyword import SRC, DST, EDGE, VAR, TIME
+
+from ark.ark import Ark
+from ark.cdg.cdg import CDG, CDGNode
 from ark.reduction import SUM
+from ark.specification.attribute_def import AttrDef
+from ark.specification.cdg_types import EdgeType, NodeType
+from ark.specification.production_rule import ProdRule
+from ark.specification.range import Range
+from ark.specification.rule_keyword import DST, EDGE, SRC, TIME, VAR
+from ark.specification.specification import CDGSpec
 
 # Capacitors
 Cap = NodeType(
@@ -76,18 +77,20 @@ cdg_types = [Cap, InpV, SwE]
 import_fn = {"ctrl_clk": ctrl_clk, "sinosoidal": sinosoidal}
 spec = CDGSpec(cdg_types=cdg_types, production_rules=prod_rules, validation_rules=None)
 
+system = Ark(cdg_spec=spec)
+
 # N-path filter implementation
 N_PATH = 8
 CENTER_FREQ = 1e2
 PERIOD = 1 / CENTER_FREQ
 DUTY_CYCLE = 1 / N_PATH
 TIME_RANGE = [0, 50 * PERIOD]
-SEED = 428
 
 n_path_filter = CDG()
 inp_v = InpV(fn=sinosoidal, r=1.0)
 
 # Capacitors and switches
+caps: list[CDGNode]
 caps, switches = [None for _ in range(N_PATH)], [None for _ in range(N_PATH)]
 for i in range(N_PATH):
     caps[i] = Cap(c=1e-2)
@@ -96,16 +99,14 @@ for i in range(N_PATH):
     )
     n_path_filter.connect(switches[i], inp_v, caps[i])
 
-compiler = ArkCompiler(rewrite=RewriteGen())
-compiler.compile(cdg=n_path_filter, cdg_spec=spec, import_lib=import_fn)
-compiler.print_prog()
-mapping = compiler.var_mapping
-init_states = compiler.map_init_state({node: 0 for node in mapping.keys()})
-
-sol = compiler.prog(
-    TIME_RANGE, init_states=init_states, init_seed=SEED, max_step=PERIOD / 100
+system.compile(cdg=n_path_filter)
+n_path_filter.initialize_all_states(val=0)
+time_points = np.linspace(*TIME_RANGE, 1000)
+system.execute(
+    cdg=n_path_filter,
+    time_eval=time_points,
+    max_step=PERIOD / 100,
 )
-time_points = sol.t
 
 # Plot the output, can observe the voltage across the capacitors converge to
 # the value which is the average during the sampling time.
@@ -115,10 +116,10 @@ fig, ax = plt.subplots(nrows=N_PATH + 2, figsize=(4, (N_PATH + 2)))
 ax[0].plot(time_points, [sinosoidal(t) for t in time_points], label="Input")
 ax[0].legend()
 output = np.zeros(len(time_points))
-for i in range(0, N_PATH):
-    print(sol.y[mapping[caps[i]]][-1])
-    ax[i + 1].plot(time_points, sol.y[mapping[caps[i]]], label="Cap %d" % i)
-    output += sol.y[mapping[caps[i]]] * np.array(
+for i, node in enumerate(caps):
+    trace = node.get_trace(n=0)
+    ax[i + 1].plot(time_points, trace, label="Cap %d" % i)
+    output += trace * np.array(
         [ctrl_clk(t, PERIOD, DUTY_CYCLE, PERIOD / N_PATH * i) for t in time_points]
     )
     ax[i + 1].legend()

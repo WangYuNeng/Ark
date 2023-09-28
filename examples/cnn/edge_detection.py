@@ -3,32 +3,28 @@ CNN for grayscale edge detection
 - Shows how random mismatch affects the convergence
 ref: https://github.com/ankitaggarwal011/PyCNN
 """
-from types import FunctionType
 import os
 from argparse import ArgumentParser
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib as mpl
-from tqdm import tqdm
-from ark.compiler import ArkCompiler
-from ark.rewrite import RewriteGen
-from ark.solver import SMTSolver
-from ark.validator import ArkValidator
-from ark.cdg.cdg import CDG, CDGNode
-from ark.specification.cdg_types import NodeType, EdgeType
-from spec import mm_cnn_spec, saturation, saturation_diffpair
+from types import FunctionType
 
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import numpy as np
+from spec import mm_cnn_spec, saturation, saturation_diffpair
+from tqdm import tqdm
+
+from ark.ark import Ark
+from ark.cdg.cdg import CDG, CDGNode
+from ark.specification.cdg_types import EdgeType, NodeType
 
 cnn_spec = mm_cnn_spec
-import_fn = {"saturation": saturation, "saturation_diffpair": saturation_diffpair}
 IdealV = cnn_spec.node_type("IdealV")
 Out, Inp = cnn_spec.node_type("Out"), cnn_spec.node_type("Inp")
 MapE, FlowE = cnn_spec.edge_type("MapE"), cnn_spec.edge_type("FlowE")
 Vm = cnn_spec.node_type("Vm")
 fEm_1p, fEm_10p = cnn_spec.edge_type("fEm_1p"), cnn_spec.edge_type("fEm_10p")
 
-validator = ArkValidator(solver=SMTSolver())
-compiler = ArkCompiler(rewrite=RewriteGen())
+system = Ark(cdg_spec=cnn_spec)
 
 
 def create_cnn(
@@ -106,14 +102,15 @@ def get_input_mapping(inps, image) -> dict[CDGNode, float]:
     return mapping
 
 
-def read_out(nodes, sol, node_2_idx, time_points, saturation_fn) -> np.array:
+def read_out(nodes, time_points, saturation_fn) -> np.array:
     """Read out the solution"""
     nrows, ncols = len(nodes), len(nodes[0])
-    traj = np.round(saturation_fn(sol.sol(time_points).T)).astype(np.uint8)
-    imgs = np.zeros((len(traj), nrows, ncols))
+    imgs = np.zeros((len(time_points), nrows, ncols))
     for row_id in tqdm(range(nrows), desc="Read out"):
         for col_id in range(ncols):
-            imgs[:, row_id, col_id] = traj[:, node_2_idx[nodes[row_id][col_id]]]
+            raw_traj = nodes[row_id][col_id].get_trace(n=0)
+            traj = np.round(saturation_fn(raw_traj)).astype(np.uint8)
+            imgs[:, row_id, col_id] = traj
     return imgs
 
 
@@ -143,27 +140,17 @@ def sim_cnn(
     )
 
     node_mapping = {v: 0 for row in vs for v in row}
-    validator.validate(cdg=graph, cdg_spec=cnn_spec)
-    if flow_et == FlowE and v_nt == IdealV:
-        compiler.compile(
-            graph,
-            cnn_spec,
-            import_lib=import_fn,
-            inline_attr=True,
-            verbose=True,
-        )
-    else:
-        compiler.compile(
-            graph,
-            cnn_spec,
-            import_lib=import_fn,
-            inline_attr=False,
-            verbose=True,
-        )
+    # assert system.validate(cdg=graph)
+    system.compile(
+        cdg=graph,
+        verbose=True,
+    )
     node_mapping.update(get_input_mapping(inps, image))
-    init_states = compiler.map_init_state(node_mapping)
-    sol = compiler.prog([0, 1], init_states=init_states, dense_output=True)
-    imgs = read_out(vs, sol, compiler.var_mapping, time_points, saturation_fn)
+    node: CDGNode
+    for node, val in node_mapping.items():
+        node.set_init_val(val=val, n=0)
+    system.execute(cdg=graph, time_eval=time_points)
+    imgs = read_out(vs, time_points, saturation_fn)
     return imgs
 
 

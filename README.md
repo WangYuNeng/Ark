@@ -1,12 +1,110 @@
-# ARK: A Design System for Agile Development of Unconventional Computing Paradigms
-To setup the environment, please have `ngspice`, `graphviz`, and an SMT solver in the system and run 
-    `pip install -e .` in the `Ark` directory.
-You might need additional configuration to set up the binding between `pySMT` and the solver.
-For more information, please refer to https://github.com/pysmt/pysmt
+# ARK: A Programming  for Agile Development of Unconventional Computing Paradigms
 
-## Examples
-    - tests/rlc.py
+This package implements the language described in [Design of Novel Analog Compute Paradigms with Ark](https://arxiv.org/abs/2309.08774). To setup the environment, please have `graphviz`, and a SMT solver in the system and run
 
-Legacy saa codebase (same idea but more ad-hoc implementation)
-    - A ladder filter
-    - Beamformer with diffrent input angle
+`pip install .` (or `pip install -e .` if you'd like to edit the package).
+
+Additional configuration might be needed to set up the binding between `pySMT` and the solver[^1].
+
+## Quick Start
+
+Here's a very simple example to describe mechanical coupled oscillator governed by the Law of Motion with Ark
+
+```python
+from ark.specification.attribute_def import AttrDef
+from ark.specification.cdg_types import EdgeType, NodeType
+from ark.specification.production_rule import ProdRule
+from ark.specification.rule_keyword import DST, EDGE, SRC, VAR
+from ark.specification.specification import CDGSpec
+
+# Specification of coupled oscillator
+co_spec = CDGSpec("co")
+
+#### Type definitions start ####
+# Oscillator node: The state variable models the displacement of the oscillator
+# Order = 2 means the state variable controlled by its second derivative - acceleration
+# The mass attribute models the mass of the oscillator
+Osc = NodeType(name="Osc", order=2, attr_def=[AttrDef("mass", attr_type=float)])
+
+# Coupling springs
+# k: coupling strength
+Coupling = EdgeType(name="Coupling", attr_def=[AttrDef("k", attr_type=float)])
+
+cdg_types = [Osc, Coupling]
+co_spec.add_cdg_types(cdg_types)
+#### Type definitions end ####
+
+#### Production rules start ####
+# F = ma = -kx -> a = x'' = -kx/m
+r_cp_src = ProdRule(Coupling, Osc, Osc, SRC, -EDGE.k * (VAR(SRC) - VAR(DST)) / SRC.mass)
+r_cp_dst = ProdRule(Coupling, Osc, Osc, DST, -EDGE.k * (VAR(DST) - VAR(SRC)) / DST.mass)
+production_rules = [r_cp_src, r_cp_dst]
+co_spec.add_production_rules(production_rules)
+#### Production rules end ####
+
+#### Validation rules start ####
+#### Validation rules end ####
+```
+
+Ideally, hardware designers write down the **specification** (or the **language** using the formalization from the paper). The specification contains type definition (`cdg_types`), production rules (`production_rules`), and validation rules (omitted here). Domain specialists can design applications using the specification.
+
+```python
+import matplotlib.pyplot as plt
+import numpy as np
+
+from ark.ark import Ark
+from ark.cdg.cdg import CDG
+# Manipulate the dynamical system with the CDG and execute it with Ark
+system = Ark(cdg_spec=co_spec)
+
+# Initialize 2 couplied oscillators
+graph = CDG()
+node1 = Osc(mass=1.0)
+node2 = Osc(mass=2.0)
+cpl = Coupling(k=2.0)
+graph.connect(cpl, node1, node2)
+
+# Compile the CDG to an executable dynamical system
+system.compile(cdg=graph)
+
+# Specify the simulation time and initial values
+time_range = [0, 10]
+time_points = np.linspace(*time_range, 1000)
+node1.set_init_val(val=0, n=0)
+node1.set_init_val(val=0.0, n=1)
+node2.set_init_val(val=1, n=0)
+node2.set_init_val(val=0.0, n=1)
+
+# Execute the dynamical system
+system.execute(cdg=graph, time_eval=time_points)
+
+# Retrieve the traces of the state variables for the CDG
+for node in [node1, node2]:
+    phi = node.get_trace(n=0)
+    plt.plot(time_points, phi, label=node.name)
+plt.xlabel("Time")
+plt.ylabel("Displacement")
+plt.legend()
+plt.show()
+```
+
+The resulting figures show the oscillating behaviors.
+![Dynamics of the two oscillators](https://github.com/WangYuNeng/Ark/tree/main/examples/obc/co.png)
+
+## More Examples
+
+You can try more examples inside the `examples` directory.
+
+- `cnn`: A specification for the cellular nonlinear network and an edge-detection application.
+- `obc`: A specification for the oscillator-based-computing paradigm and a max-cut application.
+- `tln`: A specification for the transmission-line-network and examaples demonstrating how mismatches affects the system response.
+- `crn`: A toy example that models the chemical reaction network with Ark and implements an multiplication.
+- `n_path_filter`: A toy example that models the n-path filter with Ark.
+For more details, please refer to the descriptions in the paper.
+
+## TODOs
+
+- [ ] Port the old spice generation to the current implementation.
+- [ ] containerize the package.
+
+[^1]: For example, in macOS, it is possible that z3 solver failed to find the `libz3.dylib` even when z3 is installed with brew. This because somehow z3 looks for librariesin `/op/how/bin/` instead of `/opt/homebrew/lib`. One workaround is copying the `libz3.dylib` in`/opt/homebrew/lib` to a directory that z3 will access, e.g., `/Users/{username}/miniconda3/envs/{envname}/lib`. For more information, please refer to <https://github.com/pysmt/pysmt>

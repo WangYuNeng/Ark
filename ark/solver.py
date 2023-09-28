@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
-from pysmt.shortcuts import Symbol, And, GE, LE, Plus, Equals, Int, get_model
-from pysmt.typing import INT
+
 import numpy as np
+from pysmt.shortcuts import And, Equals, Int, Plus, Symbol, get_model
+from pysmt.typing import INT
+
 from ark.specification.range import Range
 
 

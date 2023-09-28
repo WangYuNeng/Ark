@@ -1,21 +1,22 @@
 """Compiler for CDG to dynamical system simulation"""
 import ast
-import inspect
-from typing import Optional, Mapping, Any
-from types import FunctionType
 import copy
+import inspect
 from itertools import product
+from types import FunctionType
+
 import numpy as np
+import scipy
 import sympy
 from tqdm import tqdm
-import scipy
-from ark.rewrite import BaseRewriteGen
-from ark.cdg.cdg import CDG, CDGNode, CDGEdge, CDGElement
-from ark.specification.specification import CDGSpec
-from ark.specification.cdg_types import NodeType, EdgeType
-from ark.specification.production_rule import ProdRule, ProdRuleId
-from ark.specification.rule_keyword import Target, TIME, kw_name
+
+from ark.cdg.cdg import CDG, CDGEdge, CDGElement, CDGNode
 from ark.reduction import Reduction
+from ark.rewrite import BaseRewriteGen
+from ark.specification.cdg_types import EdgeType, NodeType
+from ark.specification.production_rule import ProdRule, ProdRuleId
+from ark.specification.rule_keyword import TIME, Target, kw_name
+from ark.specification.specification import CDGSpec
 
 
 def ddt(name: str, order: int) -> str:
@@ -159,12 +160,12 @@ class ArkCompiler:
     RewriteGen: ast rewrite class
     """
 
-    INIT_SEED, SIM_SEED = "init_seed", "sim_seed"
-    INIT_RAND_EXPT = parse_expr(f"np.random.rand({INIT_SEED})")
+    SIM_SEED = "sim_seed"
     SIM_RAND_EXPT = parse_expr(f"np.random.rand({SIM_SEED})")
     ODE_FN_NAME, ODE_INPUT_VAR = "__ode_fn", "__variables"
     INIT_STATE, TIME_RANGE = "init_states", "time_range"
     SWITCH_VAL = "switch_vals"
+    ATTR_VAL = "attr_vals"
     KWARGS = "kwargs"
     SIM_SOL = "__sol"
     SOLVE_IVP_EXPR = parse_expr(
@@ -175,7 +176,8 @@ class ArkCompiler:
 
     def __init__(self, rewrite: BaseRewriteGen) -> None:
         self._rewrite = rewrite
-        self._var_mapping = {}
+        self._node_to_state_var = {}
+        self._ode_fn_io_names = []
         self._switch_mapping = {}
         self._namespace = {"np": np, "scipy": scipy}
         self._prog_ast = None
@@ -192,33 +194,6 @@ class ArkCompiler:
         """name of the temporary file to store the generated program"""
         return f"__tmp_{self.prog_name}__.py"
 
-    @property
-    def var_mapping(self) -> dict[CDGNode, int]:
-        """map CDGNode to the corresponding index in the state variables"""
-        return self._var_mapping
-
-    @property
-    def switch_mapping(self) -> dict[CDGEdge, int]:
-        """map CDGEdge to the corresponding for switch variables"""
-        return self._switch_mapping
-
-    def prog(
-        self,
-        time_range: tuple[float, float],
-        init_states: list[float],
-        switch_vals: Optional[list[bool]] = None,
-        init_seed: Optional[int] = 0,
-        sim_seed: Optional[int] = 0,
-        **kwargs,
-    ):
-        """execute the compiled program
-
-        kwargs: additional arguments for scipy.integrate.solve_ivp
-        """
-        return self._namespace[self.prog_name](
-            time_range, init_states, switch_vals, init_seed, sim_seed, **kwargs
-        )
-
     def print_prog(self):
         """print the compiled program"""
         assert self._prog_ast is not None, "Program is not compiled yet!"
@@ -230,59 +205,42 @@ class ArkCompiler:
         with open(file_name, "w") as f:
             f.write(ast.unparse(self._prog_ast))
 
-    def map_init_state(
-        self, node_to_val: Mapping[CDGNode, int | float]
-    ) -> list[int | float]:
-        """map the initial state to the corresponding index in the state variables"""
-        return self._mapping(node_to_val, self._var_mapping)
+    def compile(self, cdg: CDG, cdg_spec: CDGSpec, verbose: int = 0):
+        """Compile the cdg to a function for dynamical system simulation.
 
-    def map_switch_val(self, edge_to_val: Mapping[CDGEdge, bool]) -> list[bool]:
-        """map the switch values to the corresponding index in the switch variables"""
-        return self._mapping(edge_to_val, self._switch_mapping)
+        Args:
+            cdg (CDG): The input graph to compile
+            cdg_spec (CDGSpec): Specification containing the production rules
+            verbose (int): level of status printing, 0 -- no printing,
+            1 -- print the compilation progress.
 
-    def _mapping(
-        self, ele_to_val: Mapping[object, Any], ele_to_idx: Mapping[object, int]
-    ) -> list[Any]:
-        """map the values to the corresponding index"""
-        assert ele_to_idx is not None, "Mapping is not generated yet!"
-        assert ele_to_val.keys() == ele_to_idx.keys(), "Elements mismatch!"
-        vals = [None for _ in ele_to_idx]
-        for ele, val in ele_to_val.items():
-            vals[ele_to_idx[ele]] = val
-
-        # Initialize the higher-order derivatives of variables to 0
-        if len(ele_to_val) != len(self._ode_fn_io_names):
-            vals.extend([0 for _ in range(len(self._ode_fn_io_names) - len(vals))])
-        return vals
-
-    def compile(
-        self,
-        cdg: CDG,
-        cdg_spec: CDGSpec,
-        import_lib: dict,
-        verbose: int = 0,
-        inline_attr: bool = False,
-    ):
-        """
-        Compile the cdg to a function for dynamical system simulation
-        help_fn: list of non-built-in function written in attributes, e.g., [sin, trapezoidal]
-        import_lib: additional functions or libraries, e.g., {'sin': sin, 'np': np}
-        verbose: 0: no verbose, 1: print the compilation progress
-        inline_attr: inline the attribute definitions into dynamical system function.
-                    Note that this will cause bug if the attributes are random variable.
+        Returns:
+            prog (FunctionType): The compiled function.
+            node_mapping (dict[CdgNode, int]): map the CDGNode to the corresponding
+            index in the state variables. The node_mapping[node] points to the index
+            of the 0th order term and the n-th order deravitves (if applicable) index
+            is node_mapping[node] + n.
+            switch_mapping (dict[CDGEdge, int]): map the CDGEdge to the corresponding
+            index in the switch variables.
+            attr_mapping (dict[CDGElement, dict[str, int]]): map the CDGElement to the
+            corresponding index in the attribute variables. The attr_mapping[ele][attr]
+            points to the index of the attribute.
         """
 
         self._rewrite.set_attr_rn_fn(rn_attr)
         self._verbose = verbose
 
-        self._var_mapping, self._ode_fn_io_names = self._collect_ode_fn_io(cdg)
-        self._switch_mapping = {edge: i for i, edge in enumerate(cdg.switches)}
+        node_mapping, ode_fn_io_names = self._collect_ode_fn_io(cdg)
+        switch_mapping = {edge: i for i, edge in enumerate(cdg.switches)}
+        attr_mapping, attr_idx = {}, 0
+        for ele in cdg.nodes + cdg.edges:
+            attr_mapping[ele] = {}
+            for attr_name in ele.attrs.keys():
+                attr_mapping[ele][attr_name] = attr_idx
+                attr_idx += 1
 
-        attr_var_def, attr_mapping = self._compile_attribute_var(
-            cdg, inline=inline_attr
-        )
-        self._rewrite.attr_mapping = attr_mapping
-        ode_fn = self._compile_ode_fn(cdg, cdg_spec)
+        attr_var_def = self._compile_attribute_var(switch_mapping, attr_mapping)
+        ode_fn = self._compile_ode_fn(cdg, cdg_spec, ode_fn_io_names)
         solv_ivp_stmts = self._compile_solve_ivp()
 
         stmts = attr_var_def + [ode_fn] + solv_ivp_stmts
@@ -295,11 +253,17 @@ class ArkCompiler:
         if verbose:
             print("Compiling the program...")
         code = compile(source=module, filename=self.tmp_file_name, mode="exec")
-        self._namespace.update(import_lib)
         exec(code, self._namespace)
 
         if verbose:
             print("Compilation finished")
+
+        return (
+            self._namespace[self.prog_name],
+            node_mapping,
+            switch_mapping,
+            attr_mapping,
+        )
 
     def compile_sympy(
         self,
@@ -367,23 +331,30 @@ class ArkCompiler:
         """Compile user defined functions to ast.FunctionDef"""
         return [ast.parse(inspect.getsource(fn)).body[0] for fn in funcs]
 
-    def _compile_attribute_var(self, cdg: CDG, inline: bool) -> list[ast.Assign]:
+    def _compile_attribute_var(
+        self,
+        switch_mapping: dict[CDGEdge, int],
+        attr_mapping: dict[CDGElement, dict[str, int]],
+    ) -> list[ast.Assign]:
         """Compile the attributes of nodes and edges to variables"""
 
         ele: CDGElement
 
-        stmts = [self.INIT_RAND_EXPT]
+        stmts = []
 
         # Map the input vector to the state variables
-        if cdg.switches:
+        if switch_mapping:
+            edge_names = [None for _ in range(len(switch_mapping))]
+            for edge, idx in switch_mapping.items():
+                edge_names[idx] = edge.name
             stmts.append(
                 ast.Assign(
                     [
                         set_ctx(
                             ast.Tuple(
                                 [
-                                    mk_var(switch_attr(edge.name))
-                                    for edge in cdg.switches
+                                    mk_var(switch_attr(edge_name))
+                                    for edge_name in edge_names
                                 ]
                             ),
                             ast.Store,
@@ -393,52 +364,52 @@ class ArkCompiler:
                 )
             )
 
-        attr_to_ast_node = {}
-        if self._verbose:
-            eles = tqdm(cdg.nodes + cdg.edges, desc="Compiling attributes")
-        else:
-            eles = cdg.nodes + cdg.edges
-
-        for ele in eles:
-            vname = ele.name
-            lhs, rhs = [], []
-            if ele.attrs.items():
-                for attr_name in ele.attrs.keys():
-                    renamed_attr = rn_attr(vname, attr_name)
-                    attr_expr_str = ele.get_attr_str(attr_name)
-                    attr_expr = parse_expr(attr_expr_str).value
-                    if inline:
-                        attr_to_ast_node[renamed_attr] = attr_expr
-                    else:
-                        attr_var = mk_var(renamed_attr)
-                        lhs.append(attr_var)
-                        rhs.append(attr_expr)
-                        attr_to_ast_node[renamed_attr] = mk_var(renamed_attr)
-                if lhs and rhs:
-                    stmts.append(
-                        ast.Assign(
-                            [set_ctx(ast.Tuple(lhs), ast.Store)],
-                            set_ctx(ast.Tuple(rhs), ast.Load),
+        if attr_mapping:
+            attr_names = [
+                None for _ in range(sum(len(attrs) for attrs in attr_mapping.values()))
+            ]
+            for ele, attrs in attr_mapping.items():
+                for attr_name, idx in attrs.items():
+                    attr_names[idx] = rn_attr(ele.name, attr_name)
+            stmts.append(
+                ast.Assign(
+                    [
+                        set_ctx(
+                            ast.Tuple([mk_var(attr_name) for attr_name in attr_names]),
+                            ast.Store,
                         )
-                    )
-        return stmts, attr_to_ast_node
+                    ],
+                    set_ctx(mk_var(self.ATTR_VAL), ast.Load),
+                )
+            )
+        return stmts
 
     def _collect_ode_fn_io(self, cdg: CDG) -> tuple[dict[CDGNode, int], list]:
-        """Collect the input/output node mapping and var names of the ode function"""
-        zeroth_order_var_pos = 0
-        var_mapping = {}
-        order_node_names = [[] for _ in range(1, cdg.ds_order + 1)]
+        """Collect the input/output node mapping and var names of the ode function
+
+        Args:
+            cdg (CDG): The input CDG
+
+        Returns:
+            node_to_state_var (dict[CDGNode, int]): map CDGNode to the corresponding index
+            in the state variables. The node_to_state_var[node] points to the index of the 0th
+            order term and the n-th order deravitves (if applicable) index is
+            node_to_state_var[node] + n.
+            ode_input_return_names (list): names of the state variables of the compiled
+            ode function for scipy.integrate.solve_ivp simulation.
+        """
+        node_to_state_var = {}
+        ode_input_return_names = []
         for node_order in range(1, cdg.ds_order + 1):
             for node in cdg.nodes_in_order(node_order):
-                var_mapping[node] = zeroth_order_var_pos
-                zeroth_order_var_pos += 1
+                node_to_state_var[node] = len(ode_input_return_names)
                 for order in range(node_order):
-                    order_node_names[order].append(ddt(node.name, order=order))
-        # sum the lists in order_node_names
-        input_return_names = [n for names in order_node_names for n in names]
-        return var_mapping, input_return_names
+                    ode_input_return_names.append(ddt(node.name, order=order))
+        return node_to_state_var, ode_input_return_names
 
-    def _compile_ode_fn(self, cdg: CDG, cdg_spec: CDGSpec) -> ast.FunctionDef:
+    def _compile_ode_fn(
+        self, cdg: CDG, cdg_spec: CDGSpec, io_names: list[str]
+    ) -> ast.FunctionDef:
         """Compile the cdg to the ode function for scipy.integrate.solve_ivp simulation"""
 
         node: CDGNode
@@ -449,13 +420,11 @@ class ArkCompiler:
         reduction: Reduction
 
         rule_dict = cdg_spec.prod_rule_dict()
-        # if cdg.ds_order != 1:
-        # raise NotImplementedError("only support first order dynamical system now")
 
         stmts = []
         input_vec = self.ODE_INPUT_VAR
         ode_fn_name = self.ODE_FN_NAME
-        input_return_names = self._ode_fn_io_names
+        input_return_names = io_names
 
         stmts.append(
             ast.Assign(
@@ -567,7 +536,7 @@ class ArkCompiler:
             mk_arg(self.TIME_RANGE),
             mk_arg(self.INIT_STATE),
             mk_arg(self.SWITCH_VAL),
-            mk_arg(self.INIT_SEED),
+            mk_arg(self.ATTR_VAL),
             mk_arg(self.SIM_SEED),
         ]
         kwarg = mk_arg(self.KWARGS)

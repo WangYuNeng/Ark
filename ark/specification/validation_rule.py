@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from itertools import product
 from typing import Callable, Optional
-from ark.cdg.cdg import CDGNode, CDGEdge
+
+from ark.cdg.cdg import CDGEdge, CDGNode
 from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.range import Range
 from ark.specification.rule_keyword import Target, kw_name

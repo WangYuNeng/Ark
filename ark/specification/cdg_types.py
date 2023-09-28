@@ -1,11 +1,12 @@
 """
 Meta classes for CDG types.
 """
-from abc import abstractmethod
-from typing import Optional, Mapping, Any
 import inspect
-from ark.reduction import Reduction, SUM
-from ark.cdg.cdg import CDGElement, CDGNode, CDGEdge
+from abc import abstractmethod
+from typing import Any, Mapping, Optional
+
+from ark.cdg.cdg import CDGEdge, CDGElement, CDGNode
+from ark.reduction import SUM, Reduction
 from ark.specification.attribute_def import AttrDef, AttrImpl
 
 

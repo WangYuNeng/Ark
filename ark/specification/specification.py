@@ -1,5 +1,6 @@
 from typing import Optional
-from ark.specification.cdg_types import CDGType, NodeType, EdgeType
+
+from ark.specification.cdg_types import CDGType, EdgeType, NodeType
 from ark.specification.production_rule import ProdRule, ProdRuleId
 from ark.specification.validation_rule import ValRule
 

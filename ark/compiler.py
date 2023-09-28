@@ -1,21 +1,22 @@
 """Compiler for CDG to dynamical system simulation"""
 import ast
-import inspect
-from typing import Optional, Mapping, Any
-from types import FunctionType
 import copy
+import inspect
 from itertools import product
+from types import FunctionType
+
 import numpy as np
+import scipy
 import sympy
 from tqdm import tqdm
-import scipy
-from ark.rewrite import BaseRewriteGen
-from ark.cdg.cdg import CDG, CDGNode, CDGEdge, CDGElement
-from ark.specification.specification import CDGSpec
-from ark.specification.cdg_types import NodeType, EdgeType
-from ark.specification.production_rule import ProdRule, ProdRuleId
-from ark.specification.rule_keyword import Target, TIME, kw_name
+
+from ark.cdg.cdg import CDG, CDGEdge, CDGElement, CDGNode
 from ark.reduction import Reduction
+from ark.rewrite import BaseRewriteGen
+from ark.specification.cdg_types import EdgeType, NodeType
+from ark.specification.production_rule import ProdRule, ProdRuleId
+from ark.specification.rule_keyword import TIME, Target, kw_name
+from ark.specification.specification import CDGSpec
 
 
 def ddt(name: str, order: int) -> str:

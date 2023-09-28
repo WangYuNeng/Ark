@@ -1,10 +1,10 @@
 from typing import Mapping
-import numpy as np
-from ark.specification.rule_keyword import SRC, DST, SELF, Target
-from ark.specification.attribute_def import AttrDef, AttrImpl
-from ark.reduction import Reduction
 
-# from ark.specification.types import CDGType, NodeType, EdgeType
+import numpy as np
+
+from ark.reduction import Reduction
+from ark.specification.attribute_def import AttrDef, AttrImpl
+from ark.specification.rule_keyword import DST, SELF, SRC, Target
 
 
 class CDGElement:

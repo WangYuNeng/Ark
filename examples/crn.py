@@ -8,18 +8,19 @@ Idea maybe? https://pubs.acs.org/doi/10.1021/acssynbio.0c00050
   that are geared specificallyfor modeling computational nucleic acid
   devices such as thosereviewed above.
 """
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+
 from ark.ark import Ark
-from ark.specification.specification import CDGSpec
 from ark.cdg.cdg import CDG
-from ark.specification.attribute_def import AttrDef
-from ark.specification.range import Range
-from ark.specification.cdg_types import NodeType, EdgeType
-from ark.specification.production_rule import ProdRule
-from ark.specification.validation_rule import ValRule, ValPattern
-from ark.specification.rule_keyword import SRC, DST, EDGE, VAR
 from ark.reduction import PRODUCT
+from ark.specification.attribute_def import AttrDef
+from ark.specification.cdg_types import EdgeType, NodeType
+from ark.specification.production_rule import ProdRule
+from ark.specification.range import Range
+from ark.specification.rule_keyword import DST, EDGE, SRC, VAR
+from ark.specification.specification import CDGSpec
+from ark.specification.validation_rule import ValPattern, ValRule
 
 Cpd = NodeType(name="Cpd", order=1)
 Rct = NodeType(

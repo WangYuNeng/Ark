@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-from pysmt.shortcuts import GE, LE, Equals, Int, And
+
+from pysmt.shortcuts import GE, LE, And, Equals, Int
 
 
 @dataclass

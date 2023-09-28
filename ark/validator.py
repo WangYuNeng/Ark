@@ -2,9 +2,10 @@
 Ark Validator
 TODO: Write testbench
 """
-from typing import Optional, Callable
+from typing import Callable, Optional
+
+from ark.cdg.cdg import CDG, CDGEdge, CDGNode
 from ark.solver import Solver
-from ark.cdg.cdg import CDG, CDGNode, CDGEdge
 from ark.specification.cdg_types import NodeType
 from ark.specification.specification import CDGSpec
 from ark.specification.validation_rule import ValPattern

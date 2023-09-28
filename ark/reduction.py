@@ -3,6 +3,7 @@ Reduction functions for the dynamical system.
 """
 import ast
 from dataclasses import dataclass
+
 import sympy
 
 

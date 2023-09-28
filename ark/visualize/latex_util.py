@@ -1,10 +1,11 @@
-from enum import Enum
-import re
-from sympy import latex
-import sympy
 import os
-from pylatexenc.latex2text import LatexNodes2Text
+import re
 from dataclasses import dataclass
+from enum import Enum
+
+import sympy
+from pylatexenc.latex2text import LatexNodes2Text
+from sympy import latex
 from sympy.printing import julia_code as codegen
 
 
@@ -263,7 +264,7 @@ class LatexVerbatim:
 
     def add_token(self, text):
         assert isinstance(text, str)
-        if not self._delim is None:
+        if self._delim is not None:
             self.ctx.append(self._delim)
             self._delim = None
 
@@ -347,7 +348,7 @@ class LatexVerbatim:
             ):
                 do_linebreak = True
 
-            elif not self.linewidth is None:
+            elif self.linewidth is not None:
                 currbuf = width + lw
                 nextbuf = currbuf + lb_ctx[idx + 1][0]
                 do_linebreak = nextbuf > self.linewidth

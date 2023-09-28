@@ -1,10 +1,10 @@
-import palettable
-from dataclasses import dataclass
-from typing import *
-import graphviz
-from enum import Enum
 import os
-import matplotlib.pyplot as plt
+from dataclasses import dataclass
+from enum import Enum
+from typing import *
+
+import graphviz
+import palettable
 
 
 class NodeShading(Enum):
@@ -239,7 +239,7 @@ def cdg_to_graphviz(
     for edge in cdg.edges:
         graph.add_edge(edge)
 
-    if not post_layout_hook is None:
+    if post_layout_hook is not None:
         post_layout_hook(graph)
 
     graph.save(subdir)

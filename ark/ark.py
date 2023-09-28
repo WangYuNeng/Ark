@@ -2,6 +2,8 @@
 from types import FunctionType
 from typing import Optional
 
+from ark.cdg.cdg import CDG, CDGExecutionData, CDGNode
+
 from ark.cdg.cdg import CDG, AttrImpl, CDGExecutionData, CDGNode
 from ark.compiler import ArkCompiler
 from ark.rewrite import RewriteGen

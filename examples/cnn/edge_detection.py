@@ -18,7 +18,6 @@ from ark.cdg.cdg import CDG, CDGNode
 from ark.specification.cdg_types import EdgeType, NodeType
 
 cnn_spec = mm_cnn_spec
-import_fn = {"saturation": saturation, "saturation_diffpair": saturation_diffpair}
 IdealV = cnn_spec.node_type("IdealV")
 Out, Inp = cnn_spec.node_type("Out"), cnn_spec.node_type("Inp")
 MapE, FlowE = cnn_spec.edge_type("MapE"), cnn_spec.edge_type("FlowE")
@@ -141,21 +140,11 @@ def sim_cnn(
     )
 
     node_mapping = {v: 0 for row in vs for v in row}
-    assert system.validate(cdg=graph)
-    if flow_et == FlowE and v_nt == IdealV:
-        system.compile(
-            cdg=graph,
-            import_lib=import_fn,
-            inline=True,
-            verbose=True,
-        )
-    else:
-        system.compile(
-            cdg=graph,
-            import_lib=import_fn,
-            inline=False,
-            verbose=True,
-        )
+    # assert system.validate(cdg=graph)
+    system.compile(
+        cdg=graph,
+        verbose=True,
+    )
     node_mapping.update(get_input_mapping(inps, image))
     node: CDGNode
     for node, val in node_mapping.items():

@@ -105,7 +105,7 @@ system = Ark(
     cdg_spec=spec,
 )
 assert system.validate(cdg=graph)
-system.compile(cdg=graph, import_lib={})
+system.compile(cdg=graph)
 
 time_range = [0, 15]
 time_points = np.linspace(*time_range, 1000)

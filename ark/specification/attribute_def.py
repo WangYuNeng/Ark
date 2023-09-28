@@ -4,6 +4,8 @@ Attribute class for CDGType.
 from types import FunctionType
 from typing import NewType, Optional, Union
 
+import numpy as np
+
 from ark.specification.range import Range
 
 AttrImpl = NewType("AttrImpl", Union[int, float, FunctionType])  # why pylint error?
@@ -90,3 +92,16 @@ class AttrDefMismatch(AttrDef):
             return f"np.random.normal({val}, np.abs({val} * {self.rstd}))"
         else:
             return f"np.random.normal({val}, {self.std})"
+
+    def sample(self, mean: float) -> float:
+        """Sample a random value from the normal distribution.
+
+        Args:
+            mean (float): mean of the normal distribution
+        Returns:
+            float: a random value from the normal distribution
+        """
+        if self.rstd:
+            return np.random.normal(mean, np.abs(mean * self.rstd))
+        else:
+            return np.random.normal(mean, self.std)

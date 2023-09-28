@@ -171,9 +171,7 @@ def main():
         connection_mat, max_cut_size, max_cut = prob
         nodes, graph = create_max_cut_con(connection_mat, osc_nodetype, cp_et)
 
-        system.compile(
-            cdg=graph, import_lib={"locking_fn": locking_fn, "coupling_fn": coupling_fn}
-        )
+        system.compile(cdg=graph)
         time_range = [0, N_CYCLE * cycle]
         time_points = np.linspace(*time_range, 1000)
         if INITIALIZE is not None:
@@ -181,7 +179,7 @@ def main():
         else:
             np.random.seed(seed)
             graph.initialize_all_states(rand=True)
-        system.execute(cdg=graph, time_eval=time_points, sim_seed=seed)
+        system.execute(cdg=graph, time_eval=time_points, init_seed=seed)
         if seed == 1 and PLOT:
             plot_oscillation(
                 time_points,

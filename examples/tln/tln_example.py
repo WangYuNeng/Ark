@@ -24,7 +24,6 @@ IdealE = spec.edge_type("IdealE")
 InpV, InpI = spec.node_type("InpV"), spec.node_type("InpI")
 MmV, MmI = spec.node_type("MmV"), spec.node_type("MmI")
 MmE = spec.edge_type("MmE")
-import_fn = {"pulse": pulse}
 
 system = Ark(cdg_spec=spec)
 
@@ -189,7 +188,7 @@ def create_linear_tline(
 
 def nominal_simulation(cdg: CDG, time_range, name, post_process_hook=None):
     assert system.validate(cdg=cdg)
-    system.compile(cdg=cdg, import_lib=import_fn)
+    system.compile(cdg=cdg)
     cdg.initialize_all_states(val=0)
     time_points = np.linspace(*time_range, 1000)
     system.execute(cdg=cdg, time_eval=time_points, init_seed=123)
@@ -225,7 +224,7 @@ def mismatch_simulation(cdg, time_range, name, post_process_hook=None):
     N_RAND_SIM = 100
 
     assert system.validate(cdg=cdg)
-    system.compile(cdg=cdg, import_lib=import_fn)
+    system.compile(cdg=cdg)
     cdg.initialize_all_states(val=0)
 
     fig, ax = plt.subplots(1, 1, sharex=True)

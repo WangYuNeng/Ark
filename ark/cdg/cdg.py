@@ -3,21 +3,19 @@ from typing import Mapping
 import numpy as np
 
 from ark.reduction import Reduction
-from ark.specification.attribute_def import AttrDef, AttrImpl
+from ark.specification.attribute_def import AttrDef, AttrDefMismatch, AttrImpl
 from ark.specification.rule_keyword import DST, SELF, SRC, Target
 
 
 class CDGElement:
     """Base class for CDG nodes and edges."""
 
-    attr_def: Mapping[str, AttrDef]
+    _attr_def: Mapping[str, AttrDef]
 
-    def __init__(
-        self, cdg_type: "CDGType", name: str, **attrs: Mapping[str, AttrImpl]
-    ) -> None:
-        self.cdg_type = cdg_type
-        self.name = name
-        self.attrs = attrs
+    def __init__(self, cdg_type: "CDGType", name: str, **attrs: AttrImpl) -> None:
+        self._cdg_type = cdg_type
+        self._name = name
+        self._attrs = attrs
 
     def __str__(self) -> str:
         return self.name
@@ -25,7 +23,80 @@ class CDGElement:
     def get_attr_str(self, attr_name: str) -> str:
         """Return the string representation of the attribute value."""
         val = self.attrs[attr_name]
-        return self.attr_def[attr_name].attr_str(val)
+        return self._attr_def[attr_name].attr_str(val)
+
+    def attr_sample(self) -> dict[str, AttrImpl]:
+        """Sample all the attributes.
+
+        Returns:
+            dict[str, AttrImpl]: A instance of sampled attributes
+        """
+        return {
+            attr_name: self.get_attr_val(attr_name) for attr_name in self._attrs.keys()
+        }
+
+    def get_attr_val(self, attr_name: str) -> AttrImpl:
+        """Return the concretized attribute value.
+
+        If the attribute is a mismatched attribute, sample a value from the
+        normal distribution. Otherwise, return the attribute value.
+
+        Args:
+            attr_name (str): the name of the attribute
+
+        Returns:
+            AttrImpl: the concretized attribute value
+        """
+        if not isinstance(self.attr_def[attr_name], AttrDefMismatch):
+            return self.attrs[attr_name]
+        return self.attr_def[attr_name].sample(self.attrs[attr_name])
+
+    @property
+    def cdg_type(self) -> "CDGType":
+        """Return the CDG type of the element.
+
+        Returns:
+            CDGType: the CDG type of the element
+        """
+        return self._cdg_type
+
+    @property
+    def name(self) -> str:
+        """Return the name of the element.
+
+        Returns:
+            str: the name of the element.
+        """
+        return self._name
+
+    @name.setter
+    def name(self, name: str) -> None:
+        """Set the name of the element.
+
+        Args:
+            name (str): the name of the element.
+        """
+        self._name = name
+
+    @property
+    def attrs(self) -> dict[str, AttrImpl]:
+        """Return the attributes of the element.
+
+        The value of a mismatched attribute is the mean of its distribution.
+
+        Returns:
+            dict[str, AttrImpl]: the attributes of the element
+        """
+        return self._attrs
+
+    @property
+    def attr_def(self) -> Mapping[str, AttrDef]:
+        """Return the attribute definitions of the element.
+
+        Returns:
+            Mapping[str, AttrDef]: the attribute definitions of the element
+        """
+        return self._attr_def
 
 
 def sort_element(elements: list[CDGElement]) -> list[CDGElement]:

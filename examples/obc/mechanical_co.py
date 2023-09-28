@@ -47,7 +47,7 @@ if __name__ == "__main__":
     graph = CDG()
     graph.connect(cpl, node1, node2)
 
-    system.compile(cdg=graph, import_lib={})
+    system.compile(cdg=graph)
     time_range = [0, 10]
     time_points = np.linspace(*time_range, 1000)
     # mapping = compiler.var_mapping

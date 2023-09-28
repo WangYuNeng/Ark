@@ -1,4 +1,4 @@
-# ARK: A Programming  for Agile Development of Unconventional Computing Paradigms
+# ARK: A Programming Language for Agile Development of Unconventional Computing Paradigms
 
 This package implements the language described in [Design of Novel Analog Compute Paradigms with Ark](https://arxiv.org/abs/2309.08774). To setup the environment, please have `graphviz`, and a SMT solver in the system and run
 

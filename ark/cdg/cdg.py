@@ -1,4 +1,5 @@
 from typing import Mapping
+import numpy as np
 from ark.specification.rule_keyword import SRC, DST, SELF, Target
 from ark.specification.attribute_def import AttrDef, AttrImpl
 from ark.reduction import Reduction
@@ -37,10 +38,57 @@ class CDGNode(CDGElement):
 
     edges: set["CDGEdge"]
     reduction: Reduction
+    _init_vals: list[float]
+    _traces: list[np.ndarray]
 
     def __init__(self, cdg_type: "NodeType", name: str, **attrs) -> None:
         super().__init__(cdg_type, name, **attrs)
         self.edges = set()
+        self._init_vals = [None for _ in range(cdg_type.order)]
+        self._trace = [None for _ in range(cdg_type.order)]
+
+    @property
+    def init_vals(self) -> list[float]:
+        """Access all intitial values of the node.
+
+        Returns:
+            list[float]: Initial values listed by order (0~cdg_type.order-1)
+        """
+        return self._init_vals
+
+    @init_vals.setter
+    def init_vals(self, vals: list[float]) -> None:
+        node_order = self.cdg_type.order
+        if len(vals) != node_order:
+            raise RuntimeError(
+                f"Invalid initial value length. Expect {node_order} values."
+            )
+        self._init_vals = vals
+
+    def init_val(self, n: int) -> float:
+        """Access the initial value of the n-th order deravative of the node.
+
+        Args:
+            n (int): the order of the initial value to access
+
+        Returns:
+            float: The n-th order intitial value
+        """
+        return self._init_vals[n]
+
+    def set_init_val(self, val: float, n: int) -> None:
+        """Set the initial value of the n-th order deravative of the node.
+
+        Args:
+            val (float): the initial value
+            n (int): the order of the initial value to access
+        """
+        node_order = self.cdg_type.order
+        if n >= node_order:
+            raise RuntimeError(
+                f"Invalid initial value order. Expect order < {node_order}."
+            )
+        self._init_vals[n] = val
 
     @property
     def degree(self) -> int:
@@ -110,6 +158,29 @@ class CDGNode(CDGElement):
             else:
                 arrow = f"<{edge.name}-"
             print("\t", arrow, self.get_neighbor(edge=edge).name)
+
+    def get_trace(self, n: int) -> np.ndarray:
+        """Access the trace of the n-th order state of the node from simulation.
+
+        Args:
+            n (int): the order of the state to access
+        Returns:
+            np.ndarray: the trace of the n-th order state
+        """
+        if n > self.cdg_type.order:
+            raise RuntimeError("Invalid order")
+        elif self._trace[n] is None:
+            raise RuntimeError("Trace not available")
+        return self._trace[n]
+
+    def set_trace(self, n: int, trace: np.ndarray) -> None:
+        """Set the trace of the node from simulation.
+
+        Args:
+            n (int): the order of the state to set
+            trace (np.ndarray): the trace of the n-th order state
+        """
+        self._trace[n] = trace
 
 
 class CDGEdge(CDGElement):
@@ -206,6 +277,50 @@ class CDG:
             return sort_element(list(set.union(*self._order_to_nodes)))
         else:
             return sort_element(list(self._order_to_nodes[order]))
+
+    def stateful_nodes(self) -> list[CDGNode]:
+        """Access all stateful nodes, i.e., nodes with order > 0.
+
+        Returns:
+            list[CDGNode]: list of stateful nodes sorted by name
+        """
+
+        nodes = []
+        for order in range(1, self.ds_order + 1):
+            nodes += self.nodes_in_order(order)
+        return nodes
+
+    def total_1st_order_states(self) -> int:
+        """The total number of state variables in the system of
+        1st order differential equations.
+
+        Returns:
+            int: the number of state variables
+        """
+        return sum(
+            [
+                len(self.nodes_in_order(order)) * order
+                for order in range(1, self.ds_order + 1)
+            ]
+        )
+
+    def initialize_all_states(self, val: float = None, rand: bool = False) -> None:
+        """Initialize all state variables in the system of
+        1st order differential equations.
+
+        The function will set all the initial values of the stateful nodes with val or
+        random values if rand is True.
+
+        Args:
+            val (float): the initial value
+            rand (bool): whether to initialize with random values
+        """
+        if val and rand:
+            raise RuntimeError("Cannot specify both val and rand.")
+        for node in self.stateful_nodes():
+            node.init_vals = [
+                np.random.rand() if rand else val for _ in range(node.order)
+            ]
 
     @property
     def nodes(self) -> list[CDGNode]:

@@ -5,15 +5,16 @@ ref: https://ieeexplore.ieee.org/document/9531734
 
 from argparse import ArgumentParser
 from itertools import product
-import numpy as np
-from tqdm import tqdm
-import matplotlib.pyplot as plt
+
 import matplotlib as mpl
-from ark.compiler import ArkCompiler
-from ark.rewrite import RewriteGen
+import matplotlib.pyplot as plt
+import numpy as np
+from spec import T, calc_offset_std, coupling_fn, hw_obc_spec, locking_fn
+from tqdm import tqdm
+
+from ark.ark import Ark
 from ark.cdg.cdg import CDG
-from ark.specification.cdg_types import NodeType, EdgeType
-from spec import hw_obc_spec, calc_offset_std, locking_fn, coupling_fn, T
+from ark.specification.cdg_types import EdgeType, NodeType
 
 obc_spec = hw_obc_spec
 help_fn = [locking_fn, coupling_fn]
@@ -105,7 +106,7 @@ def gen_max_cut_prob(seed, w_n_bits=W_N_BITS):
     return connection_mat, max_cut_size, max_cut
 
 
-def plot_oscillation(time_points, sol, mapping, omega, scaling, title=None):
+def plot_oscillation(time_points, cdg: CDG, omega, scaling, title=None):
     """Plot the oscillation of the oscillator"""
     mpl.rcParams.update(mpl.rcParamsDefault)
     plt.rcParams.update(
@@ -113,8 +114,8 @@ def plot_oscillation(time_points, sol, mapping, omega, scaling, title=None):
     )
     cycle = time_points / T
     fig, ax = plt.subplots(nrows=2)
-    for node, idx in mapping.items():
-        phi = sol.sol(time_points)[idx].T * scaling
+    for node in cdg.stateful_nodes():
+        phi = node.get_trace(n=0) * scaling
         ax[1].plot(cycle, np.sin(omega * time_points + phi), label=node.name)
         ax[0].plot(cycle, phi)
     ax[0].set_title(r"$\phi$")
@@ -139,6 +140,7 @@ def phase_to_assignment(phase, atol=ATOL, rtol=RTOL):
 
 def main():
     problems = [gen_max_cut_prob(seed) for seed in range(N_TIRAL)]
+    system = Ark(cdg_spec=obc_spec)
 
     if BASELINE:
         correct = 0
@@ -169,41 +171,29 @@ def main():
         connection_mat, max_cut_size, max_cut = prob
         nodes, graph = create_max_cut_con(connection_mat, osc_nodetype, cp_et)
 
-        spec = obc_spec
-        compiler = ArkCompiler(rewrite=RewriteGen())
-        compiler.compile(
-            cdg=graph,
-            cdg_spec=spec,
-            import_lib={"locking_fn": locking_fn, "coupling_fn": coupling_fn},
+        system.compile(
+            cdg=graph, import_lib={"locking_fn": locking_fn, "coupling_fn": coupling_fn}
         )
         time_range = [0, N_CYCLE * cycle]
         time_points = np.linspace(*time_range, 1000)
-        mapping = compiler.var_mapping
         if INITIALIZE is not None:
-            init_states = compiler.map_init_state(
-                {node: INITIALIZE for node in mapping.keys()}
-            )
+            graph.initialize_all_states(val=INITIALIZE)
         else:
             np.random.seed(seed)
-            init_states = compiler.map_init_state(
-                {node: np.random.rand() * np.pi / scaling for node in mapping.keys()}
-            )
-        sol = compiler.prog(
-            time_range, init_states=init_states, sim_seed=seed, dense_output=True
-        )
+            graph.initialize_all_states(rand=True)
+        system.execute(cdg=graph, time_eval=time_points, sim_seed=seed)
         if seed == 1 and PLOT:
             plot_oscillation(
                 time_points,
-                sol,
-                mapping,
+                graph,
                 omega,
                 scaling,
                 title=f"{osc_nodetype.name}, {cp_et.name}",
             )
         node_to_assignment = {}
         sync_failed = False
-        for node, idx in mapping.items():
-            phi = sol.sol(time_points)[idx].T * scaling
+        for node in graph.stateful_nodes():
+            phi = node.get_trace(n=0) * scaling
             assigment = phase_to_assignment(phi[-1])
             if assigment is None:
                 sync_failed = True

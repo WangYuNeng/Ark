@@ -1,11 +1,12 @@
 """Wrapper class for the ARK framework"""
 from typing import Optional
-from ark.validator import ArkValidator, VALID
-from ark.solver import SMTSolver
+
+from ark.cdg.cdg import CDG
 from ark.compiler import ArkCompiler
 from ark.rewrite import RewriteGen
+from ark.solver import SMTSolver
 from ark.specification.specification import CDGSpec
-from ark.cdg.cdg import CDG
+from ark.validator import VALID, ArkValidator
 
 
 class Ark:

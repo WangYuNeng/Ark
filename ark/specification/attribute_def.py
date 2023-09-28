@@ -1,10 +1,10 @@
 """
 Attribute class for CDGType.
 """
-from typing import NewType, Union, Optional
 from types import FunctionType
+from typing import NewType, Optional, Union
+
 from ark.specification.range import Range
-from pylatexenc.latex2text import LatexNodes2Text
 
 AttrImpl = NewType("AttrImpl", Union[int, float, FunctionType])  # why pylint error?
 
@@ -24,7 +24,7 @@ class AttrDef:
         self.valid_range = attr_range
         self.nargs = nargs
         if self.type == FunctionType:
-            assert not nargs is None
+            assert nargs is not None
 
     def __repr__(self) -> str:
         return f"AttrDef(name={self.name}, type={self.type}, \

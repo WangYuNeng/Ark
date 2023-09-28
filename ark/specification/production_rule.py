@@ -3,19 +3,21 @@ Ark production Rule
 """
 import ast
 from dataclasses import dataclass
+
 import sympy
-from ark.specification.rule_keyword import (
-    Expression,
-    kw_name,
-    SRC,
-    DST,
-    SELF,
-    EDGE,
-    TIME,
-    Target,
-)
-from ark.specification.cdg_types import EdgeType, NodeType
+
 from ark.cdg.cdg import CDGEdge, CDGNode
+from ark.specification.cdg_types import EdgeType, NodeType
+from ark.specification.rule_keyword import (
+    DST,
+    EDGE,
+    SELF,
+    SRC,
+    TIME,
+    Expression,
+    Target,
+    kw_name,
+)
 
 
 @dataclass

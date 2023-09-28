@@ -3,17 +3,19 @@ Example: N-Path Filter implemented with a switch-capacitor network
 Single input single output, assume ideal switches
 """
 from types import FunctionType
+
 import matplotlib.pyplot as plt
 import numpy as np
+
 from ark.ark import Ark
-from ark.specification.attribute_def import AttrDef
-from ark.specification.range import Range
-from ark.specification.specification import CDGSpec
 from ark.cdg.cdg import CDG, CDGNode
-from ark.specification.cdg_types import NodeType, EdgeType
-from ark.specification.production_rule import ProdRule
-from ark.specification.rule_keyword import SRC, DST, EDGE, VAR, TIME
 from ark.reduction import SUM
+from ark.specification.attribute_def import AttrDef
+from ark.specification.cdg_types import EdgeType, NodeType
+from ark.specification.production_rule import ProdRule
+from ark.specification.range import Range
+from ark.specification.rule_keyword import DST, EDGE, SRC, TIME, VAR
+from ark.specification.specification import CDGSpec
 
 # Capacitors
 Cap = NodeType(

@@ -12,7 +12,7 @@ setup(
         "pysmt",
         "tqdm",
         "sympy",
-        "palletable",
+        "palettable",
         "graphviz",
     ],
 )

@@ -1,5 +1,12 @@
 from dataclasses import dataclass
 import sympy
+import logging
+
+
+def sympy_function(fn: callable) -> callable:
+    """Decorator to mark a function as sympy function"""
+    fn.is_sympy_function = True
+    return fn
 
 
 class Expression:
@@ -178,6 +185,9 @@ class Power(Expression):
         return self.base.sympy**self.exp.sympy
 
 
+def function_to_sympy():
+    pass
+
 @dataclass
 class FunctionCall(Expression):
     """Function call expression"""
@@ -190,8 +200,15 @@ class FunctionCall(Expression):
 
     @property
     def sympy(self) -> sympy.Expr:
-        sympy_fn = sympy.Function(self.fn.name)
-        return sympy_fn(*[arg.sympy for arg in self.args])
+        if getattr(self.fn, "is_sympy_function", False):
+            return self.fn(*[arg.sympy for arg in self.args])
+        try:
+            # TODO: Attempt to parse function into sympy function
+            raise NotImplementedError
+        except (ValueError, NotImplementedError) as e:
+            logging.warning(f'Failed to parse function {self.fn} ({self.fn.name}) into a sympy function, falling back to a sympy function call')
+            sympy_fn = sympy.Function(self.fn.name)
+            return sympy_fn(*[arg.sympy for arg in self.args])
 
 
 @dataclass

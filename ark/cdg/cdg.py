@@ -1,10 +1,19 @@
-from typing import Mapping
+from typing import Mapping, NewType, Optional
 
 import numpy as np
 
 from ark.reduction import Reduction
 from ark.specification.attribute_def import AttrDef, AttrDefMismatch, AttrImpl
 from ark.specification.rule_keyword import DST, SELF, SRC, Target
+
+CDGExecutionData = NewType(
+    "CDGExecutionData",
+    tuple[
+        dict["CDGNode", list],
+        dict["CDGEdge", bool],
+        dict["CDGElement", dict[str, AttrImpl]],
+    ],
+)
 
 
 class CDGElement:
@@ -24,6 +33,18 @@ class CDGElement:
         """Return the string representation of the attribute value."""
         val = self.attrs[attr_name]
         return self._attr_def[attr_name].attr_str(val)
+
+    def set_attr_val(self, attr_name: str, val: AttrImpl) -> None:
+        """Set the attribute value.
+
+        Args:
+            attr_name (str): name of the attribute
+            val (AttrImpl): value of the attribute
+        """
+        if attr_name not in self.attr_def:
+            raise RuntimeError(f"{self.name} does not have attribute {attr_name}")
+        if self.attr_def[attr_name].check(val):
+            self._attrs[attr_name] = val
 
     def attr_sample(self) -> dict[str, AttrImpl]:
         """Sample all the attributes.
@@ -97,6 +118,15 @@ class CDGElement:
             Mapping[str, AttrDef]: the attribute definitions of the element
         """
         return self._attr_def
+
+    @attr_def.setter
+    def attr_def(self, attr_def: Mapping[str, AttrDef]) -> None:
+        """Set the attribute definitions of the element.
+
+        Args:
+            attr_def (Mapping[str, AttrDef]): the attribute definitions of the element
+        """
+        self._attr_def = attr_def
 
 
 def sort_element(elements: list[CDGElement]) -> list[CDGElement]:
@@ -260,6 +290,7 @@ class CDGEdge(CDGElement):
     def __init__(self, cdg_type: "CDGType", name: str, **attrs) -> None:
         super().__init__(cdg_type, name, **attrs)
         self._src, self._dst = None, None
+        self._switch_val = False
 
     def connect(self, src: CDGNode, dst: CDGNode) -> None:
         """Connect this edge to two nodes."""
@@ -282,6 +313,28 @@ class CDGEdge(CDGElement):
         """Return whether this edge is also a switch."""
         return self._switchable
 
+    @property
+    def switch_val(self) -> bool:
+        """Return the switch value of this edge.
+
+        Returns:
+            bool: the switch value of this edge, True for on and False for off.
+        """
+        if not self._switchable:
+            raise RuntimeError("Edge is not switchable")
+        return self._switch_val
+
+    @switch_val.setter
+    def switch_val(self, val: bool) -> None:
+        """Set the switch value of this edge.
+
+        Args:
+            val (bool): the switch value of this edge, True for on and False for off.
+        """
+        if not self._switchable:
+            raise RuntimeError("Edge is not switchable")
+        self._switch_val = val
+
     @switchable.setter
     def switchable(self, switchable: bool) -> None:
         self._switchable = switchable
@@ -295,9 +348,9 @@ class CDG:
     _order_to_nodes: list[dict]
 
     def __init__(self) -> None:
-        self._order_to_nodes = [set()]
-        self._edges = set()
-        self._switches = set()
+        self._order_to_nodes: list[set[CDGNode]] = [set()]
+        self._edges: set[CDGEdge] = set()
+        self._switches: set[CDGEdge] = set()
 
     def connect(self, edge: CDGEdge, src: CDGNode, dst: CDGNode):
         """Add an edge to the graph."""
@@ -349,6 +402,7 @@ class CDG:
         else:
             return sort_element(list(self._order_to_nodes[order]))
 
+    @property
     def stateful_nodes(self) -> list[CDGNode]:
         """Access all stateful nodes, i.e., nodes with order > 0.
 
@@ -361,6 +415,7 @@ class CDG:
             nodes += self.nodes_in_order(order)
         return nodes
 
+    @property
     def total_1st_order_states(self) -> int:
         """The total number of state variables in the system of
         1st order differential equations.
@@ -375,6 +430,71 @@ class CDG:
             ]
         )
 
+    def execution_data(
+        self,
+        seed: Optional[int] = None,
+    ) -> CDGExecutionData:
+        """Return the data of CDG for execution.
+
+        Args:
+            seed (int, optional): The seed for random samples of attribut values.
+        Returns:
+            tuple[dict[CDGNode, dict[int, int | float]], dict[CDGEdge, bool],
+            dict[CDGElement, dict[str, AttrImpl]]]: The node to initial state values
+            mapping, the switch to values mapping, and the element to attribute
+            mapping.
+        """
+        return (
+            self.node_to_init_state,
+            self.switch_to_val,
+            self.element_to_attr_sample(seed),
+        )
+
+    @property
+    def node_to_init_state(self) -> dict[CDGNode, list]:
+        """Return the mapping from nodes to initial state values.
+
+        Returns:
+            dict[CDGNode, list]: The mapping from nodes to the mapping
+            from order to initial state values.
+        """
+        node_to_init_state = {}
+        for node in self.stateful_nodes:
+            node_to_init_state[node] = [None for _ in range(node.order)]
+            for order in range(node.order):
+                node_to_init_state[node][order] = node.init_val(order)
+        return node_to_init_state
+
+    @property
+    def switch_to_val(self) -> dict[CDGEdge, bool]:
+        """Return the mapping from switches to their values.
+
+        Returns:
+            dict[CDGEdge, bool]: The mapping from switches to their values,
+        """
+        switch_to_val = {}
+        for edge in self.switches:
+            switch_to_val[edge] = edge.switch_val
+        return switch_to_val
+
+    def element_to_attr_sample(
+        self, seed: Optional[int] = None
+    ) -> dict[CDGElement, dict[str, AttrImpl]]:
+        """Return the mapping from elements to their attributes.
+
+        Returns:
+            dict[CDGElement, dict[str, AttrImpl]]: The mapping from elements to the mapping
+            from their attributes to their (sampled) values.
+        """
+        if seed is not None:
+            np.random.seed(seed)
+        element_to_attr = {}
+        for node in self.nodes:
+            element_to_attr[node] = node.attr_sample()
+        for edge in self.edges:
+            element_to_attr[edge] = edge.attr_sample()
+        return element_to_attr
+
     def initialize_all_states(self, val: float = None, rand: bool = False) -> None:
         """Initialize all state variables in the system of
         1st order differential equations.
@@ -388,7 +508,7 @@ class CDG:
         """
         if val and rand:
             raise RuntimeError("Cannot specify both val and rand.")
-        for node in self.stateful_nodes():
+        for node in self.stateful_nodes:
             node.init_vals = [
                 np.random.rand() if rand else val for _ in range(node.order)
             ]
@@ -404,7 +524,7 @@ class CDG:
         return sort_element(list(self._edges))
 
     @property
-    def switches(self) -> list[CDGElement]:
+    def switches(self) -> list[CDGEdge]:
         """Return all switches in the graph sorted by node.name."""
         return sort_element(list(self._switches))
 

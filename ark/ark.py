@@ -2,9 +2,7 @@
 from types import FunctionType
 from typing import Optional
 
-import numpy as np
-
-from ark.cdg.cdg import CDG
+from ark.cdg.cdg import CDG, AttrImpl, CDGEdge, CDGElement, CDGExecutionData, CDGNode
 from ark.compiler import ArkCompiler
 from ark.rewrite import RewriteGen
 from ark.solver import SMTSolver
@@ -80,27 +78,44 @@ class Ark:
 
     def execute(
         self,
-        cdg: CDG,
-        time_eval: list[float],
+        cdg: Optional[CDG] = None,
+        cdg_execution_data: Optional[CDGExecutionData] = None,
+        time_eval: list[float] = None,
         init_seed: Optional[int] = None,
-        sim_seed: Optional[int] = 0,
+        sim_seed: int = 0,
+        store_inplace: bool = True,
         **kwargs,
-    ) -> None:
-        """Execute the compiled program with the given CDG
+    ) -> None | dict[CDGNode, list[list[float]]]:
+        """Execute the compiled program with the given CDG or CDG data
 
-        The traces of the stateful nodes will be stored CDGNodes
+        The traces of the stateful nodes are stored CDGNodes if store_inplace is True.
+        Otherwise, the traces will be returned as a dictionary.
+        Execution from CDG data and not stored in-place is to support multiprocessing.
 
         Args:
-            cdg (CDG): The CDG to execute
-            time_eval (list[float]): time points to evaluate
+            cdg (CDG, optional): The CDG to execute.
+            cdg_execution_data (CDGExecutionData, optional): The CDG data to execute.
+            time_eval (list[float]): time points to evaluate.
             init_seed (int, optional): Seed for intialize mismatched attributes.
             Defaults to 0.
             sim_seed (int, optional): Seed for ode simulation. Defaults to 0.
+            store_inplace (bool, optional): Store the execution results in cdg.
+            Defaults to True.
+        Returns:
+            None | dict[CDGNode, list[list[float]]]: The mapping from stateful nodes
+            to execution traces if store_inplace is False.
         """
         assert self._prog is not None, "Program is not compiled."
-        init_states = self._map_init_state(cdg)
-        switch_vals = self._map_switch_val(cdg)
-        attr_vals = self._map_attr_val(cdg, seed=init_seed)
+        if not cdg and not cdg_execution_data:
+            raise ValueError("Either CDG or CDG data must be provided.")
+        if cdg:
+            if cdg_execution_data:
+                Warning("CDG provided. CDG data is ignored.")
+            cdg_execution_data = cdg.execution_data(seed=init_seed)
+        node_to_init_val, switch_to_val, element_to_attr = cdg_execution_data
+        init_states = self._map_init_state(node_to_init_val)
+        switch_vals = self._map_switch_val(switch_to_val)
+        attr_vals = self._map_attr_val(element_to_attr)
         sol = self._prog(
             time_range=[time_eval[0], time_eval[-1]],
             init_states=init_states,
@@ -110,7 +125,18 @@ class Ark:
             t_eval=time_eval,
             **kwargs,
         )
-        self._store_exec_results(cdg, sol)
+        if store_inplace:
+            if not cdg:
+                raise ValueError("CDG must be provided to store the results in-place.")
+            self._store_exec_results(cdg, sol)
+        else:
+            return {
+                node: [
+                    sol.y[self._node_mapping[node] + order]
+                    for order in range(node.order)
+                ]
+                for node in self._node_mapping
+            }
 
     def print_prog(self) -> None:
         """Print the compiled program"""
@@ -156,69 +182,73 @@ class Ark:
             sol (list[list[float]]): The execution results
         """
         assert self._node_mapping is not None, "Node mapping is not constructed."
-        for node in cdg.stateful_nodes():
+        for node in cdg.stateful_nodes:
             for order in range(node.order):
                 node.set_trace(n=order, trace=sol.y[self._node_mapping[node] + order])
 
-    def _map_init_state(self, cdg: CDG) -> list[int | float]:
+    def _map_init_state(
+        self, node_to_init_state: dict[CDGNode, list]
+    ) -> list[int | float]:
         """Map the initial state values to the corresponding position
 
         Args:
-            cdg (CDG): The input CDG contains the initial state values
+            node_to_init_state (dict[CDGNode, list]): The mapping from nodes to the mapping
+            from order to initial state values.
 
         Returns:
             init_states (list[int | float]): list of initial state values
             arranged for the compiled ode simulation
         """
-        n_states = cdg.total_1st_order_states()
-        statefule_nodes = cdg.stateful_nodes()
+        n_states = sum(
+            [len(init_states) for init_states in node_to_init_state.values()]
+        )
         assert self._node_mapping is not None, "Node mapping is not constructed."
-        assert len(statefule_nodes) == len(self._node_mapping)
+        assert node_to_init_state.keys() == self._node_mapping.keys()
         init_states = [0 for _ in range(n_states)]
-        for node in statefule_nodes:
-            node_order = node.order
-            for order in range(node_order):
-                init_states[self._node_mapping[node] + order] = node.init_val(order)
+        for node in node_to_init_state:
+            init_vals = node_to_init_state[node]
+            for order, val in enumerate(init_vals):
+                init_states[self._node_mapping[node] + order] = val
         return init_states
 
-    def _map_switch_val(self, cdg: CDG) -> list[int | float]:
+    def _map_switch_val(self, switch_to_val: dict[CDGEdge, bool]) -> list[int | float]:
         """Map the switch values to the corresponding position
 
         Args:
-            cdg (CDG): The input CDG contains the switch values
+            switch_to_val (dict[CDGEdge, bool]): The mapping from switches to values.
 
         Returns:
             list[int | float]: list of switch values
             arranged for the compiled ode simulation
         """
-        switches = cdg.switches
+        n_switch = len(switch_to_val)
         assert self._edge_mapping is not None, "Edge mapping is not constructed."
-        assert len(switches) == len(self._edge_mapping)
-        switch_vals = [0 for _ in range(len(switches))]
-        for switch in switches:
-            switch_vals[self._edge_mapping[switch]] = switch.val
+        assert n_switch == len(self._edge_mapping)
+        switch_vals = [0 for _ in range(n_switch)]
+        for switch, val in switch_to_val.items():
+            switch_vals[self._edge_mapping[switch]] = val
         return switch_vals
 
-    def _map_attr_val(self, cdg: CDG, seed: int) -> list[int | float | FunctionType]:
+    def _map_attr_val(
+        self, element_to_attr_sample: dict[CDGElement, dict[str, AttrImpl]]
+    ) -> list[int | float | FunctionType]:
         """Map the attribute values to the corresponding position
 
         Args:
-            cdg (CDG): The input CDG contains the attribute values
-            seed (int): Seed for random sampling of mismatched attributes
+            element_to_attr_sample (dict[CDGElement, dict[str, AttrImpl]]): The mapping
+            from elements to the mapping from attributes to values.
 
         Returns:
             list[int | float | FunctionType]: list of attribute values
             arranged for the compiled ode simulation
         """
-        elements = cdg.nodes + cdg.edges
+
         assert self._attr_mapping is not None, "Attribute mapping is not constructed."
-        assert len(elements) == len(self._attr_mapping)
+        assert len(element_to_attr_sample) == len(self._attr_mapping)
         attr_vals = [
             0 for _ in range(sum(len(attrs) for attrs in self._attr_mapping.values()))
         ]
-        if seed is not None:
-            np.random.seed(seed)
-        for ele in elements:
-            for attr, val in ele.attr_sample().items():
+        for ele, attrs in element_to_attr_sample.items():
+            for attr, val in attrs.items():
                 attr_vals[self._attr_mapping[ele][attr]] = val
         return attr_vals

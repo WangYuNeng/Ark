@@ -14,12 +14,16 @@ InpI = spec.node_type("InpI")
 MmE = spec.edge_type("MmE")
 
 MmE.attr_def = {
-    "ws": AttrDef("ws", attr_type=float, attr_range=Range(min=0.5, max=1.5)),
-    "wt": AttrDef("wt", attr_type=float, attr_range=Range(min=0.5, max=1.5)),
+    "ws": AttrDef(attr_type=float, attr_range=Range(min=0.5, max=1.5)),
+    "wt": AttrDef(attr_type=float, attr_range=Range(min=0.5, max=1.5)),
 }
 
 
 system = Ark(cdg_spec=spec)
+time_range = [0, 2.5e-8]
+time_points = np.linspace(*time_range, 101, endpoint=True)
+analyzed_points = [i for i in range(len(time_points))]
+analyzed_times = [f"{time_points[p]*1e9:.2f}ns" for p in analyzed_points]
 
 
 def setup_prob(names, bounds, outputs):
@@ -66,16 +70,6 @@ def plot_trace(save_path: str, sp: ProblemSpec, time_points, analyzed_times):
     # plt.show()
 
 
-line_len = 4
-time_range = [0, 2.5e-8]
-time_points = np.linspace(*time_range, 101, endpoint=True)
-analyzed_points = [i for i in range(len(time_points))]
-analyzed_times = [f"{time_points[p]*1e9:.2f}ns" for p in analyzed_points]
-
-
-# Single line setup
-
-
 def create_single_line(line_len: int, tline: CDG):
     source = InpI(fn=pulse, g=0.0)
     edges: list[CDGEdge] = [MmE(ws=1.0, wt=1.0)]
@@ -93,25 +87,38 @@ def create_single_line(line_len: int, tline: CDG):
     return tline, source, v_nodes, i_nodes, edges
 
 
-tline, source, v_nodes, i_nodes, edges = create_single_line(line_len, CDG())
+def create_two_line(line_len: int):
+    tline, source, v_nodes, i_nodes, edges = create_single_line(line_len, CDG())
+    tline, source2, v_nodes2, i_nodes2, edges2 = create_single_line(line_len, tline)
+    sources = [source, source2]
+    v_nodes = [v_nodes, v_nodes2]
+    i_nodes = [i_nodes, i_nodes2]
+    edges = [edges, edges2]
+    return tline, sources, v_nodes, i_nodes, edges
 
-system.compile(tline)
-tline.initialize_all_states(0)
 
-
-def tline_test_wl(l_w_arr, v_node_id, edge_id, integrate=False):
+def tline_test_wl(
+    l_w_arr,
+    tline: CDG,
+    v_nodes: list[CDGNode],
+    edges: list[CDGEdge],
+    v_node_id,
+    edge_id,
+    integrate=False,
+):
     traj_min_arr = []
     for row in l_w_arr:
         capacitance, ws, wt = row
         node2init, switch2val, element2attr = tline.execution_data()
-        element2attr[v_nodes[v_node_id]]["c"] = capacitance
-        element2attr[edges[edge_id]]["ws"] = ws
-        element2attr[edges[edge_id]]["wt"] = wt
+
+        element2attr[v_nodes[v_node_id].name]["c"] = capacitance
+        element2attr[edges[edge_id].name]["ws"] = ws
+        element2attr[edges[edge_id].name]["wt"] = wt
         exec_data = (node2init, switch2val, element2attr)
         node2trace = system.execute(
             cdg_execution_data=exec_data, time_eval=time_points, store_inplace=False
         )
-        trace = node2trace[v_nodes[0]][0]
+        trace = node2trace[v_nodes[0].name][0]
         trace = np.cumsum(trace)
         if integrate:
             trace = np.cumsum(trace)
@@ -119,6 +126,72 @@ def tline_test_wl(l_w_arr, v_node_id, edge_id, integrate=False):
     return np.array(traj_min_arr)
 
 
+def tline_test_ws(
+    w_arr, tline: CDG, v_nodes: list[CDGNode], edges: list[CDGNode], integrate=False
+):
+    traj_arr = []
+    for row in w_arr:
+        n_weights = len(row)
+        assert n_weights == len(edges) * 2
+        wss, wts = row[: n_weights // 2], row[n_weights // 2 :]
+        assert len(wss) == len(wts) == len(edges)
+        node2init, switch2val, element2attr = tline.execution_data()
+        for i, edge in enumerate(edges):
+            element2attr[edge.name]["ws"] = wss[i]
+            element2attr[edge.name]["wt"] = wts[i]
+        exec_data = (node2init, switch2val, element2attr)
+        node2trace = system.execute(
+            cdg_execution_data=exec_data, time_eval=time_points, store_inplace=False
+        )
+        trace = node2trace[v_nodes[0].name][0]
+        if integrate:
+            trace = np.cumsum(trace)
+        traj_arr.append([trace[p] for p in analyzed_points])
+    return np.array(traj_arr)
+
+
+def test_lc_gm(
+    lc_gm_arr,
+    tline: CDG,
+    v_nodes: list[list[CDGNode]],
+    i_nodes: list[list[CDGNode]],
+    edges: list[list[CDGEdge]],
+    integrate=False,
+):
+    """Wrapping function for testing l, c, gm params of the two-lines setup"""
+    traj_arr = []
+    for row in lc_gm_arr:
+        n_cs, n_ls, n_gms = len(v_nodes[0]), len(i_nodes[0]), len(edges[0])
+        css, lss, gmss = (
+            row[: n_cs * 2],
+            row[n_cs * 2 : n_cs * 2 + n_ls * 2],
+            row[n_cs * 2 + n_ls * 2 :],
+        )
+        node2init, switch2val, element2attr = tline.execution_data()
+        for i, (vns_i, ins_i, es_i) in enumerate(zip(v_nodes, i_nodes, edges)):
+            for j, node in enumerate(vns_i):
+                element2attr[node.name]["c"] = css[i * n_cs + j]
+            for j, node in enumerate(ins_i):
+                element2attr[node.name]["l"] = lss[i * n_ls + j]
+            for j, edge in enumerate(es_i):
+                element2attr[edge.name]["ws"] = gmss[i * n_gms + j]
+                element2attr[edge.name]["wt"] = gmss[i * n_gms + j + n_gms // 2]
+        exec_data = (node2init, switch2val, element2attr)
+        node2trace = system.execute(
+            cdg_execution_data=exec_data, time_eval=time_points, store_inplace=False
+        )
+        trace = node2trace[v_nodes[0][0].name][0] - node2trace[v_nodes[1][0].name][0]
+        if integrate:
+            trace = np.cumsum(trace)
+        traj_arr.append([trace[p] for p in analyzed_points])
+    return np.array(traj_arr)
+
+
+# Single line setup
+line_len = 4
+tline, source, v_nodes, i_nodes, edges = create_single_line(line_len, CDG())
+system.compile(tline)
+tline.initialize_all_states(0)
 sp = ProblemSpec(
     {
         "names": ["c[0]", "gm_s[1]", "gm_t[1]"],
@@ -127,15 +200,6 @@ sp = ProblemSpec(
         "dists": ["norm" for _ in range(3)],
     }
 )
-
-
-def test_fn():
-    pass
-
-
-sp.sample_sobol(2**10).evaluate_parallel(test_fn, nprocs=4).analyze_sobol()
-
-
 # Define the model inputs
 for n_id, e_id in [(0, 1), (0, -1), (-1, 1), (-1, -1)]:
     print(f"Running for n_id: {n_id}, e_id: {e_id}")
@@ -147,36 +211,20 @@ for n_id, e_id in [(0, 1), (0, -1), (-1, 1), (-1, -1)]:
             outputs=analyzed_times,
         )
         sp.sample_sobol(2**10).evaluate_parallel(
-            tline_test_wl, nprocs=4, v_node_id=n_id, edge_id=e_id, integrate=integrate
+            tline_test_wl,
+            nprocs=4,
+            tline=tline,
+            v_nodes=v_nodes,
+            edges=edges,
+            v_node_id=n_id,
+            edge_id=e_id,
+            integrate=integrate,
         ).analyze_sobol()
         if integrate:
             f_name = f"int_sobol_wl_nid_{n_id}_eid_{e_id}"
         else:
             f_name = f"sobol_wl_nid_{n_id}_eid_{e_id}"
         plot_trace(f_name, sp, time_points, analyzed_times)
-
-
-def tline_test_ws(w_arr, integrate=False):
-    traj_arr = []
-    for row in w_arr:
-        n_weights = len(row)
-        assert n_weights == len(edges) * 2
-        wss, wts = row[: n_weights // 2], row[n_weights // 2 :]
-        assert len(wss) == len(wts) == len(edges)
-        node2init, switch2val, element2attr = tline.execution_data()
-        for i, edge in enumerate(edges):
-            element2attr[edge]["ws"] = wss[i]
-            element2attr[edge]["wt"] = wts[i]
-        exec_data = (node2init, switch2val, element2attr)
-        node2trace = system.execute(
-            cdg_execution_data=exec_data, time_eval=time_points, store_inplace=False
-        )
-        trace = node2trace[v_nodes[0]][0]
-        if integrate:
-            trace = np.cumsum(trace)
-        traj_arr.append([trace[p] for p in analyzed_points])
-    return np.array(traj_arr)
-
 
 n_vars = len(edges) * 2
 analyzed_names = [f"gm_s[{i}]" for i in range(n_vars // 2)] + [
@@ -190,7 +238,12 @@ for integrate in [False, True]:
     )
     (
         sp.sample_saltelli(2**10).evaluate_parallel(
-            tline_test_ws, nprocs=4, integrate=integrate
+            tline_test_ws,
+            nprocs=4,
+            tline=tline,
+            v_nodes=v_nodes,
+            edges=edges,
+            integrate=integrate,
         )
     ).analyze_sobol(nprocs=8)
     if integrate:
@@ -202,51 +255,9 @@ for integrate in [False, True]:
 
 # Two line setup
 line_len = 1
-
-
-def create_two_line(line_len: int):
-    tline, source, v_nodes, i_nodes, edges = create_single_line(line_len, CDG())
-    tline, source2, v_nodes2, i_nodes2, edges2 = create_single_line(line_len, tline)
-    sources = [source, source2]
-    v_nodes = [v_nodes, v_nodes2]
-    i_nodes = [i_nodes, i_nodes2]
-    edges = [edges, edges2]
-    return tline, sources, v_nodes, i_nodes, edges
-
-
 tline, sources, v_nodes, i_nodes, edges = create_two_line(line_len)
 system.compile(tline)
 tline.initialize_all_states(0)
-
-
-def test_lc_gm(lc_gm_arr, integrate=False):
-    """Wrapping function for testing l, c, gm params of the two-lines setup"""
-    traj_arr = []
-    for row in lc_gm_arr:
-        n_cs, n_ls, n_gms = len(v_nodes[0]), len(i_nodes[0]), len(edges[0])
-        css, lss, gmss = (
-            row[: n_cs * 2],
-            row[n_cs * 2 : n_cs * 2 + n_ls * 2],
-            row[n_cs * 2 + n_ls * 2 :],
-        )
-        node2init, switch2val, element2attr = tline.execution_data()
-        for i, (vns_i, ins_i, es_i) in enumerate(zip(v_nodes, i_nodes, edges)):
-            for j, node in enumerate(vns_i):
-                element2attr[node]["c"] = css[i * n_cs + j]
-            for j, node in enumerate(ins_i):
-                element2attr[node]["l"] = lss[i * n_ls + j]
-            for j, edge in enumerate(es_i):
-                element2attr[edge]["ws"] = gmss[i * n_gms + j]
-                element2attr[edge]["wt"] = gmss[i * n_gms + j + n_gms // 2]
-        exec_data = (node2init, switch2val, element2attr)
-        node2trace = system.execute(
-            cdg_execution_data=exec_data, time_eval=time_points, store_inplace=False
-        )
-        trace = node2trace[v_nodes[0][0]][0] - node2trace[v_nodes[1][0]][0]
-        if integrate:
-            trace = np.cumsum(trace)
-        traj_arr.append([trace[p] for p in analyzed_points])
-    return np.array(traj_arr)
 
 
 n_ci = len(v_nodes[0])
@@ -274,7 +285,13 @@ for integrate in [False, True]:
     )
     (
         sp.sample_saltelli(2**12).evaluate_parallel(
-            test_lc_gm, nprocs=4, integrate=integrate
+            test_lc_gm,
+            nprocs=4,
+            tline=tline,
+            v_nodes=v_nodes,
+            i_nodes=i_nodes,
+            edges=edges,
+            integrate=integrate,
         )
     ).analyze_sobol(nprocs=8)
     if integrate:

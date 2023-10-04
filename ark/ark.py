@@ -2,7 +2,7 @@
 from types import FunctionType
 from typing import Optional
 
-from ark.cdg.cdg import CDG, AttrImpl, CDGEdge, CDGElement, CDGExecutionData, CDGNode
+from ark.cdg.cdg import CDG, AttrImpl, CDGExecutionData, CDGNode
 from ark.compiler import ArkCompiler
 from ark.rewrite import RewriteGen
 from ark.solver import SMTSolver
@@ -113,6 +113,7 @@ class Ark:
                 Warning("CDG provided. CDG data is ignored.")
             cdg_execution_data = cdg.execution_data(seed=init_seed)
         node_to_init_val, switch_to_val, element_to_attr = cdg_execution_data
+
         init_states = self._map_init_state(node_to_init_val)
         switch_vals = self._map_switch_val(switch_to_val)
         attr_vals = self._map_attr_val(element_to_attr)
@@ -133,9 +134,9 @@ class Ark:
             return {
                 node: [
                     sol.y[self._node_mapping[node] + order]
-                    for order in range(node.order)
+                    for order in range(len(node_to_init_val[node]))
                 ]
-                for node in self._node_mapping
+                for node in node_to_init_val
             }
 
     def print_prog(self) -> None:
@@ -184,11 +185,11 @@ class Ark:
         assert self._node_mapping is not None, "Node mapping is not constructed."
         for node in cdg.stateful_nodes:
             for order in range(node.order):
-                node.set_trace(n=order, trace=sol.y[self._node_mapping[node] + order])
+                node.set_trace(
+                    n=order, trace=sol.y[self._node_mapping[node.name] + order]
+                )
 
-    def _map_init_state(
-        self, node_to_init_state: dict[CDGNode, list]
-    ) -> list[int | float]:
+    def _map_init_state(self, node_to_init_state: dict[str, list]) -> list[int | float]:
         """Map the initial state values to the corresponding position
 
         Args:
@@ -203,7 +204,11 @@ class Ark:
             [len(init_states) for init_states in node_to_init_state.values()]
         )
         assert self._node_mapping is not None, "Node mapping is not constructed."
-        assert node_to_init_state.keys() == self._node_mapping.keys()
+        if node_to_init_state.keys() != self._node_mapping.keys():
+            raise ValueError(
+                "Node mapping does not match the given node to initial state mapping."
+            )
+        # assert node_to_init_state.keys() == self._node_mapping.keys()
         init_states = [0 for _ in range(n_states)]
         for node in node_to_init_state:
             init_vals = node_to_init_state[node]
@@ -211,7 +216,7 @@ class Ark:
                 init_states[self._node_mapping[node] + order] = val
         return init_states
 
-    def _map_switch_val(self, switch_to_val: dict[CDGEdge, bool]) -> list[int | float]:
+    def _map_switch_val(self, switch_to_val: dict[str, bool]) -> list[int | float]:
         """Map the switch values to the corresponding position
 
         Args:
@@ -230,7 +235,7 @@ class Ark:
         return switch_vals
 
     def _map_attr_val(
-        self, element_to_attr_sample: dict[CDGElement, dict[str, AttrImpl]]
+        self, element_to_attr_sample: dict[str, dict[str, AttrImpl]]
     ) -> list[int | float | FunctionType]:
         """Map the attribute values to the corresponding position
 

@@ -19,17 +19,22 @@ class CDGType(type):
     """
     Base CDG type class.
 
-    Keyword arguments:
-    name -- name of this type
-    parent_type -- parent type of this type
-    attrs -- attributes of this type
+    Args:
+        name: Name of this node type.
+        bases: Parent Type of this node type.
+        attrs: Attributes of this node type, e.g., "order", "reduction", "attr_def"
     """
 
     order: int
     reduction: Reduction
-    attr_def: Mapping[str, AttrDef]
+    attr_def: dict[str, AttrDef]
 
-    def __init__(cls, **kwargs: Mapping[str, Any]):
+    def __init__(
+        cls,
+        name: str,
+        bases: Optional[list] = None,
+        attrs: Optional[dict[str, Any]] = None,
+    ):
         """
         Update the attributes of this class
         Otherwise, the attributes of the parent class will be used and the
@@ -37,7 +42,10 @@ class CDGType(type):
         TODO: check if this is the correct way to do this.
             Might have some reference issues with update.
         """
-        attr_def = named_list_to_dict(kwargs.get("attr_def", {}))
+        if attrs is None or "attr_def" not in attrs:
+            attr_def = {}
+        else:
+            attr_def = attrs["attr_def"]
         cls.attr_def.update(attr_def)
         cls.new_instance_id = 0
         super().__init__(cls)
@@ -45,6 +53,8 @@ class CDGType(type):
     def __call__(cls, **attrs: Mapping[str, AttrImpl]) -> CDGElement:
         if cls.check_attr(**attrs):
             element_name = cls.new_name()  # Why does this trigger a pylint error?
+            # Somehow this calls the CDGNode/CDGEdge __init__ method as specified in
+            # the bases respectively and I forgot why I know this works.
             return super().__call__(cdg_type=cls, name=element_name, **attrs)
 
     def check_attr(cls, **attrs: Mapping[str, AttrImpl]) -> bool:
@@ -92,38 +102,72 @@ class CDGType(type):
 class NodeType(CDGType):
     """CDG node type.
 
-    Keyword arguments:
-    name -- name of this node type
-    base -- parent NodeType of this node type
-    attrs -- attributes of this node type
-    order -- the derivative taken in the dynamical system of this node type
+    Args:
+        name: Name of this node type.
+        bases: Parent NodeType of this node type.
+        attrs: Attributes of this node type, e.g., "order", "reduction", "attr_def"
     """
 
     def __new__(
         mcs,
         name: str,
-        base: Optional[CDGType] = None,
-        attr_def: Optional[list[AttrDef]] = None,
-        order: Optional[int] = 0,
-        reduction: Optional[Reduction] = SUM,
+        bases: Optional[CDGType] = (CDGNode,),
+        attrs: Optional[dict[str, Any]] = None,
     ):
-        if attr_def is None:
-            attr_def = []
-        attr_def = named_list_to_dict(attr_def)
-
-        if base is None:
-            base = CDGNode
+        if not attrs or "attr_def" not in attrs:
+            attr_def = {}
         else:
-            order = base.order
-            reduction = base.reduction
-            # Probably due to the way __getattribute__ works setting attrs here does not work
-            # Update in the __init__ method looks like a workaround.
-            # Still put this here for now in case of future changes.
-            attr_def = base.attr_def.copy()
-            attr_def.update(attr_def)
+            attr_def = attrs["attr_def"]
+
+        # Case0: Inherit another NodeType
+        if isinstance(bases, NodeType) or (
+            len(bases) == 1 and isinstance(bases[0], NodeType)
+        ):
+            if isinstance(bases, NodeType):
+                bases = (bases,)
+            base = bases[0]
+            if not attrs:
+                order = base.order
+                reduction = base.reduction
+            else:
+                if "order" in attrs:
+                    order = attrs["order"]
+                    assert (
+                        order == base.order
+                    ), f"Inherited type orrder ({order}) should be the same with\
+                        the base type order ({base.order})"
+                if "reduction" in attrs:
+                    reduction = attrs["reduction"]
+                    assert (
+                        reduction == base.reduction
+                    ), f"Inherited type reduction ({reduction}) should be the same with\
+                        the base type reduction ({base.reduction})"
+                order = base.order
+                reduction = base.reduction
+            attr_def_base = base.attr_def.copy()
+            attr_def_base.update(attr_def)
+            attr_def = attr_def_base
+
+        # Case1: Default, take CDGNode as base
+        elif bases[0] == CDGNode:
+            if not attrs:
+                raise ValueError("attrs should be specified when base is not specified")
+            if "order" not in attrs:
+                raise ValueError("order should be specified when base is not specified")
+            order = attrs["order"]
+
+            if "reduction" not in attrs:
+                reduction = SUM
+            else:
+                reduction = attrs["reduction"]
+
+        else:
+            raise ValueError(
+                "Unrecognized base classes \
+                (only support single inheritance for NodeType)"
+            )
 
         class_attrs = {"order": order, "reduction": reduction, "attr_def": attr_def}
-        bases = (base,)
         return super().__new__(mcs, name, bases, class_attrs)
 
     def __call__(cls, **attrs: Mapping[str, AttrImpl]) -> CDGNode:
@@ -138,29 +182,45 @@ class NodeType(CDGType):
 class EdgeType(CDGType):
     """CDG edge type.
 
-    Keyword arguments:
-    name -- name of this node type
-    parent_type -- parent NodeType of this node type
-    attrs -- attributes of this node type
+    Args:
+        name: Name of this edge type.
+        bases: Parent EdgeType of this edge type.
+        attrs: Attributes of this node type, e.g., "attr_def"
     """
 
     def __new__(
         mcs,
         name: str,
-        base: Optional[CDGType] = None,
-        attr_def: Optional[list[AttrDef]] = None,
+        bases: Optional[CDGType] = (CDGEdge,),
+        attrs: Optional[dict[str, AttrDef]] = None,
     ):
-        if attr_def is None:
-            attr_def = []
-        attr_def = named_list_to_dict(attr_def)
-
-        if base is None:
-            base = CDGEdge
+        if not attrs or "attr_def" not in attrs:
+            attr_def = {}
         else:
-            attr_def = base.attr_def.copy()
-            attr_def.update(attr_def)
+            attr_def = attrs["attr_def"]
+
+        # Case0: Inherit another EdgeType
+        if isinstance(bases, EdgeType) or (
+            len(bases) == 1 and isinstance(bases[0], EdgeType)
+        ):
+            if isinstance(bases, EdgeType):
+                bases = (bases,)
+            base = bases[0]
+            attr_def_base = base.attr_def.copy()
+            attr_def_base.update(attr_def)
+            attr_def = attr_def_base
+
+        # Case1: Default, take CDGEdge as base
+        elif bases[0] == CDGEdge:
+            pass
+
+        else:
+            raise ValueError(
+                "Unrecognized base classes \
+                (only support single inheritance for EdgeType)"
+            )
+
         class_attrs = {"attr_def": attr_def}
-        bases = (base,)
         return super().__new__(mcs, name, bases, class_attrs)
 
     def __call__(cls, switchable: bool = False, **attrs: Mapping[str, Any]) -> CDGEdge:

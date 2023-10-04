@@ -44,61 +44,79 @@ w_range = Range(min=0.5, max=2)
 # Parallel capacitor(c=capacitance) and resistor(g=conductance)
 IdealV = NodeType(
     name="IdealV",
-    order=1,
-    reduction=SUM,
-    attr_def=[
-        AttrDef("c", attr_type=float, attr_range=lc_range),
-        AttrDef("g", attr_type=float, attr_range=gr_range),
-    ],
+    attrs={
+        "order": 1,
+        "reduction": SUM,
+        "attr_def": {
+            "c": AttrDef(attr_type=float, attr_range=lc_range),
+            "g": AttrDef(attr_type=float, attr_range=gr_range),
+        },
+    },
 )
 # Series inductor(l=inductance) and resistor(r=resistance)
 IdealI = NodeType(
     name="IdealI",
-    order=1,
-    reduction=SUM,
-    attr_def=[
-        AttrDef("l", attr_type=float, attr_range=lc_range),
-        AttrDef("r", attr_type=float, attr_range=gr_range),
-    ],
+    attrs={
+        "order": 1,
+        "reduction": SUM,
+        "attr_def": {
+            "l": AttrDef(attr_type=float, attr_range=lc_range),
+            "r": AttrDef(attr_type=float, attr_range=gr_range),
+        },
+    },
 )
 
 IdealE = EdgeType(name="IdealE")
 # Voltage source in Thevenin equivalent
 InpV = NodeType(
     name="InpV",
-    order=0,
-    attr_def=[
-        AttrDef("fn", attr_type=FunctionType, nargs=1),
-        AttrDef("r", attr_type=float, attr_range=gr_range),
-    ],
+    attrs={
+        "order": 0,
+        "attr_def": {
+            "fn": AttrDef(attr_type=FunctionType, nargs=1),
+            "r": AttrDef(attr_type=float, attr_range=gr_range),
+        },
+    },
 )
 # Current source in Thevenin equivalent
 InpI = NodeType(
     name="InpI",
-    order=0,
-    attr_def=[
-        AttrDef("fn", attr_type=FunctionType, nargs=1),
-        AttrDef("g", attr_type=float, attr_range=gr_range),
-    ],
+    attrs={
+        "order": 0,
+        "attr_def": {
+            "fn": AttrDef(attr_type=FunctionType, nargs=1),
+            "g": AttrDef(attr_type=float, attr_range=gr_range),
+        },
+    },
 )
 # Mismatched implementation (c, l and gm (modeled with edge weights))
 MmV = NodeType(
     name="MmV",
-    base=IdealV,
-    attr_def=[AttrDefMismatch("c", attr_type=float, attr_range=lc_range, rstd=0.1)],
+    bases=IdealV,
+    attrs={
+        "attr_def": {
+            "c": AttrDefMismatch(attr_type=float, attr_range=lc_range, rstd=0.1)
+        }
+    },
 )
 MmI = NodeType(
     name="MmI",
-    base=IdealI,
-    attr_def=[AttrDefMismatch("l", attr_type=float, attr_range=lc_range, rstd=0.1)],
+    bases=IdealI,
+    attrs={
+        "attr_def": {
+            "l": AttrDefMismatch(attr_type=float, attr_range=lc_range, rstd=0.1)
+        }
+    },
 )
 MmE = EdgeType(
     name="MmE",
-    base=IdealE,
-    attr_def=[
-        AttrDefMismatch("ws", attr_type=float, attr_range=w_range, rstd=0.1),
-        AttrDefMismatch("wt", attr_type=float, attr_range=w_range, rstd=0.1),
-    ],
+    bases=IdealE,
+    attrs={
+        "attr_def": {
+            "ws": AttrDefMismatch(attr_type=float, attr_range=w_range, rstd=0.1),
+            "wt": AttrDefMismatch(attr_type=float, attr_range=w_range, rstd=0.1),
+        }
+    },
 )
 cdg_types = [IdealV, IdealI, IdealE, InpV, InpI]
 hw_cdg_types = [MmV, MmI, MmE]

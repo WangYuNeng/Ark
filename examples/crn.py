@@ -22,19 +22,23 @@ from ark.specification.rule_keyword import DST, EDGE, SRC, VAR
 from ark.specification.specification import CDGSpec
 from ark.specification.validation_rule import ValPattern, ValRule
 
-Cpd = NodeType(name="Cpd", order=1)
+Cpd = NodeType(name="Cpd", attrs={"order": 1})
 Rct = NodeType(
     name="Rct",
-    order=0,
-    reduction=PRODUCT,
-    attr_def=[AttrDef("k", attr_type=float, attr_range=Range(min=0.0, max=1.0))],
+    attrs={
+        "order": 0,
+        "reduction": PRODUCT,
+        "attr_def": {"k": AttrDef(attr_type=float, attr_range=Range(min=0.0, max=1.0))},
+    },
 )
 Rct_et = EdgeType(
     name="Rct_et",
-    attr_def=[
-        AttrDef("nc", attr_type=int),
-        AttrDef("coeff", attr_type=int, attr_range=Range(min=1)),
-    ],
+    attrs={
+        "attr_def": {
+            "nc": AttrDef(attr_type=int),
+            "coeff": AttrDef(attr_type=int, attr_range=Range(min=1)),
+        }
+    },
 )
 
 rule1 = ProdRule(Rct_et, Cpd, Rct, SRC, DST.k * EDGE.nc * VAR(DST))
@@ -45,9 +49,9 @@ rule3 = ProdRule(Rct_et, Cpd, Rct, DST, VAR(SRC) ** EDGE.coeff)
 # Compound A, B, C, D
 # Reaction 1: A + B -> A + B + C
 # Reaction 2: C -> D
-A, B = NodeType(name="A", base=Cpd), NodeType(name="B", base=Cpd)
-C, D = NodeType(name="C", base=Cpd), NodeType(name="D", base=Cpd)
-R1, R2 = NodeType(name="R1", base=Rct), NodeType(name="R2", base=Rct)
+A, B = NodeType(name="A", bases=Cpd), NodeType(name="B", bases=Cpd)
+C, D = NodeType(name="C", bases=Cpd), NodeType(name="D", bases=Cpd)
+R1, R2 = NodeType(name="R1", bases=Rct), NodeType(name="R2", bases=Rct)
 
 # Validation rules: Reaction must happen if presented
 # Problem: The resulting CDG would always represent all possible reactions,

@@ -114,7 +114,7 @@ def plot_oscillation(time_points, cdg: CDG, omega, scaling, title=None):
     )
     cycle = time_points / T
     fig, ax = plt.subplots(nrows=2)
-    for node in cdg.stateful_nodes():
+    for node in cdg.stateful_nodes:
         phi = node.get_trace(n=0) * scaling
         ax[1].plot(cycle, np.sin(omega * time_points + phi), label=node.name)
         ax[0].plot(cycle, phi)
@@ -190,7 +190,7 @@ def main():
             )
         node_to_assignment = {}
         sync_failed = False
-        for node in graph.stateful_nodes():
+        for node in graph.stateful_nodes:
             phi = node.get_trace(n=0) * scaling
             assigment = phase_to_assignment(phi[-1])
             if assigment is None:

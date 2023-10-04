@@ -115,8 +115,8 @@ def format_variables(expr):
     return sub_expr
 
 
-def attr_to_latex(attr):
-    tex = f'{kw("attr")} {lit(attr.name)}{syn("=")}'
+def attr_to_latex(name, attr):
+    tex = f'{kw("attr")} {lit(name)}{syn("=")}'
     if attr.type == FunctionType:
         tex += kw("fn")
     elif attr.type == float:
@@ -191,9 +191,10 @@ def type_spec_to_latex(tab, cdglang: CDGSpec):
 
     def attr_block(attrs):
         q(syn("{"))
+        names, attr_def = [attr[0] for attr in attrs], [attr[1] for attr in attrs]
         tab.indent()
-        for idx, attr in enumerate(attrs):
-            q(attr_to_latex(attr))
+        for idx, (name, attr) in enumerate(zip(names, attr_def)):
+            q(attr_to_latex(name, attr))
             if idx < len(attrs) - 1:
                 q(syn(","))
                 tab.linebreak()
@@ -219,7 +220,7 @@ def type_spec_to_latex(tab, cdglang: CDGSpec):
         q(vari(node.name))
         inherit_block(node)
         tab.linebreak(" ")
-        attr_block(node.attr_def.values())
+        attr_block(list(node.attr_def.items()))
         q(syn(";"))
         tab.newline()
 
@@ -231,7 +232,7 @@ def type_spec_to_latex(tab, cdglang: CDGSpec):
         if len(list(edge.attr_def.values())) == 0:
             q("\{\}")
         else:
-            attr_block(edge.attr_def.values())
+            attr_block(list(edge.attr_def.items()))
         q(syn(";"))
         tab.newline()
 

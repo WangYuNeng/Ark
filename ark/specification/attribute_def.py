@@ -16,12 +16,10 @@ class AttrDef:
 
     def __init__(
         self,
-        name: str,
         attr_type: type,
         attr_range: Optional[Range] = None,
         nargs: Optional[int] = None,
     ):
-        self.name = name
         self.type = attr_type
         self.valid_range = attr_range
         self.nargs = nargs
@@ -68,7 +66,6 @@ class AttrDefMismatch(AttrDef):
 
     def __init__(
         self,
-        name: str,
         attr_type: type,
         rstd: Optional[float] = None,
         std: Optional[float] = None,
@@ -80,7 +77,7 @@ class AttrDefMismatch(AttrDef):
             raise ValueError("Must specify either rstd or std")
         self.rstd = rstd
         self.std = std
-        super().__init__(name, attr_type, attr_range)
+        super().__init__(attr_type, attr_range)
 
     def attr_str(self, val: AttrImpl) -> str:
         if not self.type == float:

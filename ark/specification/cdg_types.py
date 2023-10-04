@@ -27,7 +27,7 @@ class CDGType(type):
 
     order: int
     reduction: Reduction
-    attr_def: Mapping[str, AttrDef]
+    attr_def: dict[str, AttrDef]
 
     def __init__(
         cls,
@@ -42,7 +42,7 @@ class CDGType(type):
         TODO: check if this is the correct way to do this.
             Might have some reference issues with update.
         """
-        if attrs is None:
+        if attrs is None or "attr_def" not in attrs:
             attr_def = {}
         else:
             attr_def = attrs["attr_def"]
@@ -126,25 +126,32 @@ class NodeType(CDGType):
             if isinstance(bases, NodeType):
                 bases = (bases,)
             base = bases[0]
-            if "order" in attrs:
-                order = attrs["order"]
-                assert (
-                    order == base.order
-                ), f"Inherited type orrder ({order}) should be the same with\
-                    the base type order ({base.order})"
-            if "reduction" in attrs:
-                reduction = attrs["reduction"]
-                assert (
-                    reduction == base.reduction
-                ), f"Inherited type reduction ({reduction}) should be the same with\
-                    the base type reduction ({base.reduction})"
-            order = base.order
-            reduction = base.reduction
-            attr_def = base.attr_def.copy()
-            attr_def.update(attr_def)
+            if not attrs:
+                order = base.order
+                reduction = base.reduction
+            else:
+                if "order" in attrs:
+                    order = attrs["order"]
+                    assert (
+                        order == base.order
+                    ), f"Inherited type orrder ({order}) should be the same with\
+                        the base type order ({base.order})"
+                if "reduction" in attrs:
+                    reduction = attrs["reduction"]
+                    assert (
+                        reduction == base.reduction
+                    ), f"Inherited type reduction ({reduction}) should be the same with\
+                        the base type reduction ({base.reduction})"
+                order = base.order
+                reduction = base.reduction
+            attr_def_base = base.attr_def.copy()
+            attr_def_base.update(attr_def)
+            attr_def = attr_def_base
 
         # Case1: Default, take CDGNode as base
         elif bases[0] == CDGNode:
+            if not attrs:
+                raise ValueError("attrs should be specified when base is not specified")
             if "order" not in attrs:
                 raise ValueError("order should be specified when base is not specified")
             order = attrs["order"]
@@ -199,8 +206,9 @@ class EdgeType(CDGType):
             if isinstance(bases, EdgeType):
                 bases = (bases,)
             base = bases[0]
-            attr_def = base.attr_def.copy()
-            attr_def.update(attr_def)
+            attr_def_base = base.attr_def.copy()
+            attr_def_base.update(attr_def)
+            attr_def = attr_def_base
 
         # Case1: Default, take CDGEdge as base
         elif bases[0] == CDGEdge:

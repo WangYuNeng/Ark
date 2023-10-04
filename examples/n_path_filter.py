@@ -20,29 +20,37 @@ from ark.specification.specification import CDGSpec
 # Capacitors
 Cap = NodeType(
     name="Cap",
-    order=1,
-    reduction=SUM,
-    attr_def=[AttrDef("c", attr_type=float, attr_range=Range(min=0))],
+    attrs={
+        "order": 1,
+        "reduction": SUM,
+        "attr_def": {
+            "c": AttrDef(attr_type=float, attr_range=Range(min=0)),
+        },
+    },
 )
 # Voltage input with series resistor
 InpV = NodeType(
     name="InpV",
-    order=0,
-    attr_def=[
-        AttrDef("fn", attr_type=FunctionType, nargs=1),
-        AttrDef("r", attr_type=float, attr_range=Range(min=0)),
-    ],
+    attrs={
+        "order": 0,
+        "attr_def": {
+            "fn": AttrDef(attr_type=FunctionType, nargs=1),
+            "r": AttrDef(attr_type=float, attr_range=Range(min=0)),
+        },
+    },
 )
 
 # Switches controlled by clock
 SwE = EdgeType(
     name="SwE",
-    attr_def=[
-        AttrDef("ctrl", attr_type=FunctionType, nargs=1),
-        AttrDef("offset", attr_type=float, attr_range=Range(min=0)),
-        AttrDef("period", attr_type=float, attr_range=Range(min=0)),
-        AttrDef("duty_cycle", attr_type=float, attr_range=Range(min=0, max=1)),
-    ],
+    attrs={
+        "attr_def": {
+            "ctrl": AttrDef(attr_type=FunctionType, nargs=1),
+            "offset": AttrDef(attr_type=float, attr_range=Range(min=0)),
+            "period": AttrDef(attr_type=float, attr_range=Range(min=0)),
+            "duty_cycle": AttrDef(attr_type=float, attr_range=Range(min=0, max=1)),
+        },
+    },
 )
 
 

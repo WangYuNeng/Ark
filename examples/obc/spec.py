@@ -56,23 +56,29 @@ def coupling_fn(x):
 # osc_fn: coupling, e.g., omega_c sin (phi_i - phi_j)
 Osc = NodeType(
     name="Osc",
-    order=1,
-    attr_def=[
-        AttrDef("lock_fn", attr_type=FunctionType, nargs=1),
-        AttrDef("osc_fn", attr_type=FunctionType, nargs=1),
-    ],
+    attrs={
+        "order": 1,
+        "attr_def": {
+            "lock_fn": AttrDef(attr_type=FunctionType, nargs=1),
+            "osc_fn": AttrDef(attr_type=FunctionType, nargs=1),
+        },
+    },
 )
 
 # k: coupling strength
-Coupling = EdgeType(name="Coupling", attr_def=[AttrDef("k", attr_type=float)])
+Coupling = EdgeType(
+    name="Coupling", attrs={"attr_def": {"k": AttrDef(attr_type=float)}}
+)
 Coupling_offset = EdgeType(
     name="Coupling_offset",
-    base=Coupling,
-    attr_def=[
-        AttrDefMismatch(
-            "offset", attr_type=float, std=OFFSET_STD, attr_range=Range(exact=0)
-        )
-    ],
+    bases=Coupling,
+    attrs={
+        "attr_def": {
+            "offset": AttrDefMismatch(
+                attr_type=float, std=OFFSET_STD, attr_range=Range(exact=0)
+            )
+        }
+    },
 )
 cdg_types = [Osc, Coupling]
 hw_cdg_types = [Coupling_offset]

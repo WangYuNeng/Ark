@@ -9,9 +9,9 @@ from ark.specification.rule_keyword import DST, SELF, SRC, Target
 CDGExecutionData = NewType(
     "CDGExecutionData",
     tuple[
-        dict["CDGNode", list],
-        dict["CDGEdge", bool],
-        dict["CDGElement", dict[str, AttrImpl]],
+        dict[str, list[float]],
+        dict[str, bool],
+        dict[str, dict[str, AttrImpl]],
     ],
 )
 
@@ -451,35 +451,35 @@ class CDG:
         )
 
     @property
-    def node_to_init_state(self) -> dict[CDGNode, list]:
+    def node_to_init_state(self) -> dict[str, list[float]]:
         """Return the mapping from nodes to initial state values.
 
         Returns:
-            dict[CDGNode, list]: The mapping from nodes to the mapping
+            dict[str, list[float]]: The mapping from nodes to the mapping
             from order to initial state values.
         """
         node_to_init_state = {}
         for node in self.stateful_nodes:
-            node_to_init_state[node] = [None for _ in range(node.order)]
+            node_to_init_state[node.name] = [None for _ in range(node.order)]
             for order in range(node.order):
-                node_to_init_state[node][order] = node.init_val(order)
+                node_to_init_state[node.name][order] = node.init_val(order)
         return node_to_init_state
 
     @property
-    def switch_to_val(self) -> dict[CDGEdge, bool]:
+    def switch_to_val(self) -> dict[str, bool]:
         """Return the mapping from switches to their values.
 
         Returns:
-            dict[CDGEdge, bool]: The mapping from switches to their values,
+            dict[str, bool]: The mapping from switches to their values,
         """
         switch_to_val = {}
         for edge in self.switches:
-            switch_to_val[edge] = edge.switch_val
+            switch_to_val[edge.name] = edge.switch_val
         return switch_to_val
 
     def element_to_attr_sample(
         self, seed: Optional[int] = None
-    ) -> dict[CDGElement, dict[str, AttrImpl]]:
+    ) -> dict[str, dict[str, AttrImpl]]:
         """Return the mapping from elements to their attributes.
 
         Returns:
@@ -490,9 +490,9 @@ class CDG:
             np.random.seed(seed)
         element_to_attr = {}
         for node in self.nodes:
-            element_to_attr[node] = node.attr_sample()
+            element_to_attr[node.name] = node.attr_sample()
         for edge in self.edges:
-            element_to_attr[edge] = edge.attr_sample()
+            element_to_attr[edge.name] = edge.attr_sample()
         return element_to_attr
 
     def initialize_all_states(self, val: float = None, rand: bool = False) -> None:

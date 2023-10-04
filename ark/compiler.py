@@ -10,7 +10,7 @@ import scipy
 import sympy
 from tqdm import tqdm
 
-from ark.cdg.cdg import CDG, CDGEdge, CDGElement, CDGNode
+from ark.cdg.cdg import CDG, CDGEdge, CDGNode
 from ark.reduction import Reduction
 from ark.rewrite import BaseRewriteGen
 from ark.specification.cdg_types import EdgeType, NodeType
@@ -216,14 +216,14 @@ class ArkCompiler:
 
         Returns:
             prog (FunctionType): The compiled function.
-            node_mapping (dict[CdgNode, int]): map the CDGNode to the corresponding
-            index in the state variables. The node_mapping[node] points to the index
+            node_mapping (dict[str, int]): map the name of CDGNode to the corresponding
+            index in the state variables. The node_mapping[name] points to the index
             of the 0th order term and the n-th order deravitves (if applicable) index
-            is node_mapping[node] + n.
-            switch_mapping (dict[CDGEdge, int]): map the CDGEdge to the corresponding
+            is node_mapping[name] + n.
+            switch_mapping (dict[str, int]): map the name of CDGEdge to the corresponding
             index in the switch variables.
-            attr_mapping (dict[CDGElement, dict[str, int]]): map the CDGElement to the
-            corresponding index in the attribute variables. The attr_mapping[ele][attr]
+            attr_mapping (dict[str, dict[str, int]]): map the name of CDGElement to the
+            corresponding index in the attribute variables. The attr_mapping[name][attr]
             points to the index of the attribute.
         """
 
@@ -231,12 +231,12 @@ class ArkCompiler:
         self._verbose = verbose
 
         node_mapping, ode_fn_io_names = self._collect_ode_fn_io(cdg)
-        switch_mapping = {edge: i for i, edge in enumerate(cdg.switches)}
+        switch_mapping = {edge.name: i for i, edge in enumerate(cdg.switches)}
         attr_mapping, attr_idx = {}, 0
         for ele in cdg.nodes + cdg.edges:
-            attr_mapping[ele] = {}
+            attr_mapping[ele.name] = {}
             for attr_name in ele.attrs.keys():
-                attr_mapping[ele][attr_name] = attr_idx
+                attr_mapping[ele.name][attr_name] = attr_idx
                 attr_idx += 1
 
         attr_var_def = self._compile_attribute_var(switch_mapping, attr_mapping)
@@ -333,20 +333,18 @@ class ArkCompiler:
 
     def _compile_attribute_var(
         self,
-        switch_mapping: dict[CDGEdge, int],
-        attr_mapping: dict[CDGElement, dict[str, int]],
+        switch_mapping: dict[str, int],
+        attr_mapping: dict[str, dict[str, int]],
     ) -> list[ast.Assign]:
         """Compile the attributes of nodes and edges to variables"""
-
-        ele: CDGElement
 
         stmts = []
 
         # Map the input vector to the state variables
         if switch_mapping:
             edge_names = [None for _ in range(len(switch_mapping))]
-            for edge, idx in switch_mapping.items():
-                edge_names[idx] = edge.name
+            for name, idx in switch_mapping.items():
+                edge_names[idx] = name
             stmts.append(
                 ast.Assign(
                     [
@@ -368,9 +366,9 @@ class ArkCompiler:
             attr_names = [
                 None for _ in range(sum(len(attrs) for attrs in attr_mapping.values()))
             ]
-            for ele, attrs in attr_mapping.items():
+            for ele_name, attrs in attr_mapping.items():
                 for attr_name, idx in attrs.items():
-                    attr_names[idx] = rn_attr(ele.name, attr_name)
+                    attr_names[idx] = rn_attr(ele_name, attr_name)
             stmts.append(
                 ast.Assign(
                     [
@@ -384,17 +382,17 @@ class ArkCompiler:
             )
         return stmts
 
-    def _collect_ode_fn_io(self, cdg: CDG) -> tuple[dict[CDGNode, int], list]:
+    def _collect_ode_fn_io(self, cdg: CDG) -> tuple[dict[str, int], list]:
         """Collect the input/output node mapping and var names of the ode function
 
         Args:
             cdg (CDG): The input CDG
 
         Returns:
-            node_to_state_var (dict[CDGNode, int]): map CDGNode to the corresponding index
-            in the state variables. The node_to_state_var[node] points to the index of the 0th
-            order term and the n-th order deravitves (if applicable) index is
-            node_to_state_var[node] + n.
+            node_to_state_var (dict[str, int]): map name ofCDGNode to the corresponding
+            index in the state variables. The node_to_state_var[name] points to the
+            index of the 0th order term and the n-th order deravitves (if applicable)
+            index is node_to_state_var[name] + n.
             ode_input_return_names (list): names of the state variables of the compiled
             ode function for scipy.integrate.solve_ivp simulation.
         """
@@ -402,7 +400,7 @@ class ArkCompiler:
         ode_input_return_names = []
         for node_order in range(1, cdg.ds_order + 1):
             for node in cdg.nodes_in_order(node_order):
-                node_to_state_var[node] = len(ode_input_return_names)
+                node_to_state_var[node.name] = len(ode_input_return_names)
                 for order in range(node_order):
                     ode_input_return_names.append(ddt(node.name, order=order))
         return node_to_state_var, ode_input_return_names

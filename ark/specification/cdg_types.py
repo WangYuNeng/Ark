@@ -19,10 +19,10 @@ class CDGType(type):
     """
     Base CDG type class.
 
-    Keyword arguments:
-    name -- name of this type
-    parent_type -- parent type of this type
-    attrs -- attributes of this type
+    Args:
+        name: Name of this node type.
+        bases: Parent Type of this node type.
+        attrs: Attributes of this node type, e.g., "order", "reduction", "attr_def"
     """
 
     order: int
@@ -102,11 +102,10 @@ class CDGType(type):
 class NodeType(CDGType):
     """CDG node type.
 
-    Keyword arguments:
-    name -- name of this node type
-    base -- parent NodeType of this node type
-    attrs -- attributes of this node type
-    order -- the derivative taken in the dynamical system of this node type
+    Args:
+        name: Name of this node type.
+        bases: Parent NodeType of this node type.
+        attrs: Attributes of this node type, e.g., "order", "reduction", "attr_def"
     """
 
     def __new__(
@@ -176,10 +175,10 @@ class NodeType(CDGType):
 class EdgeType(CDGType):
     """CDG edge type.
 
-    Keyword arguments:
-    name -- name of this node type
-    parent_type -- parent NodeType of this node type
-    attrs -- attributes of this node type
+    Args:
+        name: Name of this edge type.
+        bases: Parent EdgeType of this edge type.
+        attrs: Attributes of this node type, e.g., "attr_def"
     """
 
     def __new__(

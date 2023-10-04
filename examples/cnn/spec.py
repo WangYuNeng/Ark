@@ -34,41 +34,61 @@ lc_range, gr_range = Range(min=0.1e-9, max=10e-9), Range(min=0)
 positive = Range(min=0)
 #### Type definitions start ####
 # Cells in CNN, z is the bias
-IdealV = NodeType(name="IdealV", order=1, attr_def=[AttrDef("z", attr_type=float)])
+IdealV = NodeType(
+    name="IdealV",
+    attrs={
+        "order": 1,
+        "attr_def": {
+            "z": AttrDef(attr_type=float),
+        },
+    },
+)
 # Output function
 Out = NodeType(
-    name="Out", order=0, attr_def=[AttrDef("act", attr_type=FunctionType, nargs=1)]
+    name="Out",
+    attrs={
+        "order": 0,
+        "attr_def": {
+            "act": AttrDef(attr_type=FunctionType, nargs=1),
+        },
+    },
 )
 # Input, should be stateless, setting to 1 just for convenience of setting its value
-Inp = NodeType(name="Inp", order=1)
+Inp = NodeType(name="Inp", attrs={"order": 1})
 MapE = EdgeType(name="MapE")
-FlowE = EdgeType(name="FlowE", attr_def=[AttrDef("g", attr_type=float)])
+FlowE = EdgeType(name="FlowE", attrs={"attr_def": {"g": AttrDef(attr_type=float)}})
 
 # Mismatched implementation
 Vm = NodeType(
     name="Vm",
-    base=IdealV,
-    attr_def=[
-        AttrDefMismatch("mm", attr_type=float, rstd=0.1, attr_range=Range(exact=1))
-    ],
+    bases=IdealV,
+    attrs={
+        "attr_def": {
+            "mm": AttrDefMismatch(attr_type=float, rstd=0.1, attr_range=Range(exact=1)),
+        },
+    },
 )
 fEm_1p = EdgeType(
     name="fEm_1p",
-    base=FlowE,
-    attr_def=[
-        AttrDefMismatch(
-            "g", attr_type=float, rstd=0.01, attr_range=Range(min=-10, max=10)
-        )
-    ],
+    bases=FlowE,
+    attrs={
+        "attr_def": {
+            "g": AttrDefMismatch(
+                attr_type=float, rstd=0.01, attr_range=Range(min=-10, max=10)
+            ),
+        },
+    },
 )
 fEm_10p = EdgeType(
     name="fEm_10p",
-    base=FlowE,
-    attr_def=[
-        AttrDefMismatch(
-            "g", attr_type=float, rstd=0.1, attr_range=Range(min=-10, max=10)
-        )
-    ],
+    bases=FlowE,
+    attrs={
+        "attr_def": {
+            "g": AttrDefMismatch(
+                attr_type=float, rstd=0.1, attr_range=Range(min=-10, max=10)
+            ),
+        },
+    },
 )
 cdg_types = [IdealV, Out, Inp, MapE, FlowE]
 mm_cdg_types = [Vm, fEm_1p, fEm_10p]

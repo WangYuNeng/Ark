@@ -15,7 +15,7 @@ from ark.reduction import Reduction
 from ark.rewrite import BaseRewriteGen
 from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule, ProdRuleId
-from ark.specification.rule_keyword import TIME, Target, kw_name
+from ark.specification.rule_keyword import SRC, TIME, Target, kw_name
 from ark.specification.specification import CDGSpec
 
 
@@ -111,12 +111,18 @@ def match_prod_rule(
     src: CDGNode,
     dst: CDGNode,
     tgt: Target,
-) -> ProdRule:
-    """
-    Find the production rule that matches the given edge, source node,
+) -> ProdRule | None:
+    """Find the production rule that matches the given edge, source node,
     destination node, and rule target.
 
-    TODO: Handle multiple matches.
+    Args:
+        rule_dict (dict[ProdRuleId, ProdRule]): production rule dictionary
+        edge (CDGEdge): edge to match
+        src (CDGNode): source node to match
+        dst (CDGNode): destination node to match
+        tgt (Target): target of the production rule (SRC or DST)
+    Returns:
+        ProdRule: the matched production rule or None if no match is found
     """
 
     def check_match(
@@ -139,16 +145,21 @@ def match_prod_rule(
     src_nt_base = src_nt.base_cdg_types()
     dst_nt_base = dst_nt.base_cdg_types()
 
-    for edge_type, src_nt, dst_nt in product(et_base, src_nt_base, dst_nt_base):
+    # Try to match the node type of the target as close as possible
+    # then the edge type and then the node type of the other end.
+    if tgt == SRC:
+        ordered_types = product(src_nt_base, et_base, dst_nt_base)
+    else:
+        ordered_types = product(dst_nt_base, et_base, src_nt_base)
+
+    for nt0, et, nt1 in ordered_types:
+        if tgt == SRC:
+            src_nt, dst_nt, edge_type = nt0, nt1, et
+        else:
+            src_nt, dst_nt, edge_type = nt1, nt0, et
         match = check_match(edge_type, src_nt, dst_nt)
         if match is not None:
-            if (
-                edge_type == et_base[-1]
-                and src_nt == src_nt_base[-1]
-                and dst_nt == dst_nt_base[-1]
-            ):
-                return match
-            raise NotImplementedError("Have not implemented match in the heirarchy.")
+            return match
 
     return None
 

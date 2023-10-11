@@ -51,6 +51,17 @@ class CDGType(type):
         super().__init__(cls)
 
     def __call__(cls, **attrs: Mapping[str, AttrImpl]) -> CDGElement:
+        """Generate a new CDGElement of this CDGType.
+
+        Args:
+            attrs (Mapping[str, AttrImpl]): Attributes of the new CDGElement. Will use
+            default values from the definitions if no attribute is given.
+
+        Returns:
+            CDGElement: The new CDGElement with the given attributes.
+        """
+        if not attrs and cls.attr_def:
+            attrs = {key: val.default for key, val in cls.attr_def.items()}
         if cls.check_attr(**attrs):
             element_name = cls.new_name()  # Why does this trigger a pylint error?
             # Somehow this calls the CDGNode/CDGEdge __init__ method as specified in
@@ -58,7 +69,13 @@ class CDGType(type):
             return super().__call__(cdg_type=cls, name=element_name, **attrs)
 
     def check_attr(cls, **attrs: Mapping[str, AttrImpl]) -> bool:
-        """Check whether the given attributes are valid for this CDGType"""
+        """Check whether the given attributes are valid for this CDGType.
+
+        Args:
+            attrs (Mapping[str, AttrImpl]): Attributes to be checked.
+        Returns:
+            bool: True if the attributes are valid.
+        """
         attr_def = cls.attr_def
         if attr_def.keys() != attrs.keys():
             raise AttributeError(
@@ -171,6 +188,15 @@ class NodeType(CDGType):
         return super().__new__(mcs, name, bases, class_attrs)
 
     def __call__(cls, **attrs: Mapping[str, AttrImpl]) -> CDGNode:
+        """Generate a new CDGNode of this NodeType.
+
+        Args:
+            attrs (Mapping[str, AttrImpl]): Attributes of the new CDGElement. Will use
+            default values from the definitions if no attribute is given.
+
+        Returns:
+            CDGNode: The new CDGENode with the given attributes.
+        """
         node: CDGNode = super().__call__(**attrs)
         return node
 
@@ -224,6 +250,15 @@ class EdgeType(CDGType):
         return super().__new__(mcs, name, bases, class_attrs)
 
     def __call__(cls, switchable: bool = False, **attrs: Mapping[str, Any]) -> CDGEdge:
+        """Generate a new CDGEdge of this EdgeType.
+
+        Args:
+            attrs (Mapping[str, AttrImpl]): Attributes of the new CDGElement. Will use
+            default values from the definitions if no attribute is given.
+
+        Returns:
+            CDGEdge: The new CDGENode with the given attributes.
+        """
         edge: CDGEdge = super().__call__(**attrs)
         edge.switchable = switchable
         return edge

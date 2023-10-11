@@ -187,115 +187,114 @@ def test_lc_gm(
     return np.array(traj_arr)
 
 
-# Single line setup
-line_len = 4
-tline, source, v_nodes, i_nodes, edges = create_single_line(line_len, CDG())
-system.compile(tline)
-tline.initialize_all_states(0)
-sp = ProblemSpec(
-    {
-        "names": ["c[0]", "gm_s[1]", "gm_t[1]"],
-        "bounds": [[1e-9, 0.1e-9], [1, 0.1], [1, 0.1]],
-        "outputs": analyzed_times,
-        "dists": ["norm" for _ in range(3)],
-    }
-)
-# Define the model inputs
-for n_id, e_id in [(0, 1), (0, -1), (-1, 1), (-1, -1)]:
-    print(f"Running for n_id: {n_id}, e_id: {e_id}")
-    analyzed_names = [f"c[{n_id}]", f"gm_s[{e_id}]", f"gm_t[{e_id}]"]
+if __name__ == "__main__":
+    # Single line setup
+    line_len = 4
+    tline, source, v_nodes, i_nodes, edges = create_single_line(line_len, CDG())
+    system.compile(tline)
+    tline.initialize_all_states(0)
+    sp = ProblemSpec(
+        {
+            "names": ["c[0]", "gm_s[1]", "gm_t[1]"],
+            "bounds": [[1e-9, 0.1e-9], [1, 0.1], [1, 0.1]],
+            "outputs": analyzed_times,
+            "dists": ["norm" for _ in range(3)],
+        }
+    )
+    # Define the model inputs
+    for n_id, e_id in [(0, 1), (0, -1), (-1, 1), (-1, -1)]:
+        print(f"Running for n_id: {n_id}, e_id: {e_id}")
+        analyzed_names = [f"c[{n_id}]", f"gm_s[{e_id}]", f"gm_t[{e_id}]"]
+        for integrate in [False, True]:
+            sp = setup_prob(
+                names=analyzed_names,
+                bounds=[[1e-9, 0.1e-9], [1, 0.1], [1, 0.1]],
+                outputs=analyzed_times,
+            )
+            sp.sample_sobol(2**10).evaluate_parallel(
+                tline_test_wl,
+                nprocs=4,
+                tline=tline,
+                v_nodes=v_nodes,
+                edges=edges,
+                v_node_id=n_id,
+                edge_id=e_id,
+                integrate=integrate,
+            ).analyze_sobol()
+            if integrate:
+                f_name = f"int_sobol_wl_nid_{n_id}_eid_{e_id}"
+            else:
+                f_name = f"sobol_wl_nid_{n_id}_eid_{e_id}"
+            plot_trace(f_name, sp, time_points, analyzed_times)
+
+    n_vars = len(edges) * 2
+    analyzed_names = [f"gm_s[{i}]" for i in range(n_vars // 2)] + [
+        f"gm_t[{i}]" for i in range(n_vars // 2)
+    ]
     for integrate in [False, True]:
         sp = setup_prob(
             names=analyzed_names,
-            bounds=[[1e-9, 0.1e-9], [1, 0.1], [1, 0.1]],
+            bounds=[[1, 0.1] for _ in range(n_vars)],
             outputs=analyzed_times,
         )
-        sp.sample_sobol(2**10).evaluate_parallel(
-            tline_test_wl,
-            nprocs=4,
-            tline=tline,
-            v_nodes=v_nodes,
-            edges=edges,
-            v_node_id=n_id,
-            edge_id=e_id,
-            integrate=integrate,
-        ).analyze_sobol()
+        (
+            sp.sample_saltelli(2**10).evaluate_parallel(
+                tline_test_ws,
+                nprocs=4,
+                tline=tline,
+                v_nodes=v_nodes,
+                edges=edges,
+                integrate=integrate,
+            )
+        ).analyze_sobol(nprocs=8)
         if integrate:
-            f_name = f"int_sobol_wl_nid_{n_id}_eid_{e_id}"
+            f_name = "int_sobol_ws"
         else:
-            f_name = f"sobol_wl_nid_{n_id}_eid_{e_id}"
+            f_name = "sobol_ws"
         plot_trace(f_name, sp, time_points, analyzed_times)
 
-n_vars = len(edges) * 2
-analyzed_names = [f"gm_s[{i}]" for i in range(n_vars // 2)] + [
-    f"gm_t[{i}]" for i in range(n_vars // 2)
-]
-for integrate in [False, True]:
-    sp = setup_prob(
-        names=analyzed_names,
-        bounds=[[1, 0.1] for _ in range(n_vars)],
-        outputs=analyzed_times,
+    # Two line setup
+    line_len = 1
+    tline, sources, v_nodes, i_nodes, edges = create_two_line(line_len)
+    system.compile(tline)
+    tline.initialize_all_states(0)
+
+    n_ci = len(v_nodes[0])
+    n_li = len(i_nodes[0])
+    n_gmi = len(edges[0]) * 2
+    n_vars = (n_ci + n_li + n_gmi) * 2
+    analyzed_names = (
+        [f"c[{i // n_ci}][{i % n_ci}]" for i in range(2 * n_ci)]
+        + [f"l[{i // n_li}][{i % n_li}]" for i in range(2 * n_li)]
+        + [f"gm_s[0][{i}]" for i in range(n_gmi // 2)]
+        + [f"gm_t[0][{i}]" for i in range(n_gmi // 2)]
+        + [f"gm_s[1][{i}]" for i in range(n_gmi // 2)]
+        + [f"gm_t[1][{i}]" for i in range(n_gmi // 2)]
     )
-    (
-        sp.sample_saltelli(2**10).evaluate_parallel(
-            tline_test_ws,
-            nprocs=4,
-            tline=tline,
-            v_nodes=v_nodes,
-            edges=edges,
-            integrate=integrate,
-        )
-    ).analyze_sobol(nprocs=8)
-    if integrate:
-        f_name = "int_sobol_ws"
-    else:
-        f_name = "sobol_ws"
-    plot_trace(f_name, sp, time_points, analyzed_times)
-
-
-# Two line setup
-line_len = 1
-tline, sources, v_nodes, i_nodes, edges = create_two_line(line_len)
-system.compile(tline)
-tline.initialize_all_states(0)
-
-
-n_ci = len(v_nodes[0])
-n_li = len(i_nodes[0])
-n_gmi = len(edges[0]) * 2
-n_vars = (n_ci + n_li + n_gmi) * 2
-analyzed_names = (
-    [f"c[{i // n_ci}][{i % n_ci}]" for i in range(2 * n_ci)]
-    + [f"l[{i // n_li}][{i % n_li}]" for i in range(2 * n_li)]
-    + [f"gm_s[0][{i}]" for i in range(n_gmi // 2)]
-    + [f"gm_t[0][{i}]" for i in range(n_gmi // 2)]
-    + [f"gm_s[1][{i}]" for i in range(n_gmi // 2)]
-    + [f"gm_t[1][{i}]" for i in range(n_gmi // 2)]
-)
-bounds = (
-    [[1e-9, 0.1e-9] for _ in range(2 * n_ci)]
-    + [[1e-9, 0.1e-9] for _ in range(2 * n_li)]
-    + [[1, 0.1] for _ in range(2 * n_gmi)]
-)
-for integrate in [False, True]:
-    sp = setup_prob(
-        names=analyzed_names,
-        bounds=bounds,
-        outputs=analyzed_times,
+    bounds = (
+        [[1e-9, 0.1e-9] for _ in range(2 * n_ci)]
+        + [[1e-9, 0.1e-9] for _ in range(2 * n_li)]
+        + [[1, 0.1] for _ in range(2 * n_gmi)]
     )
-    (
-        sp.sample_saltelli(2**12).evaluate_parallel(
-            test_lc_gm,
-            nprocs=4,
-            tline=tline,
-            v_nodes=v_nodes,
-            i_nodes=i_nodes,
-            edges=edges,
-            integrate=integrate,
+    for integrate in [False, True]:
+        sp = setup_prob(
+            names=analyzed_names,
+            bounds=bounds,
+            outputs=analyzed_times,
         )
-    ).analyze_sobol(nprocs=8)
-    if integrate:
-        f_name = "int_sobol_all"
-    else:
-        f_name = "sobol_all"
-    plot_trace(f_name, sp, time_points, analyzed_times)
+        (
+            sp.sample_saltelli(2**12).evaluate_parallel(
+                test_lc_gm,
+                nprocs=4,
+                tline=tline,
+                v_nodes=v_nodes,
+                i_nodes=i_nodes,
+                edges=edges,
+                integrate=integrate,
+            )
+        ).analyze_sobol(nprocs=8)
+        if integrate:
+            f_name = "int_sobol_all"
+        else:
+            f_name = "sobol_all"
+        plot_trace(f_name, sp, time_points, analyzed_times)

@@ -52,6 +52,31 @@ class AttrDef:
             raise ValueError(f"Expected value in range {self.valid_range}, got {val}")
         return True
 
+    @property
+    def default(self) -> AttrImpl:
+        """Returen the default value of this attribute.
+
+        If attr_type is a function, return an empty function that raises error.
+        For attr_type being int or float, return a value in the range.
+
+        Returns:
+            AttrImpl: The default value of this attribute.
+        """
+
+        def empty_func(*args):
+            raise RuntimeError("Default function not implemented")
+
+        if self.type == FunctionType:
+            return empty_func
+        if self.valid_range is None:
+            return self.type(0)
+        if self.valid_range.is_exact():
+            return self.valid_range.exact
+        if self.valid_range.is_lower_bound() or self.valid_range.is_interval_bound():
+            return self.valid_range.min
+        if self.valid_range.is_upper_bound():
+            return self.valid_range.max
+
 
 class AttrDefMismatch(AttrDef):
     """Attribute definition for a CDGType where the value is sampled

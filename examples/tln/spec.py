@@ -65,8 +65,8 @@ print(pulse_sympy(t))
 print(sp.lambdify(t, pulse_sympy(t), 'numpy')(np.linspace(0.0, 1.0, 1000)))
 
 
-lc_range, gr_range = Range(min=0.1e-9, max=10e-9), Range(min=0)
-w_range = Range(min=0.5, max=2)
+lc_range, gr_range = Range(min=0.1e-9, max=10e-9), Range(min=0.0)
+w_range = Range(min=0.5, max=2.0)
 
 #### Type definitions start ####
 # Ideal implementation

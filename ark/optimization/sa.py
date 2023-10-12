@@ -1,6 +1,8 @@
 from typing import Any, Callable
 
+import matplotlib.pyplot as plt
 import numpy as np
+from tqdm import tqdm
 
 from ark.optimization.optimizer import BaseOptimizer
 
@@ -50,11 +52,32 @@ class SimulatedAnnealing(BaseOptimizer):
             Any (same as init_sol): The minimum-cost solution found in the initial phase.
         """
         self._logging, self._log = logging, self._new_log()
-        sol = self.initial_phase(init_sol, neighbor_func, cost_func)
-        best_sol = self.annealing_phase(sol, neighbor_func, cost_func)
+        sol = self._initial_phase(init_sol, neighbor_func, cost_func)
+        best_sol = self._annealing_phase(sol, neighbor_func, cost_func)
         return best_sol
 
-    def initial_phase(
+    def visualize_log(self) -> None:
+        """Plot the log of the annealing process."""
+        if not self._logging:
+            raise RuntimeError("No log to visualize")
+        # plot all the logs in a 2x3 grid
+        fig, axs = plt.subplots(2, 3, figsize=(15, 10))
+        axs[0, 0].plot(self._log["temp"])
+        axs[0, 0].set_title("Temperature")
+        axs[0, 1].plot(self._log["acc"], ".")
+        axs[0, 1].set_title("Acceptance")
+        axs[0, 2].plot(self._log["acc_prob"])
+        axs[0, 2].set_title("Acceptance Probability")
+        axs[1, 0].plot(self._log["cost"])
+        axs[1, 0].set_title("Cost")
+        axs[1, 1].plot(self._log["best_cost"])
+        axs[1, 1].set_title("Best Cost")
+        axs[1, 2].plot(self._log["delta_cost"])
+        axs[1, 2].set_title("Delta Cost")
+        plt.tight_layout()
+        plt.show()
+
+    def _initial_phase(
         self, init_sol: Any, neighbor_func: Callable, cost_func: Callable
     ) -> Any:
         """Initial searching phase for profiling.
@@ -70,7 +93,7 @@ class SimulatedAnnealing(BaseOptimizer):
         """
         return init_sol
 
-    def annealing_phase(
+    def _annealing_phase(
         self, init_sol: Any, neighbor_func: Callable, cost_func: Callable
     ) -> Any:
         """Annealing phase to search for the minimum cost solution.
@@ -87,21 +110,33 @@ class SimulatedAnnealing(BaseOptimizer):
         best_sol = cur_sol = init_sol
         best_cost = cur_cost = cost_func(cur_sol)
         temp = self.temperature
-        while not self._is_frozen(temp):
+        for _ in tqdm(range(self._frozen_iteration())):
             for _ in range(self.inner_iteration):
                 neighbor_sol = neighbor_func(cur_sol)
                 neighbor_cost = cost_func(neighbor_sol)
                 acc = self._accept(cur_cost, neighbor_cost, temp)
+                if self._logging:
+                    self._log["temp"].append(temp)
+                    if acc:
+                        self._log["acc"].append(acc)
+                    else:
+                        self._log["acc"].append(None)
+                    if neighbor_cost < cur_cost:
+                        self._log["acc_prob"].append(None)
+                    else:
+                        self._log["acc_prob"].append(
+                            np.exp(-(neighbor_cost - cur_cost) / temp)
+                        )
+                    self._log["cost"].append(cur_cost)
+                    self._log["best_cost"].append(best_cost)
+                    self._log["delta_cost"].append(neighbor_cost - cur_cost)
+
                 if acc:
                     if cur_cost < best_cost:
                         best_sol = cur_sol
                         best_cost = cur_cost
                     cur_sol = neighbor_sol
                     cur_cost = neighbor_cost
-                if self._logging:
-                    self._log["temp"].append(temp)
-                    self._log["acc"].append(acc)
-                    self._log["cost"].append(cur_cost)
             temp = self._update_temp(temp)
         return best_sol
 
@@ -118,6 +153,11 @@ class SimulatedAnnealing(BaseOptimizer):
         else:
             return np.random.rand() < np.exp(-(neighbor_cost - cur_cost) / temp)
 
+    def _frozen_iteration(self) -> int:
+        return int(
+            np.log(self.frozen_temp / self.temperature) / np.log(self.temp_decay)
+        )
+
     def _is_frozen(self, temp: float) -> bool:
         return temp < self.frozen_temp
 
@@ -125,4 +165,11 @@ class SimulatedAnnealing(BaseOptimizer):
         return temp * self.temp_decay
 
     def _new_log(self) -> dict[str, list]:
-        return {"temp": [], "acc": [], "cost": []}
+        return {
+            "temp": [],
+            "acc": [],
+            "cost": [],
+            "acc_prob": [],
+            "best_cost": [],
+            "delta_cost": [],
+        }

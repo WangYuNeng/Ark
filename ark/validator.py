@@ -89,11 +89,11 @@ class ArkValidator:
         If the edge is a switch we consider both it being ON or OFF
         """
 
-        fixed = node.get_non_switchable()
+        fixed = list(node.get_non_switchable())
         switchable = list(node.get_switchable())
         n_conn_options = 2 ** len(switchable)
 
-        possible_conns = [list(fixed) for _ in range(n_conn_options)]
+        possible_conns = [fixed.copy() for _ in range(n_conn_options)]
         for i, conn in enumerate(possible_conns):
             for j, edge in enumerate(switchable):
                 if i & (1 << j):

@@ -1,6 +1,7 @@
 """
 Attribute class for CDGType.
 """
+from functools import partial
 from types import FunctionType
 from typing import NewType, Optional, Union
 
@@ -44,7 +45,12 @@ class AttrDef:
 
     def check(self, val: AttrImpl) -> bool:
         """Check if val is in the valid range of this attribute."""
-        if not isinstance(val, self.type):
+
+        # Special case: partial function is also consdiered as a function type.
+        if self.type == FunctionType:
+            if not isinstance(val, FunctionType) and not isinstance(val, partial):
+                raise TypeError(f"Expected type {self.type}, got {type(val)}")
+        elif not isinstance(val, self.type):
             raise TypeError(f"Expected type {self.type}, got {type(val)}")
         if self.valid_range is None:
             return True

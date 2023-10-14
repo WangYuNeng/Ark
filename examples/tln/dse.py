@@ -1,196 +1,151 @@
-from copy import deepcopy
-from functools import partial
-from typing import Mapping
+import functools as ft
+import pickle
 
 import matplotlib.pyplot as plt
 import numpy as np
-import numpy.typing as npt
-from sensitivity_ananlysis import create_single_line
+from puf import SwitchableStarPUF, single_bit_flip_test, single_bit_flipped_neighbors
 from spec import mm_tln_spec
-from tqdm import tqdm
 
-from ark.ark import Ark
-from ark.cdg.cdg import CDG, CDGElement
 from ark.optimization.sa import SimulatedAnnealing
 
 
-def bits2int(bits: list[bool], msb_first: bool = True) -> int:
-    """Convert a base-2 representation in bit array to an integer
-
-    Args:
-        bits (list[bool]): base-2 representation, MSB first if msb_first is True
-        msb_first (bool, optional): Whether the bits start with MSB. Defaults to True.
-
-    Returns:
-        int: The decimal integer value
-    """
-    n_bits = len(bits)
-    if not msb_first:
-        bit_enum = enumerate(bits[::-1])
-    else:
-        bit_enum = enumerate(bits)
-    return sum([int(bit) * 2 ** (n_bits - i - 1) for i, bit in bit_enum])
-
-
-def int2bits(val: int, n_bits: int, msb_first: bool = True) -> npt.NDArray[np.bool_]:
-    """Convert an integer to base-2 representation
-
-    Args:
-        val (int): Decimal integer value
-        n_bits (int): # of bits
-        msb_first (bool, optional): whether the bit array starts with MSB.
-        Defaults to True.
-
-    Returns:
-        npt.NDArray[np.bool_]: value in base-2 representation, MSB first if msb_first
-        is True, LSB first otherwise
-    """
-    bits = []
-    base = 2 ** (n_bits - 1)
-    for i in range(n_bits):
-        bits.append(int(val >= base))
-        if val >= base:
-            val -= base
-        base //= 2
-    if not msb_first:
-        bits.reverse()
-    return np.array(bits, dtype=np.bool_)
-
-
-def single_bit_flip_test(
-    n_chl_bit: int, crps: Mapping[int, npt.NDArray[np.bool_]], center_chls: list[int]
-) -> list[list[float]]:
-    """Perform 1-bit flipping test from Uli's paper
-
-    Args:
-        n_chl_bit (int): Number of challenge bits
-        crps (Mapping[int, npt.NDArray[np.bool_]]): Mapping from challenges to
-        response(s). The response can be multiple bits.
-        center_chls (list[int]): Center challenge values
-    """
-
-    n_rsp_bit = len(crps[center_chls[0]])
-    flipped_cnt = np.zeros(shape=(n_chl_bit, n_rsp_bit))
-    for chl in center_chls:
-        chl_bits = int2bits(chl, n_chl_bit)
-        rsp = crps[chl]
-        for i, _ in enumerate(chl_bits):
-            chl_bits[i] ^= 1
-            flipped_chl = bits2int(chl_bits)
-            rsp_flipped = crps[flipped_chl]
-            flipped_cnt[i] += rsp != rsp_flipped
-            chl_bits[i] ^= 1
-    flipped_prob = flipped_cnt / len(center_chls)
-    return flipped_prob
-
-
-def evaluate_puf(
-    puf: CDG, system: Ark, time_eval: list[float], n_eval: int, plot: bool = False
+def evaluate_puf_single_bit_flip(
+    params: list[dict | list[dict]],
+    puf: SwitchableStarPUF,
+    center_chls_size: int,
+    n_inst: int,
+    plot: bool = False,
 ):
-    rsps = []
-    for _ in range(n_eval):
-        cdg_execution_data = puf.execution_data()
-        node2trace = system.execute(
-            cdg_execution_data=cdg_execution_data,
-            time_eval=time_eval,
-            store_inplace=False,
+    n_bits = puf.n_chl_bits
+    cost = 0
+    puf.set_circuit_param(*params)
+    puf.sample_instances(n_inst=n_inst)
+    for inst_id in range(n_inst):
+        center_chls = np.random.choice(
+            2**n_bits, size=center_chls_size, replace=False
+        ).tolist()
+        neighbors = [single_bit_flipped_neighbors(chl, n_bits) for chl in center_chls]
+        evaluate_chls = list(set(center_chls + sum(neighbors, [])))
+        rsps_enumerate = [
+            puf.evaluate_instance(inst_id=0, challenge=i) for i in evaluate_chls
+        ]
+        crps = {
+            chl: np.array(time_series_out)
+            for chl, time_series_out in zip(evaluate_chls, rsps_enumerate)
+        }
+        flipped_prob = single_bit_flip_test(
+            n_chl_bit=n_bits,
+            crps=crps,
+            center_chls=center_chls,
         )
-        rsp = np.sum(node2trace["IdealV_0"][0])
+
+        cost += np.sum(np.abs(flipped_prob - 0.5))
+
         if plot:
-            plt.plot(time_eval, node2trace["IdealV_0"][0])
-        rsps.append(rsp)
-    plt.show()
-    return np.average(rsps)
+            for bit_pos, prob in enumerate(flipped_prob):
+                plt.plot(time_points, prob, label=f"Bit {bit_pos}")
+            plt.show()
+    cost /= n_inst
+    return cost
 
 
-def perturb_attr(puf: CDG):
-    new_puf = deepcopy(puf)
-    elements = new_puf.edges
-    mod_ele: CDGElement = np.random.choice(elements)
-    attr_name = np.random.choice(list(mod_ele.attr_def.keys()))
-    new_val = 0.5 + np.random.random() * 1.5
-    mod_ele.attrs[attr_name] = new_val
-    return new_puf
-
-
-def bit_flip(bit_vec: npt.NDArray[np.bool_]) -> npt.NDArray[np.bool_]:
-    """Randomly flip a bit in the vector
-
-    Args:
-        bit_vec (npt.NDArray[np.bool_]): Bit vector
-
-    Returns:
-        npt.NDArray[np.bool_]: bit vector with one bit flipped
-    """
-    flip_pos = np.random.randint(len(bit_vec))
-    vec_cpy = bit_vec.copy()
-    vec_cpy[flip_pos] ^= 1
-    return vec_cpy
-
-
-# np.random.seed(10)
-VEC_LEN, N_VEC = 1000, 100
-rand_vecs = np.random.randint(2, size=(N_VEC, VEC_LEN))
-
-
-def random_xor(bit_vec: npt.NDArray[np.bool_]) -> int:
-    return (
-        np.sum(bit_vec ^ rand_vecs)
-        + np.sum(bit_vec ^ np.roll(bit_vec, 1))
-        + np.sum(bit_vec ^ np.roll(bit_vec, 3))
+def perturb_attr(params: list[dict | list[dict]], puf: SwitchableStarPUF):
+    (
+        middle_cap_param,
+        middle_edge_param,
+        branch_v_param,
+        branch_i_param,
+        branch_e_param,
+    ) = params
+    # Uniform randomly choose one parameter to perturb
+    param: dict = np.random.choice(
+        [
+            middle_cap_param,
+            middle_edge_param,
+            *branch_v_param,
+            *branch_i_param,
+            *branch_e_param,
+        ]
     )
+    for key in param.keys():
+        if key == "c" or key == "l":
+            param[key] = np.random.uniform(0.1e-9, 10e-9)
+        elif key == "r" or key == "g":
+            param[key] = np.random.uniform(0.0, 2.0)
+        elif key == "ws" or key == "wt":
+            param[key] = np.random.uniform(0.5, 2.0)
+    puf.set_circuit_param(
+        middle_cap_param,
+        middle_edge_param,
+        branch_v_param,
+        branch_i_param,
+        branch_e_param,
+    )
+    return params
 
 
-def random_xor_optimum() -> int:
-    best_vec = np.zeros(VEC_LEN, dtype=np.bool_)
-    for i in range(VEC_LEN):
-        if np.sum(rand_vecs[:, i]) > N_VEC / 2:
-            best_vec[i] = 1
-    return random_xor(best_vec)
+def save_params(params: list[dict | list[dict]], cost: float) -> None:
+    pickle.dump(params, open(f"params_{cost}.pkl", "wb"))
 
 
 if __name__ == "__main__":
+    N_BITS, LINE_LEN, N_INST = 12, 4, 1
+    CENTER_CHL_SIZE = 10
     optimizer = SimulatedAnnealing(
-        temperature=100,
-        frozen_temp=1,
+        temperature=10,
+        frozen_temp=5,
         temp_decay=0.9,
-        inner_iteraion=100,
+        inner_iteraion=5,
     )
-    tline, source, v_nodes, i_nodes, edges = create_single_line(4, CDG())
-    system = Ark(cdg_spec=mm_tln_spec)
-    system.compile(tline)
-    time_range = [0, 2.5e-8]
-    time_points = np.linspace(*time_range, 101, endpoint=True)
-    eval_func = partial(evaluate_puf, system=system, time_eval=time_points, n_eval=2)
-    init_sol = tline
-    sol = optimizer.optimize(
+    np.random.seed(428)
+    n_bits = N_BITS
+    time_range = [0, 5e-8]
+    time_points = np.linspace(*time_range, 1001, endpoint=True)
+    ss_puf = SwitchableStarPUF(
+        n_chl_bits=n_bits,
+        n_rsp_bits=1,
+        line_len=LINE_LEN,
+        spec=mm_tln_spec,
+        time_points=time_points,
+    )
+    vnode_param = {"c": 1e-9, "g": 0.0}
+    inode_param = {"l": 1e-9, "r": 0.0}
+    et_param = {"ws": 1.0, "wt": 1.0}
+    middle_cap_param = vnode_param.copy()
+    middle_edge_param = et_param.copy()
+    branch_v_param = [vnode_param.copy() for _ in range(ss_puf.branch_n_nodes)]
+    branch_i_param = [inode_param.copy() for _ in range(ss_puf.branch_n_nodes)]
+    branch_e_param = [et_param.copy() for _ in range(ss_puf.branch_n_edges)]
+    ss_puf.set_circuit_param(
+        middle_cap_param,
+        middle_edge_param,
+        branch_v_param,
+        branch_i_param,
+        branch_e_param,
+    )
+    ss_puf.sample_instances(n_inst=N_INST)
+
+    init_sol = (
+        middle_cap_param,
+        middle_edge_param,
+        branch_v_param,
+        branch_i_param,
+        branch_e_param,
+    )
+
+    eval_fn = ft.partial(
+        evaluate_puf_single_bit_flip,
+        puf=ss_puf,
+        center_chls_size=CENTER_CHL_SIZE,
+        n_inst=N_INST,
+    )
+    neighbor_fn = ft.partial(perturb_attr, puf=ss_puf)
+
+    final_params = optimizer.optimize(
         init_sol=init_sol,
-        neighbor_func=perturb_attr,
-        cost_func=evaluate_puf,
+        neighbor_func=neighbor_fn,
+        cost_func=eval_fn,
+        logging=True,
+        use_wandb=False,
+        check_point_func=save_params,
     )
-    optimizer.visualize_log()
-
-    print(evaluate_puf(tline, system, time_points, 10, plot=True))
-    print(evaluate_puf(sol, system, time_points, 10, plot=True))
-
-    best_cost, best_line = eval_func(tline), tline
-    for _ in tqdm(range(100 * 21)):
-        perturbed = perturb_attr(best_line)
-        cost = eval_func(perturbed)
-        if cost < best_cost:
-            best_cost = cost
-            best_line = perturbed
-    print(evaluate_puf(sol, system, time_points, 10, plot=True))
-
-    # init_sol = np.random.randint(2, size=VEC_LEN)
-    # # print(init_sol)
-    # print(random_xor(init_sol))
-    # sol = optimizer.optimize(
-    #     init_sol=init_sol,
-    #     neighbor_func=bit_flip,
-    #     cost_func=random_xor,
-    # )
-    # optimizer.visualize_log()
-    # # print(sol)
-    # print(random_xor(sol))
-    # print(random_xor_optimum())

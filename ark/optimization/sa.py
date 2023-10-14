@@ -5,6 +5,7 @@ import numpy as np
 from tqdm import tqdm
 
 from ark.optimization.optimizer import BaseOptimizer
+from ark.util import inspect_func_name
 
 
 class SimulatedAnnealing(BaseOptimizer):
@@ -25,6 +26,7 @@ class SimulatedAnnealing(BaseOptimizer):
             temp_decay (float): The decay rate of the temperature.
             inner_iteraion (int): The number of iterations for each temperature.
         """
+        super().__init__()
         self.temperature = temperature
         self.frozen_temp = frozen_temp
         self.temp_decay = temp_decay
@@ -38,6 +40,9 @@ class SimulatedAnnealing(BaseOptimizer):
         neighbor_func: Callable,
         cost_func: Callable,
         logging: bool = True,
+        use_wandb: bool = False,
+        check_point_func: Callable = None,
+        greedy: bool = False,
     ) -> Any:
         """Optimize the cost function from the initial solution using simulated annealing.
 
@@ -51,9 +56,19 @@ class SimulatedAnnealing(BaseOptimizer):
         Returns:
             Any (same as init_sol): The minimum-cost solution found in the initial phase.
         """
+        self.use_wandb = use_wandb
+        self.check_point_func = check_point_func
+        self.greedy = greedy
+        if use_wandb:
+            self._init_wandb(
+                neighbor_func=inspect_func_name(neighbor_func),
+                cost_func=inspect_func_name(cost_func),
+                check_point_func=inspect_func_name(check_point_func),
+            )
         self._logging, self._log = logging, self._new_log()
         sol = self._initial_phase(init_sol, neighbor_func, cost_func)
         best_sol = self._annealing_phase(sol, neighbor_func, cost_func)
+        self.wandb_run.finish()
         return best_sol
 
     def visualize_log(self) -> None:
@@ -109,6 +124,8 @@ class SimulatedAnnealing(BaseOptimizer):
         """
         best_sol = cur_sol = init_sol
         best_cost = cur_cost = cost_func(cur_sol)
+        if self.check_point_func is not None:
+            self.check_point_func(best_sol, best_cost)
         temp = self.temperature
         for _ in tqdm(range(self._frozen_iteration())):
             for _ in range(self.inner_iteration):
@@ -117,26 +134,30 @@ class SimulatedAnnealing(BaseOptimizer):
                 acc = self._accept(cur_cost, neighbor_cost, temp)
                 if self._logging:
                     self._log["temp"].append(temp)
-                    if acc:
-                        self._log["acc"].append(acc)
-                    else:
-                        self._log["acc"].append(None)
-                    if neighbor_cost < cur_cost:
-                        self._log["acc_prob"].append(None)
-                    else:
-                        self._log["acc_prob"].append(
-                            np.exp(-(neighbor_cost - cur_cost) / temp)
-                        )
+                    self._log["acc"].append(acc)
+                    self._log["acc_prob"].append(
+                        self._accept_prob(cur_cost, neighbor_cost, temp)
+                    )
                     self._log["cost"].append(cur_cost)
                     self._log["best_cost"].append(best_cost)
                     self._log["delta_cost"].append(neighbor_cost - cur_cost)
 
                 if acc:
                     if cur_cost < best_cost:
-                        best_sol = cur_sol
-                        best_cost = cur_cost
-                    cur_sol = neighbor_sol
-                    cur_cost = neighbor_cost
+                        best_sol, best_cost = cur_sol, cur_cost
+                        if self.check_point_func is not None:
+                            self.check_point_func(best_sol, best_cost)
+
+                    cur_sol, cur_cost = neighbor_sol, neighbor_cost
+            if self.use_wandb:
+                data = {
+                    f"avg_{key}": np.mean(val[-self.inner_iteration :])
+                    for key, val in self._log.items()
+                } | {
+                    f"std_{key}": np.std(val[-self.inner_iteration :])
+                    for key, val in self._log.items()
+                }
+                self._wandb_logging(data)
             temp = self._update_temp(temp)
         return best_sol
 
@@ -148,10 +169,33 @@ class SimulatedAnnealing(BaseOptimizer):
             neighbor_cost (float): The cost of the neighbor solution.
             temp (float): The current temperature.
         """
+        return np.random.rand() < self._accept_prob(
+            cur_cost=cur_cost, neighbor_cost=neighbor_cost, temp=temp
+        )
+
+    def _accept_prob(self, cur_cost: float, neighbor_cost: float, temp: float) -> float:
+        """Calculate the acceptance probability of the neighbor solution.
+
+        Args:
+            cur_cost (float): The cost of the current solution.
+            neighbor_cost (float): The cost of the neighbor solution.
+            temp (float): The current temperature.
+        """
         if neighbor_cost < cur_cost:
-            return True
+            return 1
         else:
-            return np.random.rand() < np.exp(-(neighbor_cost - cur_cost) / temp)
+            if self.greedy:
+                return 0
+            return np.exp(-(neighbor_cost - cur_cost) / temp)
+
+    def _wandb_config(self, **kwargs) -> dict[str, Any]:
+        return {
+            "temperature": self.temperature,
+            "temperature_decay": self.temp_decay,
+            "frozen_temperature": self.frozen_temp,
+            "inner_iteration": self.inner_iteration,
+            "greedy": self.greedy,
+        } | kwargs
 
     def _frozen_iteration(self) -> int:
         return int(

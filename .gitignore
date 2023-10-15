@@ -131,3 +131,7 @@ dmypy.json
 # visualization output
 *gviz-output/
 *tex-outputs/
+
+# weight & biases
+*wandb/
+*_run_*/

@@ -1,5 +1,11 @@
 import functools as ft
+import json
+import os
 import pickle
+import time
+from argparse import ArgumentParser
+from multiprocessing import Pool
+from typing import Callable
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,43 +15,64 @@ from spec import mm_tln_spec
 from ark.optimization.sa import SimulatedAnnealing
 
 
+def sim_and_calc_flip_prob(
+    puf: SwitchableStarPUF, inst_id: int, center_chls: list[int]
+):
+    neighbors = [
+        single_bit_flipped_neighbors(chl, puf.n_chl_bits) for chl in center_chls
+    ]
+    evaluate_chls = list(set(center_chls + sum(neighbors, [])))
+    rsps_enumerate = [
+        puf.evaluate_instance(inst_id=inst_id, challenge=i) for i in evaluate_chls
+    ]
+    crps = {
+        chl: np.array(time_series_out)
+        for chl, time_series_out in zip(evaluate_chls, rsps_enumerate)
+    }
+    flipped_prob = single_bit_flip_test(
+        n_chl_bit=puf.n_chl_bits,
+        crps=crps,
+        center_chls=center_chls,
+    )
+    return flipped_prob
+
+
 def evaluate_puf_single_bit_flip(
     params: list[dict | list[dict]],
     puf: SwitchableStarPUF,
     center_chls_size: int,
     n_inst: int,
+    n_core: int = 1,
     plot: bool = False,
 ):
     n_bits = puf.n_chl_bits
-    cost = 0
     puf.set_circuit_param(*params)
     puf.sample_instances(n_inst=n_inst)
-    for inst_id in range(n_inst):
-        center_chls = np.random.choice(
-            2**n_bits, size=center_chls_size, replace=False
-        ).tolist()
-        neighbors = [single_bit_flipped_neighbors(chl, n_bits) for chl in center_chls]
-        evaluate_chls = list(set(center_chls + sum(neighbors, [])))
-        rsps_enumerate = [
-            puf.evaluate_instance(inst_id=0, challenge=i) for i in evaluate_chls
-        ]
-        crps = {
-            chl: np.array(time_series_out)
-            for chl, time_series_out in zip(evaluate_chls, rsps_enumerate)
-        }
-        flipped_prob = single_bit_flip_test(
-            n_chl_bit=n_bits,
-            crps=crps,
-            center_chls=center_chls,
-        )
+    center_chlss = [
+        np.random.choice(2**n_bits, size=center_chls_size, replace=False).tolist()
+        for _ in range(n_inst)
+    ]
+    if n_core == 1:
+        flipped_probs = []
+        for inst_id, center_chls in enumerate(center_chlss):
+            flipped_probs.append(sim_and_calc_flip_prob(puf, inst_id, center_chls))
+    else:
+        with Pool(n_core) as pool:
+            flipped_probs = pool.starmap(
+                sim_and_calc_flip_prob,
+                [
+                    (puf, inst_id, center_chls)
+                    for inst_id, center_chls in enumerate(center_chlss)
+                ],
+            )
+    dist_to_ideal = np.abs(np.array(flipped_probs) - 0.5)
 
-        cost += np.sum(np.abs(flipped_prob - 0.5))
-
-        if plot:
-            for bit_pos, prob in enumerate(flipped_prob):
-                plt.plot(time_points, prob, label=f"Bit {bit_pos}")
-            plt.show()
-    cost /= n_inst
+    # normalize cost to between 0~0.5
+    cost = np.sum(dist_to_ideal) / n_inst / puf.n_chl_bits / len(puf.time_points)
+    if plot:
+        plt.title(f"Avg Distance to 0.5 vs Time, Tot Cost={cost:.4f}")
+        for bit_pos, prob in enumerate(np.mean(dist_to_ideal, axis=0)):
+            plt.plot(time_points, prob, label=f"Bit {bit_pos}")
     return cost
 
 
@@ -84,27 +111,73 @@ def perturb_attr(params: list[dict | list[dict]], puf: SwitchableStarPUF):
     return params
 
 
-def save_params(params: list[dict | list[dict]], cost: float) -> None:
-    pickle.dump(params, open(f"params_{cost}.pkl", "wb"))
+def save_params(
+    params: list[dict | list[dict]],
+    cost: float,
+    eval_fn_more_samples: Callable,
+    save_dir: str,
+) -> None:
+    cost_more_sampe = eval_fn_more_samples(params)
+    save_prefix = os.path.join(save_dir, f"params_{cost:.3f}_{cost_more_sampe:.3f}")
+    plt.savefig(f"{save_prefix}.png")
+    plt.cla()
+    pickle.dump(params, open(f"{save_prefix}.pkl", "wb"))
 
 
 if __name__ == "__main__":
-    N_BITS, LINE_LEN, N_INST = 12, 4, 1
-    CENTER_CHL_SIZE = 10
-    optimizer = SimulatedAnnealing(
-        temperature=10,
-        frozen_temp=5,
-        temp_decay=0.9,
-        inner_iteraion=5,
+    parser = ArgumentParser()
+    parser.add_argument("-c", "--config", type=str, required=True)
+    parser.add_argument(
+        "-g",
+        "--greedy",
+        action="store_true",
+        help="Use greedy mode of the simulated annealing engine, i.e., only accept a \
+            solution when the cost is strictly smaller.",
     )
-    np.random.seed(428)
-    n_bits = N_BITS
-    time_range = [0, 5e-8]
+    parser.add_argument(
+        "-w",
+        "--wandb",
+        action="store_true",
+        help="Use weight and bias for real time monitoring.",
+    )
+    args = parser.parse_args()
+
+    with open(args.config, "r") as f:
+        config = json.load(f)
+
+    # PUD and simulation parameters
+    n_bits, line_len, n_inst = config["n_bits"], config["line_len"], config["n_inst"]
+    n_core = config["n_core"]
+    center_chls_size = config["center_chls_size"]
+    seed = config["seed"]
+    time_end = config["time_end"]
+    use_wandb = args.wandb
+    greedy = args.greedy
+
+    # Optimizer parameters
+    temperature = config["temperature"]
+    frozen_temp = config["frozen_temp"]
+    temp_decay = config["temp_decay"]
+    inner_iteration = config["inner_iteration"]
+    checkpoint_dir = f"_run_{time.strftime('%Y%m%d-%H%M%S')}"
+    config["checkpoint_dir"] = checkpoint_dir
+    os.mkdir(checkpoint_dir)
+    print(f"Checkpoints store at {checkpoint_dir}")
+
+    optimizer = SimulatedAnnealing(
+        temperature=temperature,
+        frozen_temp=frozen_temp,
+        temp_decay=temp_decay,
+        inner_iteraion=inner_iteration,
+    )
+    np.random.seed(seed)
+    n_bits = n_bits
+    time_range = [0, time_end]
     time_points = np.linspace(*time_range, 1001, endpoint=True)
     ss_puf = SwitchableStarPUF(
         n_chl_bits=n_bits,
-        n_rsp_bits=1,
-        line_len=LINE_LEN,
+        n_rsp_bits=1,  # dummy, currently not used
+        line_len=line_len,
         spec=mm_tln_spec,
         time_points=time_points,
     )
@@ -123,7 +196,7 @@ if __name__ == "__main__":
         branch_i_param,
         branch_e_param,
     )
-    ss_puf.sample_instances(n_inst=N_INST)
+    ss_puf.sample_instances(n_inst=n_inst)
 
     init_sol = (
         middle_cap_param,
@@ -136,16 +209,31 @@ if __name__ == "__main__":
     eval_fn = ft.partial(
         evaluate_puf_single_bit_flip,
         puf=ss_puf,
-        center_chls_size=CENTER_CHL_SIZE,
-        n_inst=N_INST,
+        center_chls_size=center_chls_size,
+        n_inst=n_inst,
+        n_core=n_core,
+    )
+    eval_fn_more_sample = ft.partial(
+        evaluate_puf_single_bit_flip,
+        puf=ss_puf,
+        center_chls_size=2 * center_chls_size,
+        n_inst=2 * n_inst,
+        plot=True,
+        n_core=n_core,
     )
     neighbor_fn = ft.partial(perturb_attr, puf=ss_puf)
+    check_point_fn = ft.partial(
+        save_params, eval_fn_more_samples=eval_fn_more_sample, save_dir=checkpoint_dir
+    )
 
     final_params = optimizer.optimize(
         init_sol=init_sol,
         neighbor_func=neighbor_fn,
         cost_func=eval_fn,
         logging=True,
-        use_wandb=False,
-        check_point_func=save_params,
+        use_wandb=use_wandb,
+        meta_data=config,
+        check_point_func=check_point_fn,
+        greedy=greedy,
     )
+    # optimizer.visualize_log()

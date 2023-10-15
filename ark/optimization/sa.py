@@ -41,6 +41,7 @@ class SimulatedAnnealing(BaseOptimizer):
         cost_func: Callable,
         logging: bool = True,
         use_wandb: bool = False,
+        meta_data: dict[str, Any] = None,
         check_point_func: Callable = None,
         greedy: bool = False,
     ) -> Any:
@@ -49,9 +50,19 @@ class SimulatedAnnealing(BaseOptimizer):
         Args:
             init_sol (Any): The initial solution to start with.
             neighbor_func (Callable): The function to generate a neighbor solution from
-            a given solution.
+                a given solution.
             cost_func (Callable): The function to calculate the cost of a given solution.
             logging (bool, optional): Whether to log the process. Defaults to True.
+            use_wandb (bool, optional): Whether to use weight & bias to log the process.
+                Defaults to False.
+            meta_data (dict[str, Any], optional): The meta data to log with wandb.
+                Defaults to None.
+            check_point_func (Callable, optional): The function to call when storing a
+            checkpoint. The function takes the solution and the cost as the arguments.
+                Defaults to None.
+            greedy (bool, optional): Whether to use greedy search, meaning only
+                accepting a solution when the cost is strictly smaller.
+                Defaults to False.
 
         Returns:
             Any (same as init_sol): The minimum-cost solution found in the initial phase.
@@ -64,11 +75,13 @@ class SimulatedAnnealing(BaseOptimizer):
                 neighbor_func=inspect_func_name(neighbor_func),
                 cost_func=inspect_func_name(cost_func),
                 check_point_func=inspect_func_name(check_point_func),
+                **meta_data,
             )
         self._logging, self._log = logging, self._new_log()
         sol = self._initial_phase(init_sol, neighbor_func, cost_func)
         best_sol = self._annealing_phase(sol, neighbor_func, cost_func)
-        self.wandb_run.finish()
+        if use_wandb:
+            self.wandb_run.finish()
         return best_sol
 
     def visualize_log(self) -> None:

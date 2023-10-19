@@ -4,10 +4,15 @@
     "n_inst": 4,
     "n_core": 1,
     "center_chls_size": 2,
+    "checkpoint_center_chls_size": 16,
+    "checkpoint_n_inst": 8,
     "seed": 428,
     "time_end": 2.5e-8,
     "temperature": 0.1,
     "frozen_temp": 0.01,
     "temp_decay": 0.7,
-    "inner_iteration": 4
+    "inner_iteration": 4,
+    "rand_init": false,
+    "n_time_point": 1001,
+    "window_size": 50
 }

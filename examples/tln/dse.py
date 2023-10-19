@@ -17,7 +17,18 @@ from ark.optimization.sa import SimulatedAnnealing
 
 def sim_and_calc_flip_prob(
     puf: SwitchableStarPUF, inst_id: int, center_chls: list[int]
-):
+) -> list[list[float]]:
+    """Simulate a puf instance and calculate the single-bit flipping probability test restult.
+
+    Args:
+        puf (SwitchableStarPUF): The PUF description.
+        inst_id (int): The instance id to simulate.
+        center_chls (list[int]): challenges to be flipped in the test.
+
+    Returns:
+        list[list[float]]: (n_chl_bit, n_rsp_bit) Flipping probability of each
+        response bit for each challenge position.
+    """
     neighbors = [
         single_bit_flipped_neighbors(chl, puf.n_chl_bits) for chl in center_chls
     ]
@@ -41,10 +52,24 @@ def evaluate_puf_single_bit_flip(
     params: list[dict | list[dict]],
     puf: SwitchableStarPUF,
     center_chls_size: int,
+    window_size: int,
     n_inst: int,
     n_core: int = 1,
     plot: bool = False,
-):
+) -> float:
+    """Evaluate the cost of a PUF by single-bit flipping probability test.
+
+    Args:
+        params (list[dict  |  list[dict]]): nominal parameters of the PUF.
+        puf (SwitchableStarPUF): the PUF description.
+        center_chls_size (int): number of challenges to be flipped in the test.
+        n_inst (int): number of instances to simulate.
+        n_core (int, optional): number of core to use. Defaults to 1.
+        plot (bool, optional): plot the test results. Defaults to False.
+
+    Returns:
+        float: cost
+    """
     n_bits = puf.n_chl_bits
     puf.set_circuit_param(*params)
     puf.sample_instances(n_inst=n_inst)
@@ -66,9 +91,14 @@ def evaluate_puf_single_bit_flip(
                 ],
             )
     dist_to_ideal = np.abs(np.array(flipped_probs) - 0.5)
+    cost = np.min(
+        [
+            np.mean(dist_to_ideal[:, :, i : i + window_size])
+            for i in range(len(puf.time_points) - window_size)
+        ]
+    )
 
-    # normalize cost to between 0~0.5
-    cost = np.sum(dist_to_ideal) / n_inst / puf.n_chl_bits / len(puf.time_points)
+    # cost = np.mean(dist_to_ideal)
     if plot:
         plt.title(f"Avg Distance to 0.5 vs Time, Tot Cost={cost:.4f}")
         for bit_pos, prob in enumerate(np.mean(dist_to_ideal, axis=0)):
@@ -76,7 +106,30 @@ def evaluate_puf_single_bit_flip(
     return cost
 
 
-def perturb_attr(params: list[dict | list[dict]], puf: SwitchableStarPUF):
+def rand_lc():
+    return np.random.uniform(0.1e-9, 10e-9)
+
+
+def rand_rg():
+    return np.random.uniform(0.0, 2.0)
+
+
+def rand_w():
+    return np.random.uniform(0.5, 2.0)
+
+
+def perturb_attr(
+    params: list[dict | list[dict]], puf: SwitchableStarPUF
+) -> list[dict | list[dict]]:
+    """Perturb one parameter of the PUF.
+
+    Args:
+        params (list[dict  |  list[dict]]): PUF nominal parameters.
+        puf (SwitchableStarPUF): the PUF description.
+
+    Returns:
+        list[dict | list[dict]]: perturbed parameters.
+    """
     (
         middle_cap_param,
         middle_edge_param,
@@ -96,11 +149,11 @@ def perturb_attr(params: list[dict | list[dict]], puf: SwitchableStarPUF):
     )
     for key in param.keys():
         if key == "c" or key == "l":
-            param[key] = np.random.uniform(0.1e-9, 10e-9)
+            param[key] = rand_lc()
         elif key == "r" or key == "g":
-            param[key] = np.random.uniform(0.0, 2.0)
+            param[key] = rand_rg()
         elif key == "ws" or key == "wt":
-            param[key] = np.random.uniform(0.5, 2.0)
+            param[key] = rand_w()
     puf.set_circuit_param(
         middle_cap_param,
         middle_edge_param,
@@ -149,6 +202,10 @@ if __name__ == "__main__":
     n_bits, line_len, n_inst = config["n_bits"], config["line_len"], config["n_inst"]
     n_core = config["n_core"]
     center_chls_size = config["center_chls_size"]
+    n_time_point, window_size = config["n_time_point"], config["window_size"]
+    rand_init = config["rand_init"]
+    checkpoint_n_inst = config["checkpoint_n_inst"]
+    checkpoint_center_chls_size = config["checkpoint_center_chls_size"]
     seed = config["seed"]
     time_end = config["time_end"]
     use_wandb = args.wandb
@@ -173,7 +230,7 @@ if __name__ == "__main__":
     np.random.seed(seed)
     n_bits = n_bits
     time_range = [0, time_end]
-    time_points = np.linspace(*time_range, 1001, endpoint=True)
+    time_points = np.linspace(*time_range, n_time_point, endpoint=True)
     ss_puf = SwitchableStarPUF(
         n_chl_bits=n_bits,
         n_rsp_bits=1,  # dummy, currently not used
@@ -181,14 +238,46 @@ if __name__ == "__main__":
         spec=mm_tln_spec,
         time_points=time_points,
     )
-    vnode_param = {"c": 1e-9, "g": 0.0}
-    inode_param = {"l": 1e-9, "r": 0.0}
-    et_param = {"ws": 1.0, "wt": 1.0}
-    middle_cap_param = vnode_param.copy()
-    middle_edge_param = et_param.copy()
-    branch_v_param = [vnode_param.copy() for _ in range(ss_puf.branch_n_nodes)]
-    branch_i_param = [inode_param.copy() for _ in range(ss_puf.branch_n_nodes)]
-    branch_e_param = [et_param.copy() for _ in range(ss_puf.branch_n_edges)]
+
+    if rand_init:
+        middle_cap_param = {
+            "c": rand_lc(),
+            "g": rand_rg(),
+        }
+        middle_edge_param = {
+            "ws": rand_w(),
+            "wt": rand_w(),
+        }
+        branch_v_param = [
+            {
+                "c": rand_lc(),
+                "g": rand_rg(),
+            }
+            for _ in range(ss_puf.branch_n_nodes)
+        ]
+        branch_i_param = [
+            {
+                "l": rand_lc(),
+                "r": rand_rg(),
+            }
+            for _ in range(ss_puf.branch_n_nodes)
+        ]
+        branch_e_param = [
+            {
+                "ws": rand_w(),
+                "wt": rand_w(),
+            }
+            for _ in range(ss_puf.branch_n_edges)
+        ]
+    else:
+        vnode_param = {"c": 1e-9, "g": 0.0}
+        inode_param = {"l": 1e-9, "r": 0.0}
+        et_param = {"ws": 1.0, "wt": 1.0}
+        middle_cap_param = vnode_param.copy()
+        middle_edge_param = et_param.copy()
+        branch_v_param = [vnode_param.copy() for _ in range(ss_puf.branch_n_nodes)]
+        branch_i_param = [inode_param.copy() for _ in range(ss_puf.branch_n_nodes)]
+        branch_e_param = [et_param.copy() for _ in range(ss_puf.branch_n_edges)]
     ss_puf.set_circuit_param(
         middle_cap_param,
         middle_edge_param,
@@ -211,13 +300,15 @@ if __name__ == "__main__":
         puf=ss_puf,
         center_chls_size=center_chls_size,
         n_inst=n_inst,
+        window_size=window_size,
         n_core=n_core,
     )
     eval_fn_more_sample = ft.partial(
         evaluate_puf_single_bit_flip,
         puf=ss_puf,
-        center_chls_size=2 * center_chls_size,
-        n_inst=2 * n_inst,
+        center_chls_size=checkpoint_center_chls_size,
+        n_inst=checkpoint_n_inst,
+        window_size=window_size,
         plot=True,
         n_core=n_core,
     )

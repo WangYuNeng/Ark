@@ -211,6 +211,12 @@ class RenderableGraph:
 
         self.graph.render(directory=graph_path)
 
+    def _repr_mimebundle_(self, **kwargs):
+        self.graph.graph_attr['ratio'] = 'compress'
+        self.graph.graph_attr['bgcolor'] = 'transparent'
+        self.graph.graph_attr['margin'] = '0'
+        return self.graph._repr_mimebundle_(**kwargs)
+
 
 def cdg_to_graphviz(
     subdir,
@@ -243,3 +249,36 @@ def cdg_to_graphviz(
         post_layout_hook(graph)
 
     graph.save(subdir)
+
+
+def cdg_to_graphviz_display(
+    cdg_lang,
+    cdg,
+    name='graph',
+    inherited=False,
+    save_legend=False,
+    horizontal=False,
+    show_node_labels=True,
+    show_edge_labels=False,
+    post_layout_hook=None,
+):
+
+    graph = RenderableGraph(
+        name=name,
+        inherited=inherited,
+        horizontal=horizontal,
+        save_legend=save_legend,
+        show_node_labels=show_node_labels,
+        show_edge_labels=show_edge_labels,
+    )
+    graph.load_cdg_lang(cdg_lang)
+    for node in cdg.nodes:
+        graph.add_node(node)
+
+    for edge in cdg.edges:
+        graph.add_edge(edge)
+
+    if post_layout_hook is not None:
+        post_layout_hook(graph)
+
+    return graph

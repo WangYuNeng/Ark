@@ -9,6 +9,8 @@ Provide specification for
 from typing import Literal
 
 import numpy as np
+
+from ark.specification.specification import CDGSpec
 from spec import mm_tln_spec, pulse, tln_spec
 
 from ark.ark import Ark
@@ -286,6 +288,42 @@ def highlight_refl(fig, ax):
     ax.fill_between(section, ymin, ymax, facecolor=shadecolor, alpha=shadealpha)
     ax.fill_between(section, ymin, ymax, facecolor=shadecolor, alpha=shadealpha)
 
+
+def make_full_graph(
+    mismatch: bool | Literal["nodes", "edges"],
+    branch_args_override: dict[
+        Literal[
+            "line_len",
+            "branch_stride",
+            "branches_per_node",
+            "branch_len",
+            "branch_offset",
+        ],
+        int,
+    ]
+    | None = None,
+) -> tuple[CDG, CDGSpec]:
+    branch_args = {
+        "line_len": 2,
+        "branch_stride": 2,
+        "branches_per_node": 1,
+        "branch_len": 0,
+        "branch_offset": 0,
+        **branch_args_override,
+    }
+    if mismatch:
+        graph, _, _ = create_tline_branch(
+            MmV, MmI, lambda: MmE(ws=1.0, wt=1.0), **branch_args
+        )
+        return graph, mm_tln_spec
+    else:
+        graph, _, _ = create_tline_branch(
+            IdealV, IdealI, lambda: IdealE(), **branch_args
+        )
+        return graph, tln_spec
+
+
+# make_full_graph(True, {'branch_len': 10})
 
 if __name__ == "__main__":
     import ark.visualize.graphviz_gen as graphvizlib

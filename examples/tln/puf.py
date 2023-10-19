@@ -82,8 +82,8 @@ def single_bit_flip_test(
         response(s). The response can be multiple bits.
         center_chls (list[int]): Center challenge values.
     Returns:
-        list[list[float]]: Flipping probability of each response bit for each challenge
-        position.
+        list[list[float]]: (n_chl_bit, n_rsp_bit) Flipping probability of each
+        response bit for each challenge position.
     """
 
     n_rsp_bit = len(crps[center_chls[0]])

@@ -6,13 +6,11 @@ Provide specification for
 - LC mismatched ladder
 - Gain mismatched ladder
 """
-import matplotlib as mpl
-import matplotlib.pyplot as plt
+from typing import Literal
+
 import numpy as np
 from spec import mm_tln_spec, pulse, tln_spec
 
-import ark.visualize.graphviz_gen as graphvizlib
-import ark.visualize.latex_gen as latexlib
 from ark.ark import Ark
 from ark.cdg.cdg import CDG, CDGNode
 from ark.specification.cdg_types import EdgeType, NodeType
@@ -26,19 +24,6 @@ MmV, MmI = spec.node_type("MmV"), spec.node_type("MmI")
 MmE = spec.edge_type("MmE")
 
 system = Ark(cdg_spec=spec)
-
-fontsize = 25
-mpl.rcParams.update(mpl.rcParamsDefault)
-plt.rcParams.update(
-    {
-        "text.usetex": True,
-        "font.size": 12,
-        "font.family": "Helvetica",
-        "axes.labelsize": fontsize,
-        "xtick.labelsize": fontsize,
-        "ytick.labelsize": fontsize,
-    }
-)
 
 
 def build_line(graph, e_nt, v_nt, i_nt, length, term_g=1.0, start_i=False):
@@ -303,6 +288,24 @@ def highlight_refl(fig, ax):
 
 
 if __name__ == "__main__":
+    import ark.visualize.graphviz_gen as graphvizlib
+    import ark.visualize.latex_gen as latexlib
+    import matplotlib as mpl
+    import matplotlib.pyplot as plt
+
+    fontsize = 25
+    mpl.rcParams.update(mpl.rcParamsDefault)
+    plt.rcParams.update(
+        {
+            "text.usetex": True,
+            "font.size": 12,
+            "font.family": "Helvetica",
+            "axes.labelsize": fontsize,
+            "xtick.labelsize": fontsize,
+            "ytick.labelsize": fontsize,
+        }
+    )
+
     fnargs = {"br": latexlib.SwitchArg("E_6", "br==1")}
     branch_args = {
         "line_len": 2,

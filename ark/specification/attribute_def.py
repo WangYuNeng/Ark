@@ -1,6 +1,7 @@
 """
 Attribute class for CDGType.
 """
+from functools import partial
 from types import FunctionType
 from typing import NewType, Optional, Union
 
@@ -44,13 +45,43 @@ class AttrDef:
 
     def check(self, val: AttrImpl) -> bool:
         """Check if val is in the valid range of this attribute."""
-        if not isinstance(val, self.type):
+
+        # Special case: partial function is also consdiered as a function type.
+        if self.type == FunctionType:
+            if not isinstance(val, FunctionType) and not isinstance(val, partial):
+                raise TypeError(f"Expected type {self.type}, got {type(val)}")
+        elif not isinstance(val, self.type):
             raise TypeError(f"Expected type {self.type}, got {type(val)}")
         if self.valid_range is None:
             return True
         if not self.valid_range.check_in_range(val):
             raise ValueError(f"Expected value in range {self.valid_range}, got {val}")
         return True
+
+    @property
+    def default(self) -> AttrImpl:
+        """Returen the default value of this attribute.
+
+        If attr_type is a function, return an empty function that raises error.
+        For attr_type being int or float, return a value in the range.
+
+        Returns:
+            AttrImpl: The default value of this attribute.
+        """
+
+        def empty_func(*args):
+            raise RuntimeError("Default function not implemented")
+
+        if self.type == FunctionType:
+            return empty_func
+        if self.valid_range is None:
+            return self.type(0)
+        if self.valid_range.is_exact():
+            return self.valid_range.exact
+        if self.valid_range.is_lower_bound() or self.valid_range.is_interval_bound():
+            return self.valid_range.min
+        if self.valid_range.is_upper_bound():
+            return self.valid_range.max
 
 
 class AttrDefMismatch(AttrDef):

@@ -357,8 +357,8 @@ class CDG:
         edge.connect(src=src, dst=dst)
         src.add_edge(edge)
         dst.add_edge(edge)
-        self._add_node(src)
-        self._add_node(dst)
+        self.add_node(src)
+        self.add_node(dst)
         self._edges.add(edge)
         if edge.switchable:
             self._switches.add(edge)
@@ -375,7 +375,7 @@ class CDG:
         """Check if an element exists in the graph."""
         if isinstance(element, CDGNode):
             order = element.order
-            return order < self.ds_order and element in self._order_to_nodes[order]
+            return order <= self.ds_order and element in self._order_to_nodes[order]
         elif isinstance(element, CDGEdge):
             return element in self._edges
 
@@ -384,13 +384,50 @@ class CDG:
 
         raise NotImplementedError
 
-    def _add_node(self, node: CDGNode) -> None:
-        """Add a node to the graph."""
+    def add_graph(self, graph: "CDG") -> None:
+        """Add the elements in another graph to the current graph.
+
+        Args:
+            graph (CDG): the graph to add
+        """
+        for node in graph.nodes:
+            self.add_node(node)
+        for edge in graph.edges:
+            self.add_edge(edge)
+
+    def add_node(self, node: CDGNode) -> None:
+        """Add a node to the graph.
+
+        Args:
+            node (CDGNode): The node to add to the graph
+        """
         order = node.order
         max_order = len(self._order_to_nodes) - 1
         if order > max_order:
             self._order_to_nodes += [set() for _ in range(order - max_order)]
         self._order_to_nodes[order].add(node)
+
+    def add_edge(self, edge: CDGEdge) -> None:
+        """Add an edge to the graph.
+
+        If the edge is connected to any node, the node should already be in the graph.
+        Otherwise, an error will be raised.
+
+        Args:
+            edge (CDGEdge): The edge to add to the graph
+        """
+        if edge.src is not None and edge.dst is not None:
+            if not self.check_exist(edge.src):
+                raise RuntimeError(
+                    f"Add edge {edge.name} while node {edge.src.name} not in the graph"
+                )
+            elif not self.check_exist(edge.dst):
+                raise RuntimeError(
+                    f"Add edge {edge.name} while node {edge.dst.name} not in the graph"
+                )
+        self._edges.add(edge)
+        if edge.switchable:
+            self._switches.add(edge)
 
     def nodes_in_order(self, order: int) -> list[CDGNode]:
         """Return nodes in the graph based on order sorted by node.name.

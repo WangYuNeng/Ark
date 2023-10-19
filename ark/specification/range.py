@@ -11,23 +11,23 @@ class Range:
     max: int | float = None
     exact: int | float = None
 
-    def is_interval_bound(self):
-        return self.is_range() and not self.min is None and not self.max is None
+    def is_interval_bound(self) -> bool:
+        return self.is_range() and self.min is not None and self.max is not None
 
-    def is_lower_bound(self):
-        return self.is_range() and self.max is None and not self.min is None
+    def is_lower_bound(self) -> bool:
+        return self.is_range() and self.max is None and self.min is not None
 
-    def is_upper_bound(self):
-        return self.is_range() and self.min is None and not self.max is None
+    def is_upper_bound(self) -> bool:
+        return self.is_range() and self.min is None and self.max is not None
 
-    def is_unbounded(self):
+    def is_unbounded(self) -> bool:
         return self.is_range() and self.min is None and self.max is None
 
-    def is_range(self):
+    def is_range(self) -> bool:
         return self.exact is None
 
-    def is_exact(self):
-        return not self.exact is None
+    def is_exact(self) -> bool:
+        return self.exact is not None
 
     def check_in_range(self, val):
         """Check if val is in the valid range."""
@@ -65,3 +65,15 @@ class Range:
         if self.max is not None:
             return LE(val, Int(self.max))
         raise NotImplementedError
+
+    def get_interval(self) -> tuple[int | float, int | float]:
+        """Return the range.
+
+        Returns:
+            tuple[int | float, int | float]: The lower and higher bound of the range.
+        Raises:
+            ValueError: If the range is not an interval.
+        """
+        if not self.is_interval_bound():
+            raise ValueError("The range is not an interval.")
+        return self.min, self.max

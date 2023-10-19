@@ -56,8 +56,8 @@ def pulse_sympy(
     t = (t - delay) % period
     # Use a sympy piecewise function to represent the pulse
     return sp.Piecewise(
-        (0, t < rise_time),
-        (amplitude * t / rise_time, t < rise_time + pulse_width),
+        (amplitude * t / rise_time, t < rise_time),
+        (amplitude, t < rise_time + pulse_width),
         (
             amplitude * (1 - (t - pulse_width - rise_time) / fall_time),
             t < rise_time + pulse_width + fall_time,

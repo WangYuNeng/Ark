@@ -106,26 +106,42 @@ def evaluate_puf_single_bit_flip(
     return cost
 
 
-def rand_lc():
-    return np.random.uniform(0.1e-9, 10e-9)
+def rand_in_range(range: tuple[float, float] = None, bound: tuple[float, float] = None):
+    if range is None:
+        range = bound
+    if range[0] < bound[0]:
+        range[0] = bound[0]
+    if range[1] > bound[1]:
+        range[1] = bound[1]
+    return np.random.uniform(*range)
 
 
-def rand_rg():
-    return np.random.uniform(0.0, 2.0)
+def rand_lc(range: tuple[float, float] = None):
+    return rand_in_range(range, (0.1e-9, 10e-9))
 
 
-def rand_w():
-    return np.random.uniform(0.5, 2.0)
+def rand_rg(range: tuple[float, float] = None):
+    return rand_in_range(range, (0.0, 2.0))
+
+
+def rand_w(range: tuple[float, float] = None):
+    return rand_in_range(range, (0.5, 2.0))
 
 
 def perturb_attr(
-    params: list[dict | list[dict]], puf: SwitchableStarPUF
+    params: list[dict | list[dict]],
+    puf: SwitchableStarPUF,
+    perturb_all: bool = False,
+    increment: bool = False,
 ) -> list[dict | list[dict]]:
     """Perturb one parameter of the PUF.
 
     Args:
         params (list[dict  |  list[dict]]): PUF nominal parameters.
         puf (SwitchableStarPUF): the PUF description.
+        perturb_all (bool, optional): perturb all parameters. Defaults to False.
+        increment (bool, optional): perturb parameter by increment of
+        the current value. Defaults to False.
 
     Returns:
         list[dict | list[dict]]: perturbed parameters.
@@ -138,22 +154,33 @@ def perturb_attr(
         branch_e_param,
     ) = params
     # Uniform randomly choose one parameter to perturb
-    param: dict = np.random.choice(
-        [
-            middle_cap_param,
-            middle_edge_param,
-            *branch_v_param,
-            *branch_i_param,
-            *branch_e_param,
-        ]
-    )
-    for key in param.keys():
-        if key == "c" or key == "l":
-            param[key] = rand_lc()
-        elif key == "r" or key == "g":
-            param[key] = rand_rg()
-        elif key == "ws" or key == "wt":
-            param[key] = rand_w()
+    perturbed_params = [
+        middle_cap_param,
+        middle_edge_param,
+        *branch_v_param,
+        *branch_i_param,
+        *branch_e_param,
+    ]
+    if not perturb_all:
+        param: dict = np.random.choice(perturbed_params)
+        perturbed_params = [param]
+    for param in perturbed_params:
+        for key, val in param.items():
+            perturb_range = None
+            if key == "c" or key == "l":
+                if increment:
+                    perturb_range = [val / 2, val * 2]
+                param[key] = rand_lc(range=perturb_range)
+
+            elif key == "r" or key == "g":
+                if increment:
+                    perturb_range = [val - 0.2, val + 0.2]
+                param[key] = rand_rg()
+
+            elif key == "ws" or key == "wt":
+                if increment:
+                    perturb_range = [val / 2, val * 2]
+                param[key] = rand_w()
     puf.set_circuit_param(
         middle_cap_param,
         middle_edge_param,
@@ -203,6 +230,7 @@ if __name__ == "__main__":
     n_core = config["n_core"]
     center_chls_size = config["center_chls_size"]
     n_time_point, window_size = config["n_time_point"], config["window_size"]
+    perturb_all, increment = config["perturb_all"], config["increment"]
     rand_init = config["rand_init"]
     checkpoint_n_inst = config["checkpoint_n_inst"]
     checkpoint_center_chls_size = config["checkpoint_center_chls_size"]
@@ -216,7 +244,7 @@ if __name__ == "__main__":
     frozen_temp = config["frozen_temp"]
     temp_decay = config["temp_decay"]
     inner_iteration = config["inner_iteration"]
-    checkpoint_dir = f"_run_{time.strftime('%Y%m%d-%H%M%S')}"
+    checkpoint_dir = f"_run_{time.strftime('%Y%m%d-%H%M%S')}_{time.time():.0f}"
     config["checkpoint_dir"] = checkpoint_dir
     os.mkdir(checkpoint_dir)
     print(f"Checkpoints store at {checkpoint_dir}")
@@ -312,7 +340,9 @@ if __name__ == "__main__":
         plot=True,
         n_core=n_core,
     )
-    neighbor_fn = ft.partial(perturb_attr, puf=ss_puf)
+    neighbor_fn = ft.partial(
+        perturb_attr, puf=ss_puf, perturb_all=perturb_all, increment=increment
+    )
     check_point_fn = ft.partial(
         save_params, eval_fn_more_samples=eval_fn_more_sample, save_dir=checkpoint_dir
     )

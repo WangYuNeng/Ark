@@ -2,12 +2,12 @@
 from types import FunctionType
 from typing import Optional
 
-from ark.cdg.cdg import CDG, AttrImpl, CDGExecutionData, CDGNode
+from ark.cdg.cdg import CDG, AttrImpl, CDGEdge, CDGExecutionData, CDGNode
 from ark.compiler import ArkCompiler
 from ark.rewrite import RewriteGen
 from ark.solver import SMTSolver
 from ark.specification.specification import CDGSpec
-from ark.validator import VALID, ArkValidator
+from ark.validator import FAILED_CHECK, NOT_ACC, REJ, VALID, ArkValidator
 
 
 class Ark:
@@ -45,19 +45,47 @@ class Ark:
             None,
         )
 
-    def validate(self, cdg: CDG) -> bool:
+    def validate(self, cdg: CDG):
         """Validate the given CDG against the specification
 
         Args:
             cdg (CDG): The CDG to validate
 
-        Returns:
-            bool: True if the CDG is valid, False otherwise
+        Raises:
+            ValueError: When CDG is rejected, not accepted, or failed
+            the checking function.
         """
-        flag, _ = self.validator.validate(cdg, self.cdg_spec)
-        if flag != VALID:
-            return False
-        return True
+
+        def print_connection(conn: list[CDGEdge]):
+            for edge in conn:
+                edge.print_local()
+
+        flag, ctx = self.validator.validate(cdg, self.cdg_spec)
+        if flag == VALID:
+            pass
+        elif flag == REJ:
+            print("CDG is rejected.")
+            node, conn, rej_pattern = ctx
+            print("Rejected node: ", node)
+            print("Rejected connection:")
+            print_connection(conn)
+            print("Rejected pattern: ", rej_pattern)
+            raise ValueError
+        elif flag == NOT_ACC:
+            print("CDG is not accepted.")
+            node, conn = ctx
+            print("Not accepted node: ", node)
+            print("Not accepted connection:")
+            print_connection(conn)
+            raise ValueError
+        elif flag == FAILED_CHECK:
+            print("CDG failed the checking function.")
+            node, conn, check_fn = ctx
+            print("Failed node: ", node)
+            print("Failed connection:")
+            print_connection(conn)
+            print("Failed checking function: ", check_fn.__name__)
+            raise ValueError
 
     def compile(
         self,

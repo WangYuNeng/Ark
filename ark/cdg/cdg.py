@@ -339,6 +339,10 @@ class CDGEdge(CDGElement):
     def switchable(self, switchable: bool) -> None:
         self._switchable = switchable
 
+    def print_local(self):
+        """Print the local view of this edge."""
+        print(f"{self.name}:", self.src.name, "->", self.dst.name)
+
 
 class CDG:
     """

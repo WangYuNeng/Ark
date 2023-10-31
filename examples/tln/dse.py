@@ -4,11 +4,11 @@ import os
 import pickle
 import time
 from argparse import ArgumentParser
-from multiprocessing import Pool
 from typing import Callable
 
 import matplotlib.pyplot as plt
 import numpy as np
+from multiprocess import Pool
 from puf import (
     PUF,
     SwitchableStarPUF,

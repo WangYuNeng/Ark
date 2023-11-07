@@ -12,10 +12,12 @@ from multiprocess import Pool
 from puf import (
     PUF,
     SwitchableStarPUF,
+    sample_challenges,
     single_bit_flip_test,
     single_bit_flipped_neighbors,
 )
 from spec import mm_tln_spec
+from tqdm import tqdm
 
 from ark.optimization.optimizer import BaseOptimizer
 from ark.optimization.sa import SimulatedAnnealing
@@ -70,6 +72,7 @@ def evaluate_puf_single_bit_flip(
     n_core: int = 1,
     plot: bool = False,
     return_crps: bool = False,
+    tqdm_process: bool = False,
 ) -> float:
     """Evaluate the cost of a PUF by single-bit flipping probability test.
 
@@ -82,6 +85,7 @@ def evaluate_puf_single_bit_flip(
         plot (bool, optional): plot the test results. Defaults to False.
         return_crps: (bool, optional): return the challenge-response pairs
         instead of the aggregated cost. Defaults to False.
+        tqdm_process (bool, optional): use tqdm to monitor the simulation progress.
 
     Returns:
         float: cost
@@ -90,12 +94,15 @@ def evaluate_puf_single_bit_flip(
     puf.set_circuit_param(*params)
     puf.sample_instances(n_inst=n_inst)
     center_chlss = [
-        np.random.choice(2**n_bits, size=center_chls_size, replace=False).tolist()
-        for _ in range(n_inst)
+        sample_challenges(n_bits=n_bits, n_chl=center_chls_size) for _ in range(n_inst)
     ]
     if n_core == 1:
         flipped_probs = []
-        for inst_id, center_chls in enumerate(center_chlss):
+        if tqdm_process:
+            iterable = tqdm(center_chlss)
+        else:
+            iterable = center_chlss
+        for inst_id, center_chls in enumerate(iterable):
             flipped_probs.append(
                 sim_and_calc_flip_prob(puf, inst_id, center_chls, return_crps)
             )

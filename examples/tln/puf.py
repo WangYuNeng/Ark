@@ -56,6 +56,29 @@ def int2bits(val: int, n_bits: int, msb_first: bool = True) -> npt.NDArray[np.bo
     return np.array(bits, dtype=np.bool_)
 
 
+def sample_challenges(n_bits: int, n_chl: int, seed: int | None = None) -> list[int]:
+    """Sample challenges from uniform distribution.
+
+    If n_bits < 64, use numpy.random.randint to sample challenges which guarantees
+    no duplicates. Otherwise, use random bits to sample challenges which may have
+    duplicates.
+
+    Args:
+        n_bits (int): # of challenge bits.
+        n_chl (int): # of challenges to sample.
+        seed (int | None, optional): Random seed. Defaults to None.
+
+    Returns:
+        list[int]: The sampled challenges.
+    """
+    if seed is not None:
+        np.random.seed(seed)
+    if n_bits < 64:
+        return np.random.randint(0, 2**n_bits, size=n_chl).tolist()
+    else:
+        return [bits2int(np.random.randint(0, 2, size=n_bits)) for _ in range(n_chl)]
+
+
 def single_bit_flipped_neighbors(chl: int, n_bits: int) -> list[int]:
     """Return the neighbors of the challenge with one bit flipped.
 

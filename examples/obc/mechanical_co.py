@@ -19,11 +19,16 @@ co_spec = CDGSpec("co")
 # Oscillator node: The state variable models the displacement of the oscillator
 # Order = 2 means the state variable controlled by its second derivative - acceleration
 # The mass attribute models the mass of the oscillator
-Osc = NodeType(name="Osc", order=2, attr_def=[AttrDef("mass", attr_type=float)])
+Osc = NodeType(
+    name="Osc",
+    attrs={"order": 2, "attr_def": {"mass": AttrDef(attr_type=float)}},
+)
 
 # Coupling springs
 # k: coupling strength
-Coupling = EdgeType(name="Coupling", attr_def=[AttrDef("k", attr_type=float)])
+Coupling = EdgeType(
+    name="Coupling", attrs={"attr_def": {"k": AttrDef(attr_type=float)}}
+)
 
 cdg_types = [Osc, Coupling]
 co_spec.add_cdg_types(cdg_types)

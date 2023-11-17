@@ -359,8 +359,9 @@ def create_switchable_star_cdg(
     switche_pairs = [[et(switchable=True) for _ in range(n_bits)] for _ in range(2)]
     short_pulse = partial(pulse, rise_time=0.5e-9, fall_time=0.5e-9, pulse_width=1e-9)
     for branches, cap, switches in zip(branch_pairs, middle_caps, switche_pairs):
-        puf.connect(et(), inp_nt(fn=short_pulse, g=0.0), cap)
-        puf.connect(et(), cap, cap)
+        # Assume the input current input is ideal for simplicity
+        puf.connect(self_et(), inp_nt(fn=short_pulse, g=0.0), cap)
+        puf.connect(self_et(), cap, cap)
         for branch, switch_edge in zip(branches, switches):
             branch_graph, _, i_nodes, _ = branch
             puf.add_graph(branch_graph)

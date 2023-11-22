@@ -56,6 +56,29 @@ def int2bits(val: int, n_bits: int, msb_first: bool = True) -> npt.NDArray[np.bo
     return np.array(bits, dtype=np.bool_)
 
 
+def sample_challenges(n_bits: int, n_chl: int, seed: int | None = None) -> list[int]:
+    """Sample challenges from uniform distribution.
+
+    If n_bits < 64, use numpy.random.randint to sample challenges which guarantees
+    no duplicates. Otherwise, use random bits to sample challenges which may have
+    duplicates.
+
+    Args:
+        n_bits (int): # of challenge bits.
+        n_chl (int): # of challenges to sample.
+        seed (int | None, optional): Random seed. Defaults to None.
+
+    Returns:
+        list[int]: The sampled challenges.
+    """
+    if seed is not None:
+        np.random.seed(seed)
+    if n_bits < 64:
+        return np.random.randint(0, 2**n_bits, size=n_chl).tolist()
+    else:
+        return [bits2int(np.random.randint(0, 2, size=n_bits)) for _ in range(n_chl)]
+
+
 def single_bit_flipped_neighbors(chl: int, n_bits: int) -> list[int]:
     """Return the neighbors of the challenge with one bit flipped.
 
@@ -336,8 +359,9 @@ def create_switchable_star_cdg(
     switche_pairs = [[et(switchable=True) for _ in range(n_bits)] for _ in range(2)]
     short_pulse = partial(pulse, rise_time=0.5e-9, fall_time=0.5e-9, pulse_width=1e-9)
     for branches, cap, switches in zip(branch_pairs, middle_caps, switche_pairs):
-        puf.connect(et(), inp_nt(fn=short_pulse, g=0.0), cap)
-        puf.connect(et(), cap, cap)
+        # Assume the input current input is ideal for simplicity
+        puf.connect(self_et(), inp_nt(fn=short_pulse, g=0.0), cap)
+        puf.connect(self_et(), cap, cap)
         for branch, switch_edge in zip(branches, switches):
             branch_graph, _, i_nodes, _ = branch
             puf.add_graph(branch_graph)

@@ -276,6 +276,40 @@ class ArkCompiler:
             attr_mapping,
         )
 
+    def compile_odeterm(self, cdg: CDG, cdg_spec: CDGSpec, verbose: int = 0):
+        """Compile the cdg to an executable function representing the derivative term.
+
+        The function will in the form of `ode_term(t, y, args, fargs)` where `t` is
+        the time, `y` is the state vector, `args` is the list of arguments mapped to
+        the float/int attribute values and switch values, and `fargs` is the list of
+        function arguments mapped to the FunctionType attribute values.
+
+        The separation of the two arguments is for compatibility to Diffrax
+        1. The function arguments can't be jitted. Need to be treat as static value
+        separately.
+        2. The ode term in Diffrax is in the form of f(t, y, args).
+
+        Args:
+            cdg (CDG): The input graph to compile
+            cdg_spec (CDGSpec): Specification containing the production rules
+            verbose (int): level of status printing, 0 -- no printing,
+            1 -- print the compilation progress.
+
+        Returns:
+            prog (FunctionType): The compiled function.
+            node_mapping (dict[str, int]): map the name of CDGNode to the corresponding
+            index in the state variables. The node_mapping[name] points to the index
+            of the 0th order term and the n-th order deravitves (if applicable) index
+            is node_mapping[name] + n.
+            switch_mapping (dict[str, int]): map the name of CDGEdge to the corresponding
+            index in the switch variables.
+            attr_mapping (dict[str, dict[str, int]]): map the name of CDGElement to the
+            corresponding index in the attribute variables. The attr_mapping[name][attr]
+            points to the index of the attribute.
+        """
+
+    raise NotImplementedError
+
     def compile_sympy(
         self,
         cdg: CDG,
@@ -289,6 +323,8 @@ class ArkCompiler:
             cdg_spec (CDGSpec): Specification
             help_fn (list[FunctionType]): List of non-built-in functions
         """
+        raise NotImplementedError
+
         node: CDGNode
         src: CDGNode
         dst: CDGNode

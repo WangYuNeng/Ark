@@ -51,6 +51,18 @@ def mk_arg(name: str) -> ast.arg:
     return ast.arg(arg=name)
 
 
+def mk_list_assign(targets: list[ast.Name], value: ast.expr) -> ast.Assign:
+    return ast.Assign(
+        [
+            set_ctx(
+                ast.Tuple(targets),
+                ast.Store,
+            )
+        ],
+        set_ctx(value, ast.Load),
+    )
+
+
 def parse_expr(val: "int | float | FunctionType | str") -> ast.expr:
     """parse value to expression"""
     if isinstance(val, int) or isinstance(val, float):
@@ -177,6 +189,8 @@ class ArkCompiler:
     INIT_STATE, TIME_RANGE = "init_states", "time_range"
     SWITCH_VAL = "switch_vals"
     ATTR_VAL = "attr_vals"
+    ARGS = "args"
+    FN_ARGS = "fargs"
     KWARGS = "kwargs"
     SIM_SOL = "__sol"
     SOLVE_IVP_EXPR = parse_expr(
@@ -241,14 +255,12 @@ class ArkCompiler:
         self._rewrite.set_attr_rn_fn(rn_attr)
         self._verbose = verbose
 
-        node_mapping, ode_fn_io_names = self._collect_ode_fn_io(cdg)
-        switch_mapping = {edge.name: i for i, edge in enumerate(cdg.switches)}
-        attr_mapping, attr_idx = {}, 0
-        for ele in cdg.nodes + cdg.edges:
-            attr_mapping[ele.name] = {}
-            for attr_name in ele.attrs.keys():
-                attr_mapping[ele.name][attr_name] = attr_idx
-                attr_idx += 1
+        (
+            node_mapping,
+            ode_fn_io_names,
+            switch_mapping,
+            attr_mapping,
+        ) = self._collect_ode_fn_io(cdg)
 
         attr_var_def = self._compile_attribute_var(switch_mapping, attr_mapping)
         ode_fn = self._compile_ode_fn(cdg, cdg_spec, ode_fn_io_names)
@@ -308,7 +320,68 @@ class ArkCompiler:
             points to the index of the attribute.
         """
 
-    raise NotImplementedError
+        self._rewrite.set_attr_rn_fn(rn_attr)
+        self._verbose = verbose
+
+        stmts = []
+
+        (
+            node_mapping,
+            ode_fn_io_names,
+            switch_mapping,
+            attr_mapping,
+        ) = self._collect_ode_fn_io(cdg, separate_fn_attr=True)
+
+        # Count the numerical value attributes index from the switch mapping
+        # Isolate the function attributes mapping
+        num_attr_mapping, num_attr_idx = {}, len(switch_mapping)
+        fn_attr_mapping, fn_attr_idx = {}, 0
+        for ele_name, attrs in attr_mapping.items():
+            num_attr_mapping[ele_name], fn_attr_mapping[ele_name] = {}, {}
+            for attr_name, is_num in attrs.items():
+                if not is_num:
+                    fn_attr_mapping[ele_name][attr_name] = fn_attr_idx
+                    fn_attr_idx += 1
+                else:
+                    num_attr_mapping[ele_name][attr_name] = num_attr_idx
+                    num_attr_idx += 1
+
+        # Generate the variable names of the switches and attributes
+        args_names = [
+            None
+            for _ in range(
+                len(switch_mapping)
+                + sum(len(attrs) for attrs in num_attr_mapping.values())
+            )
+        ]
+        fn_args_names = [
+            None for _ in range(sum(len(attrs) for attrs in fn_attr_mapping))
+        ]
+
+        for name, idx in switch_mapping.items():
+            args_names[idx] = mk_var(switch_attr(name))
+        for ele_name, attrs in num_attr_mapping.items():
+            for attr_name, idx in attrs.items():
+                args_names[idx] = mk_var(rn_attr(ele_name, attr_name))
+        for ele_name, attrs in fn_attr_mapping.items():
+            for attr_name, idx in attrs.items():
+                fn_args_names[idx] = mk_var(rn_attr(ele_name, attr_name))
+
+        # Generate the Assignment statements
+        stmts.append(
+            mk_list_assign(
+                targets=args_names,
+                value=mk_var(self.ARGS),
+            )
+        )
+        stmts.append(
+            mk_list_assign(
+                targets=fn_args_names,
+                value=mk_var(self.FN_ARGS),
+            )
+        )
+        ode_fn = self._compile_ode_fn(cdg, cdg_spec, ode_fn_io_names)
+        raise NotImplementedError
 
     def compile_sympy(
         self,
@@ -393,19 +466,11 @@ class ArkCompiler:
             for name, idx in switch_mapping.items():
                 edge_names[idx] = name
             stmts.append(
-                ast.Assign(
-                    [
-                        set_ctx(
-                            ast.Tuple(
-                                [
-                                    mk_var(switch_attr(edge_name))
-                                    for edge_name in edge_names
-                                ]
-                            ),
-                            ast.Store,
-                        )
+                mk_list_assign(
+                    targets=[
+                        mk_var(switch_attr(edge_name)) for edge_name in edge_names
                     ],
-                    set_ctx(mk_var(self.SWITCH_VAL), ast.Load),
+                    value=mk_var(self.SWITCH_VAL),
                 )
             )
 
@@ -417,32 +482,40 @@ class ArkCompiler:
                 for attr_name, idx in attrs.items():
                     attr_names[idx] = rn_attr(ele_name, attr_name)
             stmts.append(
-                ast.Assign(
-                    [
-                        set_ctx(
-                            ast.Tuple([mk_var(attr_name) for attr_name in attr_names]),
-                            ast.Store,
-                        )
-                    ],
-                    set_ctx(mk_var(self.ATTR_VAL), ast.Load),
+                mk_list_assign(
+                    targets=[mk_var(attr_name) for attr_name in attr_names],
+                    value=mk_var(self.ATTR_VAL),
                 )
             )
         return stmts
 
-    def _collect_ode_fn_io(self, cdg: CDG) -> tuple[dict[str, int], list]:
+    def _collect_ode_fn_io(
+        self, cdg: CDG, separate_fn_attr: bool = False
+    ) -> tuple[dict[str, int], list[str], dict[str, int], dict[str, dict[str, int]]]:
         """Collect the input/output node mapping and var names of the ode function
 
         Args:
             cdg (CDG): The input CDG
+            separate_fn_attr (bool): Separate the int/float attributes with function
+            attributes.
 
         Returns:
             node_to_state_var (dict[str, int]): map name ofCDGNode to the corresponding
-            index in the state variables. The node_to_state_var[name] points to the
+            index in the state variables. The `node_to_state_var[name]` points to the
             index of the 0th order term and the n-th order deravitves (if applicable)
-            index is node_to_state_var[name] + n.
+            index is `node_to_state_var[name] + n`.
             ode_input_return_names (list): names of the state variables of the compiled
             ode function for scipy.integrate.solve_ivp simulation.
+            switch_mapping (dict[str, int]): map the name of CDGEdge to the corresponding
+            index in the switch variables.
+            attr_mapping (dict[str, dict[str, int]]): map the name of CDGElement to the
+            corresponding index in the attribute variables. The `attr_mapping[name][attr]`
+            points to the index of the attribute if `separate_fn_attr` is false. Otherwise,
+            it denote whether the attribute is a float/int attribute or not.
         """
+
+        # Go through the nodes to collect the state variables
+        # n-th order variable has n-1 state variables
         node_to_state_var = {}
         ode_input_return_names = []
         for node_order in range(1, cdg.ds_order + 1):
@@ -450,7 +523,28 @@ class ArkCompiler:
                 node_to_state_var[node.name] = len(ode_input_return_names)
                 for order in range(node_order):
                     ode_input_return_names.append(ddt(node.name, order=order))
-        return node_to_state_var, ode_input_return_names
+
+        # Go through the edges to collect the switch variables
+        switch_mapping = {edge.name: i for i, edge in enumerate(cdg.switches)}
+        attr_mapping, attr_idx = {}, 0
+        for ele in cdg.nodes + cdg.edges:
+            attr_mapping[ele.name] = {}
+            for attr_name, attr in ele.attrs.items():
+                if separate_fn_attr:
+                    if attr.type == FunctionType:
+                        attr_mapping[ele.name][attr_name] = False
+                    else:
+                        attr_mapping[ele.name][attr_name] = True
+                else:
+                    attr_mapping[ele.name][attr_name] = attr_idx
+                    attr_idx += 1
+
+        return (
+            node_to_state_var,
+            ode_input_return_names,
+            switch_mapping,
+            attr_mapping,
+        )
 
     def _compile_ode_fn(
         self, cdg: CDG, cdg_spec: CDGSpec, io_names: list[str]
@@ -472,14 +566,9 @@ class ArkCompiler:
         input_return_names = io_names
 
         stmts.append(
-            ast.Assign(
-                [
-                    set_ctx(
-                        ast.Tuple([mk_var(name) for name in input_return_names]),
-                        ast.Store,
-                    )
-                ],
-                set_ctx(mk_var(input_vec), ast.Load),
+            mk_list_assign(
+                targets=[mk_var(name) for name in input_return_names],
+                value=set_ctx(mk_var(input_vec), ast.Load),
             )
         )
 
@@ -583,6 +672,40 @@ class ArkCompiler:
             mk_arg(self.SWITCH_VAL),
             mk_arg(self.ATTR_VAL),
             mk_arg(self.SIM_SEED),
+        ]
+        kwarg = mk_arg(self.KWARGS)
+        defaults = [ast.Constant(None), ast.Constant(0), ast.Constant(0)]
+        return ast.FunctionDef(
+            name=self.prog_name,
+            args=ast.arguments(
+                posonlyargs=[],
+                args=args,
+                kwonlyargs=[],
+                kwarg=kwarg,
+                kw_defaults=[],
+                defaults=defaults,
+            ),
+            body=stmts,
+            decorator_list=[],
+        )
+
+    def _compile_top_stmt_odeterm(self, stmts: list) -> ast.FunctionDef:
+        """Top level statement for ode term
+
+        Args:
+            stmts (list): list of statements
+
+        Returns:
+            ast.FunctionDef: top level statement
+        """
+
+        args = [
+            mk_arg(self.TIME_RANGE),
+            mk_arg(self.INIT_STATE),
+            mk_arg(self.SWITCH_VAL),
+            mk_arg(self.ATTR_VAL),
+            mk_arg(self.SIM_SEED),
+            mk_arg(self.FN_ARGS),
         ]
         kwarg = mk_arg(self.KWARGS)
         defaults = [ast.Constant(None), ast.Constant(0), ast.Constant(0)]

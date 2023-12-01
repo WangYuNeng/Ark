@@ -206,6 +206,7 @@ class ArkCompiler:
         self._switch_mapping = {}
         self._namespace = {"np": np, "scipy": scipy}
         self._prog_ast = None
+        self._ode_term_ast = None
         self._gen_rule_dict = {}
         self._verbose = 0
 
@@ -229,6 +230,17 @@ class ArkCompiler:
         assert self._prog_ast is not None, "Program is not compiled yet!"
         with open(file_name, "w") as f:
             f.write(ast.unparse(self._prog_ast))
+
+    def print_odeterm(self):
+        """print the compiled odeterm function"""
+        assert self._ode_term_ast is not None, "Program is not compiled yet!"
+        print(ast.unparse(self._ode_term_ast))
+
+    def dump_odeterm(self, file_name: str):
+        """dump the compiled odeterm function to the given file"""
+        assert self._ode_term_ast is not None, "Program is not compiled yet!"
+        with open(file_name, "w") as f:
+            f.write(ast.unparse(self._ode_term_ast))
 
     def compile(self, cdg: CDG, cdg_spec: CDGSpec, verbose: int = 0):
         """Compile the cdg to a function for dynamical system simulation.
@@ -263,7 +275,7 @@ class ArkCompiler:
         ) = self._collect_ode_fn_io(cdg)
 
         attr_var_def = self._compile_attribute_var(switch_mapping, attr_mapping)
-        ode_fn = self._compile_ode_fn(cdg, cdg_spec, ode_fn_io_names)
+        ode_fn, _ = self._compile_ode_fn(cdg, cdg_spec, ode_fn_io_names)
         solv_ivp_stmts = self._compile_solve_ivp()
 
         stmts = attr_var_def + [ode_fn] + solv_ivp_stmts
@@ -291,8 +303,8 @@ class ArkCompiler:
     def compile_odeterm(self, cdg: CDG, cdg_spec: CDGSpec, verbose: int = 0):
         """Compile the cdg to an executable function representing the derivative term.
 
-        The function will in the form of `ode_term(t, y, args, fargs)` where `t` is
-        the time, `y` is the state vector, `args` is the list of arguments mapped to
+        The function will in the form of `__ode_fn(time, __variables, args, fargs)`
+        where `args` is the list of arguments mapped to
         the float/int attribute values and switch values, and `fargs` is the list of
         function arguments mapped to the FunctionType attribute values.
 
@@ -368,20 +380,42 @@ class ArkCompiler:
                 fn_args_names[idx] = mk_var(rn_attr(ele_name, attr_name))
 
         # Generate the Assignment statements
-        stmts.append(
-            mk_list_assign(
-                targets=args_names,
-                value=mk_var(self.ARGS),
+        if args_names:
+            stmts.append(
+                mk_list_assign(
+                    targets=args_names,
+                    value=mk_var(self.ARGS),
+                )
             )
-        )
-        stmts.append(
-            mk_list_assign(
-                targets=fn_args_names,
-                value=mk_var(self.FN_ARGS),
+        if fn_args_names:
+            stmts.append(
+                mk_list_assign(
+                    targets=fn_args_names,
+                    value=mk_var(self.FN_ARGS),
+                )
             )
+        _, stmts = self._compile_ode_fn(cdg, cdg_spec, ode_fn_io_names)
+        arguments = ast.arguments(
+            posonlyargs=[],
+            args=[
+                mk_arg(kw_name(TIME)),
+                mk_arg(self.ODE_INPUT_VAR),
+                mk_arg(self.ARGS),
+                mk_arg(self.FN_ARGS),
+            ],
+            kwonlyargs=[],
+            kw_defaults=[],
+            defaults=[],
         )
-        ode_fn = self._compile_ode_fn(cdg, cdg_spec, ode_fn_io_names)
-        raise NotImplementedError
+        func_def = ast.FunctionDef(
+            name=self.ODE_FN_NAME, args=arguments, body=stmts, decorator_list=[]
+        )
+        module = ast.Module([func_def], type_ignores=[])
+        module = ast.fix_missing_locations(module)
+        self._ode_fn_ast = module
+
+        code = compile(source=module, filename=self.tmp_file_name, mode="exec")
+        exec(code, self._namespace)
 
     def compile_sympy(
         self,
@@ -548,8 +582,22 @@ class ArkCompiler:
 
     def _compile_ode_fn(
         self, cdg: CDG, cdg_spec: CDGSpec, io_names: list[str]
-    ) -> ast.FunctionDef:
-        """Compile the cdg to the ode function for scipy.integrate.solve_ivp simulation"""
+    ) -> tuple[ast.FunctionDef, list[ast.stmt]]:
+        """Compile the cdg to the ode function for scipy.integrate.solve_ivp simulation
+
+        The compiled function will have the following signature:
+        ```
+        def __ode_fn(t, y):
+            var1, var2, ... = y
+            return [ddt_var1, ddt_var2, ...]
+        ```
+
+        Args:
+            cdg (CDG): The input CDG
+            cdg_spec (CDGSpec): Specification
+            io_names (list[str]): names of the state variables `var1, var2, ...`
+
+        """
 
         node: CDGNode
         src: CDGNode
@@ -654,7 +702,7 @@ class ArkCompiler:
             kw_defaults=[],
             defaults=[],
         )
-        return ast.FunctionDef(ode_fn_name, arguments, stmts, decorator_list=[])
+        return ast.FunctionDef(ode_fn_name, arguments, stmts, decorator_list=[]), stmts
 
     def _compile_solve_ivp(self) -> tuple[ast.Assign, ast.Return]:
         stmts = [

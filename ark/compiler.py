@@ -367,7 +367,7 @@ class ArkCompiler:
             )
         ]
         fn_args_names = [
-            None for _ in range(sum(len(attrs) for attrs in fn_attr_mapping))
+            None for _ in range(sum(len(attrs) for attrs in fn_attr_mapping.values()))
         ]
 
         for name, idx in switch_mapping.items():
@@ -394,7 +394,8 @@ class ArkCompiler:
                     value=mk_var(self.FN_ARGS),
                 )
             )
-        _, stmts = self._compile_ode_fn(cdg, cdg_spec, ode_fn_io_names)
+        _, ode_stmts = self._compile_ode_fn(cdg, cdg_spec, ode_fn_io_names)
+        stmts.extend(ode_stmts)
         arguments = ast.arguments(
             posonlyargs=[],
             args=[
@@ -412,10 +413,18 @@ class ArkCompiler:
         )
         module = ast.Module([func_def], type_ignores=[])
         module = ast.fix_missing_locations(module)
-        self._ode_fn_ast = module
+        self._ode_term_ast = module
 
         code = compile(source=module, filename=self.tmp_file_name, mode="exec")
         exec(code, self._namespace)
+
+        return (
+            self._namespace[self.ODE_FN_NAME],
+            node_mapping,
+            switch_mapping,
+            num_attr_mapping,
+            fn_attr_mapping,
+        )
 
     def compile_sympy(
         self,
@@ -565,7 +574,7 @@ class ArkCompiler:
             attr_mapping[ele.name] = {}
             for attr_name, attr in ele.attrs.items():
                 if separate_fn_attr:
-                    if attr.type == FunctionType:
+                    if isinstance(attr, FunctionType):
                         attr_mapping[ele.name][attr_name] = False
                     else:
                         attr_mapping[ele.name][attr_name] = True

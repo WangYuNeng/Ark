@@ -124,7 +124,7 @@ class SwitchableStar(eqx.Module):
         b_mat = jnp.zeros(shape=(self.lds_a.shape[0], 1))
         b_mat = b_mat.at[0, 0].set(1 / self.lc_val)
         c_mat = jnp.zeros(shape=(1, self.lds_a.shape[0]))
-        c_mat = c_mat.at[0, 1].set(1)
+        c_mat = c_mat.at[0, 0].set(1)
 
         amp, t1, t2, t3 = (
             self.pulse_amplitude,
@@ -140,11 +140,9 @@ class SwitchableStar(eqx.Module):
         input_integral = (
             1 / t1 * jnp.matmul(expm_t1_integrals[1], b_mat)
         )  # rise integral
-        print("rise integral\n", input_integral)
         input_integral += jnp.matmul(
             (expm_t2_integrals[0] - expm_t1_integrals[0]), b_mat
         )  # hold integral
-        print("hold integral\n", input_integral)
         input_integral += (
             1
             / (t2 - t3)
@@ -157,8 +155,6 @@ class SwitchableStar(eqx.Module):
                 b_mat,
             )
         )  # fall integral
-        print("fall integral\n", input_integral)
-        print("expm t\n", expm_t)
         sol = amp * jnp.matmul(jnp.matmul(c_mat, expm_t), input_integral)
         return sol
 

@@ -13,8 +13,8 @@ from tqdm import tqdm
 config.update("jax_debug_nans", True)
 
 
-class SwitchableStar(eqx.Module):
-    """SwitchableStar topology of transmission lines.
+class SwitchableStarPUF(eqx.Module):
+    """SwitchableStar PUF in transmission lines.
 
     - n_branch: # of branches to switch
     - line_len: # of LC section in each branch
@@ -30,6 +30,7 @@ class SwitchableStar(eqx.Module):
     n_branch: int
     line_len: int
     n_order: int
+    lds_a_shape: tuple[int, int]
     gm_c: jax.Array
     gm_l: jax.Array
     lc_val: int = 1e-9
@@ -37,8 +38,6 @@ class SwitchableStar(eqx.Module):
     pulse_t1: float = 0.5e-9
     pulse_t2: float = 1.5e-9
     pulse_t3: float = 2.0e-9
-    lds_a: jax.Array
-    t: jax.typing.DTypeLike
 
     def __init__(
         self, n_branch: int, line_len: int, n_order: int = 40, random: bool = False
@@ -54,60 +53,38 @@ class SwitchableStar(eqx.Module):
             Defaults to False, initializing with gm_c=gm_l=1.0, t=20e-9.
         """
         self.n_branch, self.line_len = n_branch, line_len
+        self.lds_a_shape = (1 + n_branch * line_len * 2, 1 + n_branch * line_len * 2)
         self.n_order = n_order
-        self.gm_c = np.ones(shape=(n_branch, line_len, 2))
-        self.gm_l = np.ones(shape=(n_branch, line_len, 2))
 
         if random:
-            raise NotImplementedError
+            self.gm_c = np.random.normal(shape=(line_len))
+            self.gm_l = np.random.normal(shape=(line_len))
 
         else:
-            # Construct the gm part of the A matrix
-            sub_mat_len = 2 * line_len
+            self.gm_c = np.ones(shape=(line_len))
+            self.gm_l = np.ones(shape=(line_len))
 
-            def ith_diag_sub_mat(i: int):
-                a_i = np.zeros(shape=(sub_mat_len, sub_mat_len))
-                for j in range(sub_mat_len - 1):
-                    if j % 2 == 0:
-                        c_idx = j // 2
-                        a_i[j, j + 1] = -self.gm_c[i][c_idx][1]
-                        a_i[j + 1, j] = self.gm_c[i][c_idx][0]
-                    else:
-                        l_idx = j // 2 + 1
-                        a_i[j, j + 1] = -self.gm_l[i][l_idx][1]
-                        a_i[j + 1, j] = self.gm_l[i][l_idx][0]
-                return a_i
+    def __call__(self, switch: jax.Array, mismatch: jax.Array, t: jax.typing.DTypeLike):
+        """Compute the analog PUF response at time t.
 
-            ai_row_mats = [ith_diag_sub_mat(i) for i in range(n_branch)]
-            for i, diag_mat in enumerate(ai_row_mats):
-                left_zeros = np.zeros(shape=(sub_mat_len, sub_mat_len * i))
-                right_zeros = np.zeros(
-                    shape=(sub_mat_len, sub_mat_len * (n_branch - i - 1))
-                )
-                ai_row_mats[i] = np.hstack([left_zeros, diag_mat, right_zeros])
+        The response is the difference between two stars under two mismatch samples.
 
-            mid_to_branch_row = np.zeros(shape=(1, sub_mat_len * n_branch))
-            mid_to_branch_col = np.zeros(shape=(sub_mat_len * n_branch, 1))
-            for i in range(n_branch):
-                mid_to_branch_row[0, i * sub_mat_len] = -self.gm_l[i][0][1]
-                mid_to_branch_col[i * sub_mat_len, 0] = self.gm_c[i][0][0]
+        Args:
+            switch (jax.Array): An array of {0,1} value denoting whether the branches
+            are ON or OFF.
+            mismatch (jax.Array): Two arrays of random value to model the mismatch.
 
-            A_1_to_n = np.vstack([mid_to_branch_row] + ai_row_mats)
+        Returns:
+            jax.typing.DTypeLike: The output of the SwitchableStar at time t.
+        """
+        rsp0 = self._calc_one_star_rsp(switch, mismatch[0], t)
+        rsp1 = self._calc_one_star_rsp(switch, mismatch[1], t)
+        return rsp0 - rsp1
 
-            A_mat = np.hstack(
-                [np.vstack([np.zeros((1, 1)), mid_to_branch_col]), A_1_to_n]
-            )
-
-            # Scale by LC values
-            LC_mat = np.diag([1 / self.lc_val] * A_mat.shape[0])
-
-            self.lds_a = jnp.array(np.matmul(LC_mat, A_mat))
-            self.t = 20e-9
-
-    def __call__(
+    def _calc_one_star_rsp(
         self, switch: jax.Array, mismatch: jax.Array, t: jax.typing.DTypeLike
     ) -> jax.typing.DTypeLike:
-        """Compute the
+        """Compute the transient response of a SwitchableStar at time t.
 
         Args:
             switch (jax.Array): An array of {0,1} value denoting whether the branches
@@ -117,13 +94,14 @@ class SwitchableStar(eqx.Module):
         Returns:
             jax.typing.DTypeLike: The output of the SwitchableStar at time t.
         """
-        a_sw_mm = jnp.multiply(self.lds_a, mismatch)
+        lds_a = self._calc_lds_a_matrix()
+        a_sw_mm = jnp.multiply(lds_a, mismatch)
         for i, sw_val in enumerate(switch):
             a_sw_mm = a_sw_mm.at[0, 1 + i * self.line_len * 2].multiply(sw_val)
 
-        b_mat = jnp.zeros(shape=(self.lds_a.shape[0], 1))
+        b_mat = jnp.zeros(shape=(lds_a.shape[0], 1))
         b_mat = b_mat.at[0, 0].set(1 / self.lc_val)
-        c_mat = jnp.zeros(shape=(1, self.lds_a.shape[0]))
+        c_mat = jnp.zeros(shape=(1, lds_a.shape[0]))
         c_mat = c_mat.at[0, 0].set(1)
 
         amp, t1, t2, t3 = (
@@ -158,6 +136,48 @@ class SwitchableStar(eqx.Module):
         sol = amp * jnp.matmul(jnp.matmul(c_mat, expm_t), input_integral)
         return sol
 
+    def _calc_lds_a_matrix(self) -> jax.Array:
+        """Calculate the A matrix of the SwitchableStar in state-space repr."""
+        sub_mat_len = 2 * self.line_len
+        n_branch = self.n_branch
+
+        def ith_diag_sub_mat(i: int):
+            a_i = np.zeros(shape=(sub_mat_len, sub_mat_len))
+            for j in range(sub_mat_len - 1):
+                if j % 2 == 0:
+                    c_idx = j // 2
+                    a_i[j, j + 1] = -self.gm_c[c_idx]
+                    a_i[j + 1, j] = self.gm_c[c_idx]
+                else:
+                    l_idx = j // 2 + 1
+                    a_i[j, j + 1] = -self.gm_l[l_idx]
+                    a_i[j + 1, j] = self.gm_l[l_idx]
+            return a_i
+
+        ai_row_mats = [ith_diag_sub_mat(i) for i in range(n_branch)]
+        for i, diag_mat in enumerate(ai_row_mats):
+            left_zeros = np.zeros(shape=(sub_mat_len, sub_mat_len * i))
+            right_zeros = np.zeros(
+                shape=(sub_mat_len, sub_mat_len * (n_branch - i - 1))
+            )
+            ai_row_mats[i] = np.hstack([left_zeros, diag_mat, right_zeros])
+
+        mid_to_branch_row = np.zeros(shape=(1, sub_mat_len * n_branch))
+        mid_to_branch_col = np.zeros(shape=(sub_mat_len * n_branch, 1))
+        for i in range(n_branch):
+            mid_to_branch_row[0, i * sub_mat_len] = -self.gm_l[0]
+            mid_to_branch_col[i * sub_mat_len, 0] = self.gm_c[0]
+
+        A_1_to_n = np.vstack([mid_to_branch_row] + ai_row_mats)
+
+        A_mat = np.hstack([np.vstack([np.zeros((1, 1)), mid_to_branch_col]), A_1_to_n])
+
+        # Scale by LC values
+        LC_mat = np.diag([1 / self.lc_val] * A_mat.shape[0])
+
+        lds_a = jnp.array(np.matmul(LC_mat, A_mat))
+        return lds_a
+
     def _calc_expm_t_integrals(
         self, mat: jax.Array, tau: jax.typing.DTypeLike
     ) -> jax.Array:
@@ -186,13 +206,12 @@ class SwitchableStar(eqx.Module):
         return jnp.stack([integral_exp_mat, integral_exp_mat_t])
 
 
-test = SwitchableStar(n_branch=1, line_len=1)
-print(test.lds_a)
+test = SwitchableStarPUF(n_branch=1, line_len=1)
 switches = jnp.array([1])
-mismatch = jnp.ones_like(test.lds_a)
-test(switch=switches, mismatch=mismatch, t=5e-9)
+mismatch = jnp.ones(shape=test.lds_a_shape)
+# test(switch=switches, mismatch=mismatch, t=5e-9)
 
-mismatch = jnp.array(np.random.normal(size=test.lds_a.shape, loc=1, scale=0.1))
+mismatch = jnp.array(np.random.normal(size=(2, *test.lds_a_shape), loc=1, scale=0.1))
 
 traj = []
 times = np.linspace(2e-9, 10e-9, 100)

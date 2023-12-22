@@ -28,8 +28,7 @@ class AttrDef:
             assert nargs is not None
 
     def __repr__(self) -> str:
-        return f"AttrDef(name={self.name}, type={self.type}, \
-            valid_range={self.valid_range})"
+        return f"AttrDef(type={self.type}, valid_range={self.valid_range}, nargs={self.nargs})"
 
     def attr_str(self, val: AttrImpl) -> str:
         """Get an AST expression for this attribute."""
@@ -83,6 +82,19 @@ class AttrDef:
         if self.valid_range.is_upper_bound():
             return self.valid_range.max
 
+    def sample_decision(self, *, shape: tuple[int, ...], key: 'jax.Array') -> 'jax.Array':
+        import jax.random as jrandom
+        if self.valid_range is None:
+            raise ValueError()
+        if self.valid_range.is_exact():
+            return self.valid_range.exact
+        if self.valid_range.is_lower_bound():
+            return jrandom.uniform(key=key, shape=shape, minval=self.valid_range.min, maxval=10.0)
+        if self.valid_range.is_interval_bound():
+            return jrandom.uniform(key=key, shape=shape, minval=self.valid_range.min, maxval=self.valid_range.max)
+        if self.valid_range.is_upper_bound():
+            raise ValueError()
+
 
 class AttrDefMismatch(AttrDef):
     """Attribute definition for a CDGType where the value is sampled
@@ -110,6 +122,10 @@ class AttrDefMismatch(AttrDef):
         self.std = std
         super().__init__(attr_type, attr_range)
 
+    def __repr__(self) -> str:
+        return f"AttrDefMismatch(type={self.type}, valid_range={self.valid_range}, nargs={self.nargs}, rst={self.rstd}, std={self.std})"
+
+
     def attr_str(self, val: AttrImpl) -> str:
         if not self.type == float:
             raise NotImplementedError(
@@ -133,3 +149,12 @@ class AttrDefMismatch(AttrDef):
             return np.random.normal(mean, np.abs(mean * self.rstd))
         else:
             return np.random.normal(mean, self.std)
+
+    def sample_mismatch_ratio(self, shape: tuple[int, ...], *, key) -> 'jax.Array':
+        import jax.random as jrandom
+        import jax.numpy as jnp
+        samples = jrandom.normal(key, shape)
+        if self.rstd:
+            return jnp.abs(1 + samples * self.rstd)
+        raise ValueError()
+

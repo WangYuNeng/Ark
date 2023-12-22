@@ -323,7 +323,20 @@ def make_full_graph(
         return graph, tln_spec
 
 
+def make_hub_and_spoke(num_spokes: int, spoke_length: int, mismatch=True) -> tuple[CDG, CDGSpec]:
+    return make_full_graph(mismatch=mismatch, branch_args_override={
+        'line_len': spoke_length,
+        'branch_stride': spoke_length,
+        'branches_per_node': num_spokes,
+        'branch_len': spoke_length - 1,
+        'branch_offset': 0,
+    })
+
+def make_hub_and_spoke_with_connections():
+    pass
+
 # make_full_graph(True, {'branch_len': 10})
+
 
 if __name__ == "__main__":
     import ark.visualize.graphviz_gen as graphvizlib

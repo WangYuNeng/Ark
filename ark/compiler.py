@@ -8,7 +8,7 @@ from types import FunctionType
 import numpy as np
 import scipy
 import sympy
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from ark.cdg.cdg import CDG, CDGEdge, CDGNode
 from ark.reduction import Reduction
@@ -281,7 +281,7 @@ class ArkCompiler:
         cdg: CDG,
         cdg_spec: CDGSpec,
         help_fn: list[FunctionType],
-    ) -> list[sympy.Expr]:
+    ) -> list[tuple[sympy.Symbol, sympy.Expr]]:
         """Compile a CDG to sympy expressions
 
         Args:

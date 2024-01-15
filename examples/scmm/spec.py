@@ -1,0 +1,162 @@
+"""
+Example: Switch-capacitor matrix multiplier (scmm)
+https://ieeexplore.ieee.org/abstract/document/7579580
+"""
+from functools import partial
+from types import FunctionType
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+from ark.ark import Ark
+from ark.cdg.cdg import CDG
+from ark.reduction import SUM
+from ark.specification.attribute_def import AttrDef
+from ark.specification.cdg_types import EdgeType, NodeType
+from ark.specification.production_rule import ProdRule
+from ark.specification.range import Range
+from ark.specification.rule_keyword import DST, EDGE, SRC, TIME, VAR
+from ark.specification.specification import CDGSpec
+
+# Capacitors
+Cap = NodeType(
+    name="Cap",
+    attrs={
+        "order": 1,
+        "reduction": SUM,
+        "attr_def": {
+            "c": AttrDef(attr_type=float, attr_range=Range(min=0)),
+        },
+    },
+)
+# Voltage input with series resistor
+Inp = NodeType(
+    name="InpV",
+    attrs={
+        "order": 0,
+        "attr_def": {
+            "vin": AttrDef(attr_type=FunctionType, nargs=1),
+            "r": AttrDef(attr_type=float, attr_range=Range(min=0)),
+        },
+    },
+)
+
+# Switches
+Sw = EdgeType(
+    name="Sw",
+    attrs={
+        "attr_def": {
+            "ctrl": AttrDef(attr_type=FunctionType, nargs=1),
+            "Gon": AttrDef(attr_type=float, attr_range=Range(min=0)),
+            "Goff": AttrDef(attr_type=float, attr_range=Range(min=0)),
+        },
+    },
+)
+
+CapWeight = NodeType(
+    name="CapWeight",
+    bases=Cap,
+)
+
+CapSAR = NodeType(
+    name="CapSAR",
+    bases=Cap,
+)
+
+# Production rules
+inp_cweight_conn = ProdRule(
+    Sw,
+    Inp,
+    CapWeight,
+    DST,
+    (SRC.vin(TIME) - VAR(DST))
+    / DST.c
+    * (
+        EDGE.ctrl(TIME) * EDGE.Gon / (EDGE.Gon * SRC.r + 1)
+        + (-EDGE.ctrl(TIME) + 1) * EDGE.Goff / (EDGE.Goff * SRC.r + 1)
+    ),
+)
+cweight_sar_conn = ProdRule(
+    Sw,
+    CapWeight,
+    CapSAR,
+    SRC,
+    (-VAR(SRC) - VAR(DST))
+    / SRC.c
+    * (EDGE.ctrl(TIME) * EDGE.Gon + (-EDGE.ctrl(TIME) + 1) * EDGE.Goff),
+)
+
+sar_cweight_conn = ProdRule(
+    Sw,
+    CapWeight,
+    CapSAR,
+    DST,
+    (-VAR(SRC) - VAR(DST))
+    / DST.c
+    * (EDGE.ctrl(TIME) * EDGE.Gon + (-EDGE.ctrl(TIME) + 1) * EDGE.Goff),
+)
+prod_rules = [inp_cweight_conn, cweight_sar_conn, sar_cweight_conn]
+cdg_types = [Cap, Inp, Sw, CapWeight, CapSAR]
+spec = CDGSpec(cdg_types=cdg_types, production_rules=prod_rules, validation_rules=None)
+system = Ark(cdg_spec=spec)
+
+
+def clk(t, period, duty_cycle, offset):
+    """Control clock function"""
+    t = (t - offset) % period
+    return float(t <= duty_cycle * period)
+
+
+def vdd(t, val):
+    return val
+
+
+# N-path filter implementation
+C_RATIO = 39
+C1 = 300e-10
+C2 = C1 * C_RATIO
+G_ON = 1e6
+G_OFF = 0.0
+R_IN = 1e-6
+FREQ = 1e9
+VDD = partial(vdd, val=1.0)
+
+TIME_RANGE = [0, 20 / FREQ]
+
+
+phi1 = partial(clk, period=1 / FREQ, duty_cycle=0.5, offset=0)
+phi2 = partial(clk, period=1 / FREQ, duty_cycle=0.5, offset=0.5 / FREQ)
+
+scmm = CDG()
+inp = Inp(vin=VDD, r=R_IN)
+cweight = CapWeight(c=C1)
+csar = CapSAR(c=C2)
+sw1 = Sw(ctrl=phi1, Gon=G_ON, Goff=G_OFF)
+sw2 = Sw(ctrl=phi2, Gon=G_ON, Goff=G_OFF)
+scmm.connect(sw1, inp, cweight)
+scmm.connect(sw2, cweight, csar)
+
+system.compile(cdg=scmm)
+scmm.initialize_all_states(val=0)
+
+system.print_prog()
+
+time_points = np.linspace(*TIME_RANGE, 1000)
+system.execute(
+    cdg=scmm,
+    time_eval=time_points,
+)
+
+fig, ax = plt.subplots(nrows=5)
+ax[0].plot(time_points, [VDD(t) for t in time_points], label="Input")
+ax[0].legend()
+for i, (node, phi) in enumerate(zip([cweight, csar], [phi1, phi2])):
+    trace = node.get_trace(n=0)
+    ax[2 * i + 1].plot(
+        time_points, [phi(t) for t in time_points], label="phi %d" % (i + 1)
+    )
+    ax[2 * i + 1].legend()
+    ax[2 * (i + 1)].plot(time_points, trace, label="Cap %d" % (i + 1))
+    ax[2 * (i + 1)].legend()
+plt.tight_layout()
+plt.show()

@@ -205,8 +205,10 @@ class Simulator:
             ds_data = node.get_trace(n=0)
             name = node.name.lower()
             spice_data = analysis.nodes[name].as_ndarray()
-            max_error = np.max(ds_data - spice_data)
-            if max_error > tol:
+            error = np.mean(np.square((ds_data - spice_data))) / np.mean(
+                np.square(spice_data)
+            )
+            if error > tol:
                 plt.figure(1)
                 for node in graph.nodes_in_order(1):
                     ds_data = node.get_trace(n=0)
@@ -371,7 +373,7 @@ if __name__ == "__main__":
     sim = Simulator()
 
     mapper = SpiceMapper()
-    for seed in tqdm(range(20)):
+    for seed in tqdm(range(1000)):
         graph = g.generate(max_op=20, seed=seed)
         spice_str = mapper.to_spice(graph=graph)
 

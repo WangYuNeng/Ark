@@ -8,6 +8,7 @@ from types import FunctionType
 import numpy as np
 import scipy
 import sympy
+from scipy import integrate
 from tqdm import tqdm
 
 from ark.cdg.cdg import CDG, CDGEdge, CDGNode
@@ -204,7 +205,7 @@ class ArkCompiler:
         self._node_to_state_var = {}
         self._ode_fn_io_names = []
         self._switch_mapping = {}
-        self._namespace = {"np": np, "scipy": scipy}
+        self._namespace = {"np": np, "scipy": scipy, "scipy.integrate": integrate}
         self._prog_ast = None
         self._ode_term_ast = None
         self._gen_rule_dict = {}

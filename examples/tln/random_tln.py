@@ -201,24 +201,29 @@ class Simulator:
         time_data = analysis.time.as_ndarray()
         system.execute(cdg=graph, time_eval=time_data)
 
+        all_ds_data, all_spice_data = [], []
+
         for node in graph.nodes_in_order(1):
             ds_data = node.get_trace(n=0)
             name = node.name.lower()
             spice_data = analysis.nodes[name].as_ndarray()
-            error = np.mean(np.square((ds_data - spice_data))) / np.mean(
-                np.square(spice_data)
-            )
-            if error > tol:
-                plt.figure(1)
-                for node in graph.nodes_in_order(1):
-                    ds_data = node.get_trace(n=0)
-                    spice_data = analysis.nodes[node.name.lower()].as_ndarray()
-                    plt.plot(time_data, ds_data, label="ds_{}".format(name))
-                    plt.plot(time_data, spice_data, label="spice_{}".format(name))
-                plt.legend()
-                plt.savefig("fail.png")
-                plt.clf()
-                assert False
+            all_ds_data.append(ds_data)
+            all_spice_data.append(spice_data)
+
+        error = np.mean(np.square((ds_data - spice_data))) / np.mean(
+            np.square(spice_data)
+        )
+        if error > tol:
+            plt.figure(1)
+            for node in graph.nodes_in_order(1):
+                ds_data = node.get_trace(n=0)
+                spice_data = analysis.nodes[node.name.lower()].as_ndarray()
+                plt.plot(time_data, ds_data, label="ds_{}".format(name))
+                plt.plot(time_data, spice_data, label="spice_{}".format(name))
+            plt.legend()
+            plt.savefig("fail.png")
+            plt.clf()
+            assert False
 
 
 GM_FACTOR = 1e-3

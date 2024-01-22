@@ -1,10 +1,32 @@
 # ARK: A Programming Language for Agile Development of Unconventional Computing Paradigms
 
-This package implements the language described in [Design of Novel Analog Compute Paradigms with Ark](https://arxiv.org/abs/2309.08774). To setup the environment, please have `graphviz`, and a SMT solver in the system and run
+This package implements the language described in [Design of Novel Analog Compute Paradigms with Ark](https://arxiv.org/abs/2309.08774). 
+
+## Build from source
+To setup the environment, please have `graphviz`, and a SMT solver in the system and run
 
 `pip install .` (or `pip install -e .` if you'd like to edit the package).
 
 Additional configuration might be needed to set up the binding between `pySMT` and the solver[^1].
+
+The package is tested with `python 3.10.13` and `python3.11.3`.
+
+### Additional Dependencies
+
+If you'd like to run random_tln.py, please also have `python3.10` (using >3.10 will have dependecy issue) and install ngspice and pyspice in the system.
+
+```
+apt-get install libngspice0
+conda install -c conda-forge pyspice
+```
+
+## Run in a container
+
+```
+docker build -t ark --platform linux/x86\_64 .
+docker run -it ark --platform linux/x86\_64 .
+```
+
 
 ## Quick Start
 
@@ -102,9 +124,5 @@ You can try more examples inside the `examples` directory.
 - `n_path_filter`: A toy example that models the n-path filter with Ark.
 For more details, please refer to the descriptions in the paper.
 
-## TODOs
-
-- [ ] Port the old spice generation to the current implementation.
-- [ ] containerize the package.
 
 [^1]: For example, in macOS, it is possible that z3 solver failed to find the `libz3.dylib` even when z3 is installed with brew. This because somehow z3 looks for librariesin `/op/how/bin/` instead of `/opt/homebrew/lib`. One workaround is copying the `libz3.dylib` in`/opt/homebrew/lib` to a directory that z3 will access, e.g., `/Users/{username}/miniconda3/envs/{envname}/lib`. For more information, please refer to <https://github.com/pysmt/pysmt>

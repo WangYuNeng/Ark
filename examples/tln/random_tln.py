@@ -1,10 +1,11 @@
+import os
 import re
 
 import matplotlib.pyplot as plt
 import numpy as np
 import PySpice.Logging.Logging as Logging
 from PySpice.Spice.Netlist import Circuit
-from spec import pulse, tln_spec
+from spec import mm_tln_spec, pulse
 from tqdm import tqdm
 
 from ark.ark import Ark
@@ -27,44 +28,44 @@ class Sampler:
         return np.random.choice(a=choices, p=prob)
 
 
-IdealV, IdealI, IdealE = (
-    tln_spec.node_type("IdealV"),
-    tln_spec.node_type("IdealI"),
-    tln_spec.edge_type("IdealE"),
+VNode, INode, Edge = (
+    mm_tln_spec.node_type("MmV"),
+    mm_tln_spec.node_type("MmI"),
+    mm_tln_spec.edge_type("MmE"),
 )
-InpV = tln_spec.node_type("InpV")
+InpV = mm_tln_spec.node_type("InpV")
 
 
 class Generator:
     def __init__(self) -> None:
-        self._tln_spec = tln_spec
+        self._tln_spec = mm_tln_spec
         self._sampler = None
 
         self._type2elements = {}
         self._type2prefix = {
-            IdealV: "c",
-            IdealI: "l",
+            VNode: "c",
+            INode: "l",
             InpV: "s",
-            IdealE: "e",
+            Edge: "e",
         }
 
     def generate(self, max_op, seed) -> CDG:
         self._sampler = Sampler(seed=seed)
         graph = CDG()
         s = self._sampler
-        self._type2elements = {IdealV: [], IdealI: [], InpV: []}
+        self._type2elements = {VNode: [], INode: [], InpV: []}
         self._initialize(graph=graph)
 
         n_op = self._sampler.sample_int(0, max_op + 1)
 
-        vnodes, inodes = self._type2elements[IdealV], self._type2elements[IdealI]
+        vnodes, inodes = self._type2elements[VNode], self._type2elements[INode]
         for _ in range(n_op):
             choices = vnodes + inodes
             node = s.sample_choice(choices=choices)
             # print(node)
             while not self._produce(graph, node):
                 node = s.sample_choice(choices=choices)
-        self._type2elements[IdealE] = graph.edges
+        self._type2elements[Edge] = graph.edges
         return graph
 
     def _produce(self, graph: CDG, node: CDGNode):
@@ -72,13 +73,13 @@ class Generator:
 
         def new_source(graph: CDG, node: CDGNode):
             src = self._gen_S(graph=graph)
-            graph.connect(edge=IdealE(), src=src, dst=node)
+            graph.connect(edge=Edge(wt=1.0, ws=1.0), src=src, dst=node)
             return True
 
         def new_vn_or_in(graph: CDG, node: CDGNode):
-            if node.cdg_type == IdealV:
+            if node.cdg_type == VNode:
                 n_node = self._gen_IN(graph=graph)
-            elif node.cdg_type == IdealI:
+            elif node.cdg_type == INode:
                 n_node = self._gen_VN(graph=graph)
             else:
                 assert False, "Only generate VN or IN node"
@@ -86,18 +87,18 @@ class Generator:
 
         def new_out(graph: CDG, node: CDGNode):
             n_node = new_vn_or_in(graph=graph, node=node)
-            graph.connect(edge=IdealE(), src=node, dst=n_node)
+            graph.connect(edge=Edge(wt=1.0, ws=1.0), src=node, dst=n_node)
             return True
 
         def new_in(graph: CDG, node: CDGNode):
             n_node = new_vn_or_in(graph=graph, node=node)
-            graph.connect(edge=IdealE(), src=n_node, dst=node)
+            graph.connect(edge=Edge(wt=1.0, ws=1.0), src=n_node, dst=node)
             return True
 
         def sample_valid_VN(node: CDGNode):
-            if self._type2elements[IdealV] == []:
+            if self._type2elements[VNode] == []:
                 return False
-            vnode = s.sample_choice(self._type2elements[IdealV])
+            vnode = s.sample_choice(self._type2elements[VNode])
             if node.is_neighbor(vnode):
                 return False
             return vnode
@@ -105,27 +106,27 @@ class Generator:
         def connect_out(graph: CDG, node: CDGNode):
             vnode = sample_valid_VN(node=node)
             if vnode:
-                graph.connect(edge=IdealE(), src=node, dst=vnode)
+                graph.connect(edge=Edge(wt=1.0, ws=1.0), src=node, dst=vnode)
                 return True
             return False
 
         def connect_in(graph: CDG, node: CDGNode):
             vnode = sample_valid_VN(node=node)
             if vnode:
-                graph.connect(edge=IdealE(), src=vnode, dst=node)
+                graph.connect(edge=Edge(wt=1.0, ws=1.0), src=vnode, dst=node)
                 return True
             return False
 
         def filter_choices(node: CDGNode, choices: set):
             this_type = node.cdg_type
-            if node.cdg_type == IdealV:
+            if node.cdg_type == VNode:
                 choices.remove(connect_out)
                 choices.remove(connect_in)
 
             for edge in node.edges:
                 if edge.src == edge.dst:
                     continue
-                if this_type == IdealI:
+                if this_type == INode:
                     if node.is_src(edge=edge):
                         if new_out in choices:
                             choices.remove(new_out)
@@ -159,39 +160,38 @@ class Generator:
     def _gen_VN(self, graph: CDG):
         c = self._sampler.sample_float(1e-10, 10e-9)
         g = self._sampler.sample_float(0, 10)
-        node = IdealV(c=c, g=g)
-        graph.connect(edge=IdealE(), src=node, dst=node)
-        self._type2elements[IdealV].append(node)
+        node = VNode(c=c, g=g)
+        graph.connect(edge=Edge(wt=1.0, ws=1.0), src=node, dst=node)
+        self._type2elements[VNode].append(node)
         return node
 
     def _gen_IN(self, graph: CDG):
         l = self._sampler.sample_float(1e-10, 10e-9)
         r = self._sampler.sample_float(0, 10)
-        node = IdealI(l=l, r=r)
-        graph.connect(edge=IdealE(), src=node, dst=node)
-        self._type2elements[IdealI].append(node)
+        node = INode(l=l, r=r)
+        graph.connect(edge=Edge(wt=1.0, ws=1.0), src=node, dst=node)
+        self._type2elements[INode].append(node)
         return node
 
     def _initialize(self, graph: CDG):
         s = self._sampler
 
         source = self._gen_S(graph=graph)
-        sampled_type = s.sample_choice([IdealI, IdealV], [0.5, 0.5])
-        if sampled_type == IdealI:
+        sampled_type = s.sample_choice([INode, VNode], [0.5, 0.5])
+        if sampled_type == INode:
             node = self._gen_IN(graph=graph)
         else:
             node = self._gen_VN(graph=graph)
-        graph.connect(IdealE(), source, node)
+        graph.connect(Edge(wt=1.0, ws=1.0), source, node)
 
 
 class Simulator:
-    def sim_cmp(self, spice_str: str, graph: CDG, tol: float):
+    def sim_cmp(self, spice_str: str, graph: CDG, data, tol: float):
         time_range = [0, 75e-9]
 
-        system = Ark(cdg_spec=tln_spec)
+        system = Ark(cdg_spec=mm_tln_spec)
         system.validate(cdg=graph)
         system.compile(cdg=graph)
-        graph.initialize_all_states(val=0)
 
         circuit = Circuit("simulation")
         circuit.raw_spice += spice_str
@@ -199,24 +199,29 @@ class Simulator:
         analysis = simulator.transient(step_time=1e-10, end_time=time_range[1])
 
         time_data = analysis.time.as_ndarray()
-        system.execute(cdg=graph, time_eval=time_data)
+        traces = system.execute(
+            cdg_execution_data=data, time_eval=time_data, store_inplace=False
+        )
 
         all_ds_data, all_spice_data = [], []
 
         for node in graph.nodes_in_order(1):
-            ds_data = node.get_trace(n=0)
             name = node.name.lower()
+            ds_data = traces[node.name][0]
             spice_data = analysis.nodes[name].as_ndarray()
             all_ds_data.append(ds_data)
             all_spice_data.append(spice_data)
 
-        error = np.mean(np.square((ds_data - spice_data))) / np.mean(
-            np.square(spice_data)
+        all_ds_data = np.array(all_ds_data)
+        all_spice_data = np.array(all_spice_data)
+
+        error = np.mean(np.square((all_ds_data - all_spice_data))) / np.mean(
+            np.square(all_spice_data)
         )
         if error > tol:
             plt.figure(1)
             for node in graph.nodes_in_order(1):
-                ds_data = node.get_trace(n=0)
+                ds_data = traces[node.name][0]
                 spice_data = analysis.nodes[node.name.lower()].as_ndarray()
                 plt.plot(time_data, ds_data, label="ds_{}".format(name))
                 plt.plot(time_data, spice_data, label="spice_{}".format(name))
@@ -227,7 +232,7 @@ class Simulator:
 
 
 GM_FACTOR = 1e-3
-MODEL = tln_spec
+MODEL = mm_tln_spec
 
 FUNC_PATTERN = r"([\w|_]+)=([0-9|e|\.|\+|\-]+)"
 RE_OBJ = re.compile(FUNC_PATTERN)
@@ -237,7 +242,7 @@ class SpiceMapper:
     def __init__(self) -> None:
         pass
 
-    def to_spice(self, graph: CDG):
+    def to_spice(self, graph: CDG, data):
         node: CDGNode
         spice_strs: list
 
@@ -245,10 +250,11 @@ class SpiceMapper:
         self._gmrc_ins = set()
 
         self._graph = graph
+        self._attr_val_map = data[2]
         spice_strs = []
 
         for node in self._graph.nodes:
-            if node.cdg_type == IdealV or node.cdg_type == IdealI:
+            if node.cdg_type == VNode or node.cdg_type == INode:
                 spice_strs.append(self._map_LC(node=node))
 
             elif node.cdg_type == InpV:
@@ -261,21 +267,24 @@ class SpiceMapper:
         return "\n".join(spice_strs)
 
     def _map_LC(self, node: CDGNode):
+        attr_map = self._attr_val_map
+
         def calc_rloss():
             edge: CDGEdge
 
-            if node.cdg_type == IdealV:
-                re_rloss = [node.get_attr_val("g")]
-            elif node.cdg_type == IdealI:
-                re_rloss = [node.get_attr_val("r")]
+            if node.cdg_type == VNode:
+                re_rloss = [attr_map[node.name]["g"]]
+            elif node.cdg_type == INode:
+                re_rloss = [attr_map[node.name]["r"]]
             for edge in node.edges:
                 if edge.src.cdg_type == InpV:
-                    inv_r = float(edge.src.get_attr_val("r"))
+                    if node.cdg_type == VNode:
+                        inv_r = attr_map[edge.name]["wt"] / attr_map[edge.src.name]["r"]
+                    elif node.cdg_type == INode:
+                        inv_r = attr_map[edge.src.name]["r"] * attr_map[edge.name]["wt"]
                 else:
                     continue
 
-                if node.cdg_type == IdealV:
-                    inv_r = 1 / inv_r
                 re_rloss.append(inv_r)
             if re_rloss == []:
                 return None
@@ -289,19 +298,19 @@ class SpiceMapper:
                 continue
 
             if node.is_src(edge=edge):
-                in_name, in_gm = edge.dst.name, -1 * GM_FACTOR
+                in_name, in_gm = edge.dst.name, -attr_map[edge.name]["ws"] * GM_FACTOR
             else:
-                in_name, in_gm = edge.src.name, GM_FACTOR
+                in_name, in_gm = edge.src.name, attr_map[edge.name]["wt"] * GM_FACTOR
 
             ins.append(in_name)
             gms.append(in_gm)
 
         component = "X{}".format(node.name)
 
-        if node.cdg_type == IdealV:
-            base_val = float(node.get_attr_val("c"))
-        elif node.cdg_type == IdealI:
-            base_val = float(node.get_attr_val("l"))
+        if node.cdg_type == VNode:
+            base_val = float(attr_map[node.name]["c"])
+        elif node.cdg_type == INode:
+            base_val = float(attr_map[node.name]["l"])
 
         rloss = calc_rloss()
         model_prefix = "gmrc"
@@ -340,8 +349,8 @@ class SpiceMapper:
         assert len(node.edges) == 1
         for edge in node.edges:
             pass
-        if edge.dst.cdg_type == IdealV:
-            amplitude /= float(node.get_attr_val("r"))
+        if edge.dst.cdg_type == VNode:
+            amplitude /= float(self._attr_val_map[node.name]["r"])
         return "V{} {} 0 DC 0V PULSE(0V {}V {}s {}s {}s {}s {}s)".format(
             node.name,
             node.name,
@@ -378,8 +387,16 @@ if __name__ == "__main__":
     sim = Simulator()
 
     mapper = SpiceMapper()
+
+    if not os.path.exists("../../output/spice-dump"):
+        os.mkdir("../../output/spice-dump")
+
     for seed in tqdm(range(1000)):
         graph = g.generate(max_op=20, seed=seed)
-        spice_str = mapper.to_spice(graph=graph)
+        graph.initialize_all_states(val=0)
+        execution_data = graph.execution_data()
+        spice_str = mapper.to_spice(graph=graph, data=execution_data)
+        with open("../../output/spice-dump/tln-rand-inst{}.sp".format(seed), "w") as f:
+            f.write(spice_str)
 
-        sim.sim_cmp(spice_str=spice_str, graph=graph, tol=0.01)
+        sim.sim_cmp(spice_str=spice_str, graph=graph, data=execution_data, tol=0.01)

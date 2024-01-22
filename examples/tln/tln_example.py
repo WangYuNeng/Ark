@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from spec import mm_tln_spec, pulse, tln_spec
 
-import ark.visualize.graphviz_gen as graphvizlib
 import ark.visualize.latex_gen as latexlib
 from ark.ark import Ark
 from ark.cdg.cdg import CDG, CDGNode
@@ -31,9 +30,9 @@ fontsize = 25
 mpl.rcParams.update(mpl.rcParamsDefault)
 plt.rcParams.update(
     {
-        "text.usetex": True,
+        # "text.usetex": True,
         "font.size": 12,
-        "font.family": "Helvetica",
+        # "font.family": "Helvetica",
         "axes.labelsize": fontsize,
         "xtick.labelsize": fontsize,
         "ytick.labelsize": fontsize,
@@ -187,7 +186,7 @@ def create_linear_tline(
 
 
 def nominal_simulation(cdg: CDG, time_range, name, post_process_hook=None):
-    assert system.validate(cdg=cdg)
+    system.validate(cdg=cdg)
     system.compile(cdg=cdg)
     cdg.initialize_all_states(val=0)
     time_points = np.linspace(*time_range, 1000)
@@ -215,7 +214,10 @@ def nominal_simulation(cdg: CDG, time_range, name, post_process_hook=None):
     if post_process_hook is not None:
         post_process_hook(fig, ax)
 
-    filename = "gviz-output/tln-example/%s-plot.pdf" % name
+    if name == "idl-tline-linear":
+        filename = "../../output/tln-linear-tline.pdf" % name
+    elif name == "idl-tline-branch":
+        filename = "../../output/tln-branch-tline.pdf" % name
     plt.savefig(filename, bbox_inches="tight")
     plt.clf()
 
@@ -223,7 +225,7 @@ def nominal_simulation(cdg: CDG, time_range, name, post_process_hook=None):
 def mismatch_simulation(cdg, time_range, name, post_process_hook=None):
     N_RAND_SIM = 100
 
-    assert system.validate(cdg=cdg)
+    system.validate(cdg=cdg)
     system.compile(cdg=cdg)
     cdg.initialize_all_states(val=0)
 
@@ -271,7 +273,10 @@ def mismatch_simulation(cdg, time_range, name, post_process_hook=None):
     if post_process_hook is not None:
         post_process_hook(fig, ax)
 
-    filename = "gviz-output/tln-example/%s-plot.pdf" % name
+    if name == "emm-tline-linear":
+        filename = "../../output/tln-gm-mismatch-tline.pdf" % name
+    elif name == "nmm-tline-linear":
+        filename = "../../output/tln-cint-mismatch-tline.pdf" % name
     plt.savefig(filename, bbox_inches="tight")
     plt.clf()
 
@@ -314,19 +319,19 @@ if __name__ == "__main__":
     itl_small, _, _ = create_tline_branch(
         IdealV, IdealI, lambda: IdealE(), **branch_args
     )
-    latexlib.gen_function("br-func", tln_lang, itl_small, fnargs, first_k=3)
+    # latexlib.gen_function("br-func", tln_lang, itl_small, fnargs, first_k=3)
 
-    graphvizlib.cdg_to_graphviz(
-        "tln-example",
-        "idl-small",
-        hw_tln_lang,
-        itl_small,
-        inherited=False,
-        horizontal=True,
-        save_legend=True,
-        show_node_labels=True,
-        post_layout_hook=None,
-    )
+    # graphvizlib.cdg_to_graphviz(
+    #     "tln-example",
+    #     "idl-small",
+    #     hw_tln_lang,
+    #     itl_small,
+    #     inherited=False,
+    #     horizontal=True,
+    #     save_legend=True,
+    #     show_node_labels=True,
+    #     post_layout_hook=None,
+    # )
     lin_opts = {
         "nominal": True,
         "name": "idl-tline-small",
@@ -336,17 +341,17 @@ if __name__ == "__main__":
     itl_malform, _, _ = create_malformed_tline(
         IdealV, IdealI, lambda: IdealE(), line_len=2
     )
-    graphvizlib.cdg_to_graphviz(
-        "tln-example",
-        "idl-malf",
-        hw_tln_lang,
-        itl_malform,
-        inherited=False,
-        horizontal=True,
-        save_legend=True,
-        show_node_labels=True,
-        post_layout_hook=None,
-    )
+    # graphvizlib.cdg_to_graphviz(
+    #     "tln-example",
+    #     "idl-malf",
+    #     hw_tln_lang,
+    #     itl_malform,
+    #     inherited=False,
+    #     horizontal=True,
+    #     save_legend=True,
+    #     show_node_labels=True,
+    #     post_layout_hook=None,
+    # )
     lin_opts = {
         "nominal": True,
         "name": "idl-tline-small-malf",
@@ -357,17 +362,17 @@ if __name__ == "__main__":
     itl_linear, _, _ = create_linear_tline(
         IdealV, IdealI, lambda: IdealE(), line_len=LINE_LEN
     )
-    graphvizlib.cdg_to_graphviz(
-        "tln-example",
-        "idl-tline-linear",
-        hw_tln_lang,
-        itl_linear,
-        inherited=False,
-        horizontal=True,
-        save_legend=True,
-        show_node_labels=False,
-        post_layout_hook=graph_process,
-    )
+    # graphvizlib.cdg_to_graphviz(
+    #     "tln-example",
+    #     "idl-tline-linear",
+    #     hw_tln_lang,
+    #     itl_linear,
+    #     inherited=False,
+    #     horizontal=True,
+    #     save_legend=True,
+    #     show_node_labels=False,
+    #     post_layout_hook=graph_process,
+    # )
     lin_opts = {
         "nominal": True,
         "name": "idl-tline-linear",
@@ -384,17 +389,17 @@ if __name__ == "__main__":
     itl_branch, _, _ = create_tline_branch(
         IdealV, IdealI, lambda: IdealE(), **branch_args
     )
-    graphvizlib.cdg_to_graphviz(
-        "tln-example",
-        "idl-tline-branch",
-        hw_tln_lang,
-        itl_branch,
-        inherited=False,
-        horizontal=True,
-        save_legend=False,
-        show_node_labels=False,
-        post_layout_hook=graph_process,
-    )
+    # graphvizlib.cdg_to_graphviz(
+    #     "tln-example",
+    #     "idl-tline-branch",
+    #     hw_tln_lang,
+    #     itl_branch,
+    #     inherited=False,
+    #     horizontal=True,
+    #     save_legend=False,
+    #     show_node_labels=False,
+    #     post_layout_hook=graph_process,
+    # )
     br_opts = {
         "nominal": True,
         "name": "idl-tline-branch",
@@ -404,16 +409,16 @@ if __name__ == "__main__":
     node_mm_branch, _, _ = create_tline_branch(
         MmV, MmI, lambda: IdealE(), **branch_args
     )
-    graphvizlib.cdg_to_graphviz(
-        "tln-example",
-        "mmnode_tline_branch",
-        hw_tln_lang,
-        node_mm_branch,
-        inherited=True,
-        horizontal=True,
-        save_legend=False,
-        show_node_labels=False,
-    )
+    # graphvizlib.cdg_to_graphviz(
+    #     "tln-example",
+    #     "mmnode_tline_branch",
+    #     hw_tln_lang,
+    #     node_mm_branch,
+    #     inherited=True,
+    #     horizontal=True,
+    #     save_legend=False,
+    #     show_node_labels=False,
+    # )
     nodemm_br_opts = {
         "nominal": False,
         "name": "mmnode-tline-branch",
@@ -423,17 +428,17 @@ if __name__ == "__main__":
     edge_mm_branch, _, _ = create_tline_branch(
         IdealV, IdealI, lambda: MmE(ws=1.0, wt=1.0), **branch_args
     )
-    graphvizlib.cdg_to_graphviz(
-        "tln-example",
-        "mmedge-tline-branch",
-        hw_tln_lang,
-        edge_mm_branch,
-        inherited=True,
-        horizontal=True,
-        save_legend=False,
-        show_node_labels=False,
-        post_layout_hook=graph_process,
-    )
+    # graphvizlib.cdg_to_graphviz(
+    #     "tln-example",
+    #     "mmedge-tline-branch",
+    #     hw_tln_lang,
+    #     edge_mm_branch,
+    #     inherited=True,
+    #     horizontal=True,
+    #     save_legend=False,
+    #     show_node_labels=False,
+    #     post_layout_hook=graph_process,
+    # )
     edgemm_br_opts = {
         "nominal": False,
         "name": "mmedge-tline-branch",
@@ -448,17 +453,17 @@ if __name__ == "__main__":
         mismatch_strategy="branch-only",
         **branch_args
     )
-    graphvizlib.cdg_to_graphviz(
-        "tln-example",
-        "mmeBranches_tline_branch",
-        hw_tln_lang,
-        edge_mmbranches_branch,
-        inherited=True,
-        horizontal=True,
-        save_legend=False,
-        show_node_labels=False,
-        post_layout_hook=graph_process,
-    )
+    # graphvizlib.cdg_to_graphviz(
+    #     "tln-example",
+    #     "mmeBranches_tline_branch",
+    #     hw_tln_lang,
+    #     edge_mmbranches_branch,
+    #     inherited=True,
+    #     horizontal=True,
+    #     save_legend=False,
+    #     show_node_labels=False,
+    #     post_layout_hook=graph_process,
+    # )
     emmbranch_opts = {
         "nominal": False,
         "name": "mmeBranches-tline-branch",
@@ -473,17 +478,17 @@ if __name__ == "__main__":
         mismatch_strategy="line-only",
         **branch_args
     )
-    graphvizlib.cdg_to_graphviz(
-        "tln-example",
-        "mmeLine_tline_branch",
-        hw_tln_lang,
-        edge_mmline_branch,
-        inherited=True,
-        horizontal=True,
-        save_legend=False,
-        show_node_labels=False,
-        post_layout_hook=graph_process,
-    )
+    # graphvizlib.cdg_to_graphviz(
+    #     "tln-example",
+    #     "mmeLine_tline_branch",
+    #     hw_tln_lang,
+    #     edge_mmline_branch,
+    #     inherited=True,
+    #     horizontal=True,
+    #     save_legend=False,
+    #     show_node_labels=False,
+    #     post_layout_hook=graph_process,
+    # )
     emmline_opts = {
         "nominal": False,
         "name": "mmeLine-tline-branch",
@@ -493,17 +498,17 @@ if __name__ == "__main__":
     itl_linear_short, _, _ = create_linear_tline(
         IdealV, IdealI, lambda: IdealE(), line_len=1
     )
-    graphvizlib.cdg_to_graphviz(
-        "tln-example",
-        "idl-tline-linear-short",
-        hw_tln_lang,
-        itl_linear_short,
-        inherited=False,
-        horizontal=True,
-        save_legend=True,
-        show_node_labels=True,
-        post_layout_hook=None,
-    )
+    # graphvizlib.cdg_to_graphviz(
+    #     "tln-example",
+    #     "idl-tline-linear-short",
+    #     hw_tln_lang,
+    #     itl_linear_short,
+    #     inherited=False,
+    #     horizontal=True,
+    #     save_legend=True,
+    #     show_node_labels=True,
+    #     post_layout_hook=None,
+    # )
     lin_short_opts = {
         "nominal": True,
         "name": "idl-tline-linear-short",
@@ -513,17 +518,17 @@ if __name__ == "__main__":
     emm_linear_short, _, _ = create_linear_tline(
         IdealV, IdealI, lambda: MmE(ws=1.0, wt=1.0), line_len=1
     )
-    graphvizlib.cdg_to_graphviz(
-        "tln-example",
-        "emm-tline-linear-short",
-        hw_tln_lang,
-        emm_linear_short,
-        inherited=True,
-        horizontal=True,
-        save_legend=True,
-        show_node_labels=True,
-        post_layout_hook=None,
-    )
+    # graphvizlib.cdg_to_graphviz(
+    #     "tln-example",
+    #     "emm-tline-linear-short",
+    #     hw_tln_lang,
+    #     emm_linear_short,
+    #     inherited=True,
+    #     horizontal=True,
+    #     save_legend=True,
+    #     show_node_labels=True,
+    #     post_layout_hook=None,
+    # )
     emm_short_opts = {
         "nominal": True,
         "name": "emm-tline-linear-short",
@@ -531,17 +536,17 @@ if __name__ == "__main__":
     }
 
     nmm_linear_short, _, _ = create_linear_tline(MmV, MmI, lambda: IdealE(), line_len=1)
-    graphvizlib.cdg_to_graphviz(
-        "tln-example",
-        "nmm-tline-linear-short",
-        hw_tln_lang,
-        nmm_linear_short,
-        inherited=True,
-        horizontal=True,
-        save_legend=True,
-        show_node_labels=True,
-        post_layout_hook=None,
-    )
+    # graphvizlib.cdg_to_graphviz(
+    #     "tln-example",
+    #     "nmm-tline-linear-short",
+    #     hw_tln_lang,
+    #     nmm_linear_short,
+    #     inherited=True,
+    #     horizontal=True,
+    #     save_legend=True,
+    #     show_node_labels=True,
+    #     post_layout_hook=None,
+    # )
     nmm_short_opts = {
         "nominal": True,
         "name": "nmm-tline-linear-short",
@@ -551,17 +556,17 @@ if __name__ == "__main__":
     emm_linear, _, _ = create_linear_tline(
         IdealV, IdealI, lambda: MmE(ws=1.0, wt=1.0), line_len=LINE_LEN
     )
-    graphvizlib.cdg_to_graphviz(
-        "tln-example",
-        "emm-tline-linear",
-        hw_tln_lang,
-        emm_linear,
-        inherited=True,
-        horizontal=True,
-        save_legend=True,
-        show_node_labels=True,
-        post_layout_hook=None,
-    )
+    # graphvizlib.cdg_to_graphviz(
+    #     "tln-example",
+    #     "emm-tline-linear",
+    #     hw_tln_lang,
+    #     emm_linear,
+    #     inherited=True,
+    #     horizontal=True,
+    #     save_legend=True,
+    #     show_node_labels=True,
+    #     post_layout_hook=None,
+    # )
     emm_opts = {
         "nominal": False,
         "name": "emm-tline-linear",
@@ -571,17 +576,17 @@ if __name__ == "__main__":
     nmm_linear, _, _ = create_linear_tline(
         MmV, MmI, lambda: IdealE(), line_len=LINE_LEN
     )
-    graphvizlib.cdg_to_graphviz(
-        "tln-example",
-        "nmm-tline-linear",
-        hw_tln_lang,
-        nmm_linear,
-        inherited=True,
-        horizontal=True,
-        save_legend=True,
-        show_node_labels=True,
-        post_layout_hook=None,
-    )
+    # graphvizlib.cdg_to_graphviz(
+    #     "tln-example",
+    #     "nmm-tline-linear",
+    #     hw_tln_lang,
+    #     nmm_linear,
+    #     inherited=True,
+    #     horizontal=True,
+    #     save_legend=True,
+    #     show_node_labels=True,
+    #     post_layout_hook=None,
+    # )
     nmm_opts = {
         "nominal": False,
         "name": "nmm-tline-linear",
@@ -593,13 +598,13 @@ if __name__ == "__main__":
     for options, cdg_prog in [
         (lin_opts, itl_linear),
         (br_opts, itl_branch),
-        (nodemm_br_opts, node_mm_branch),
-        (edgemm_br_opts, edge_mm_branch),
-        (emmbranch_opts, edge_mmbranches_branch),
-        (emmline_opts, edge_mmline_branch),
-        (lin_short_opts, itl_linear_short),
-        (emm_short_opts, emm_linear_short),
-        (nmm_short_opts, nmm_linear_short),
+        # (nodemm_br_opts, node_mm_branch),
+        # (edgemm_br_opts, edge_mm_branch),
+        # (emmbranch_opts, edge_mmbranches_branch),
+        # (emmline_opts, edge_mmline_branch),
+        # (lin_short_opts, itl_linear_short),
+        # (emm_short_opts, emm_linear_short),
+        # (nmm_short_opts, nmm_linear_short),
         (emm_opts, emm_linear),
         (nmm_opts, nmm_linear),
     ]:

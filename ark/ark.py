@@ -1,4 +1,5 @@
 """Wrapper class for the ARK framework"""
+import warnings
 from types import FunctionType
 from typing import Optional
 
@@ -138,7 +139,7 @@ class Ark:
             raise ValueError("Either CDG or CDG data must be provided.")
         if cdg:
             if cdg_execution_data:
-                Warning("CDG provided. CDG data is ignored.")
+                warnings.warn("CDG provided. CDG data is ignored.")
             cdg_execution_data = cdg.execution_data(seed=init_seed)
         node_to_init_val, switch_to_val, element_to_attr = cdg_execution_data
 

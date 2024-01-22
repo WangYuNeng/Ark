@@ -109,24 +109,22 @@ def gen_max_cut_prob(seed, w_n_bits=W_N_BITS):
 def plot_oscillation(time_points, cdg: CDG, omega, scaling, title=None):
     """Plot the oscillation of the oscillator"""
     mpl.rcParams.update(mpl.rcParamsDefault)
-    plt.rcParams.update(
-        {"text.usetex": True, "font.size": 15, "font.family": "Helvetica"}
-    )
+    plt.rcParams.update({"font.size": 15})
     cycle = time_points / T
     fig, ax = plt.subplots(nrows=2)
     for node in cdg.stateful_nodes:
         phi = node.get_trace(n=0) * scaling
         ax[1].plot(cycle, np.sin(omega * time_points + phi), label=node.name)
         ax[0].plot(cycle, phi)
-    ax[0].set_title(r"$\phi$")
+    ax[0].set_title("\phi")
     ax[0].set_ylabel("phase (rad)")
-    ax[1].set_title(r"$\sin{(\omega t + \phi)}$")
+    ax[1].set_title("$\sin{(\omega t + \phi)}")
     ax[1].set_ylabel("Amplitude (V)")
     ax[1].set_xlabel("\# of cycle (t/T)")
     plt.tight_layout()
     if title:
         plt.savefig(title + ".pdf")
-    plt.show()
+    # plt.show()
 
 
 def phase_to_assignment(phase, atol=ATOL, rtol=RTOL):
@@ -165,9 +163,15 @@ def main():
 
     correct = 0
     sync_success = 0
-    for seed, prob in tqdm(
-        enumerate(problems), desc=f"{osc_nodetype.name}, {cp_et.name}", total=N_TIRAL
-    ):
+    if PLOT:
+        iterator = enumerate(problems)
+    else:
+        iterator = tqdm(
+            enumerate(problems),
+            desc=f"{osc_nodetype.name}, {cp_et.name}",
+            total=N_TIRAL,
+        )
+    for seed, prob in iterator:
         connection_mat, max_cut_size, max_cut = prob
         nodes, graph = create_max_cut_con(connection_mat, osc_nodetype, cp_et)
 
@@ -180,14 +184,15 @@ def main():
             np.random.seed(seed)
             graph.initialize_all_states(rand=True)
         system.execute(cdg=graph, time_eval=time_points, init_seed=seed)
-        if seed == 1 and PLOT:
+        if seed == 8 and PLOT:
             plot_oscillation(
                 time_points,
                 graph,
                 omega,
                 scaling,
-                title=f"{osc_nodetype.name}, {cp_et.name}",
+                title=f"../../output/obc-{cp_et.name}",
             )
+            break
         node_to_assignment = {}
         sync_failed = False
         for node in graph.stateful_nodes:
@@ -204,8 +209,9 @@ def main():
         cut_size = calc_cut_size(connection_mat, assigments)
         if cut_size == max_cut_size:
             correct += 1
-    print(f"Sync success rate = {sync_success / N_TIRAL * 100}%")
-    print(f"Correct rate = {correct / N_TIRAL * 100}%")
+    if not PLOT:
+        print(f"Sync success rate = {sync_success / N_TIRAL * 100}%")
+        print(f"Correct rate = {correct / N_TIRAL * 100}%")
 
 
 if __name__ == "__main__":

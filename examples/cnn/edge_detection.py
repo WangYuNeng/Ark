@@ -202,17 +202,17 @@ def paper_plot():
     mpl.rcParams.update(mpl.rcParamsDefault)
     plt.rcParams.update(
         {
-            "text.usetex": True,
+            # "text.usetex": True,
             "font.size": 12,
             "font.family": "Helvetica",
         }
     )
-    col_titles = [r"\texttt{A}", r"\texttt{B}", r"\texttt{C}", r"\texttt{D}"]
+    col_titles = ["A", "B", "C", "D"]
 
     x = np.linspace(-1.2, 1.2, 100)
     plt.plot(x, saturation(x), linewidth=5.0)
     plt.plot(x, saturation_diffpair(x), linewidth=5.0)
-    plt.savefig("saturation-cmp.pdf", bbox_inches="tight")
+    plt.savefig("../../output/cnn-sat-vs-sat-ni.pdf", bbox_inches="tight")
     plt.close()
 
     components = [
@@ -255,8 +255,8 @@ def paper_plot():
                 ax.set_ylabel(f"t={time:.2f}", rotation=0, labelpad=20)
 
     # put rows in plt closer together
-    plt.savefig("cnn-output.pdf", bbox_inches="tight")
-    plt.show()
+    plt.savefig("../../output/cnn-output.pdf", bbox_inches="tight")
+    # plt.show()
 
 
 if __name__ == "__main__":

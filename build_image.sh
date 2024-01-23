@@ -1,0 +1,1 @@
+docker build -t ark --platform linux/x86_64 .

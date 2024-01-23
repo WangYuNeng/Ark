@@ -1,0 +1,1 @@
+docker run -it -v $(pwd)/output:/home/ae/Ark/output -w /home/ae/Ark ark 

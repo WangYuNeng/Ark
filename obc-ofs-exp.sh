@@ -3,11 +3,17 @@ echo ""
 
 cd examples/obc
 echo "obc, d=0.01pi"
-python max_cut.py  --n_cycle 5 # -p
+python max_cut.py  --n_cycle 5
+ehco ""
+
 echo "obc, d=0.1pi"
 python max_cut.py  --n_cycle 5 --atol 0.1
+ehco ""
+
 echo "ofs-obc, d=0.01pi"
-python max_cut.py  --n_cycle 5 --offset_rstd 0.01 # -p
+python max_cut.py  --n_cycle 5 --offset_rstd 0.01
+ehco ""
+
 echo "ofs-obc, d=0.1pi"
 python max_cut.py  --n_cycle 5 --offset_rstd 0.01 --atol 0.1
 cd ../..

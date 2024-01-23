@@ -111,13 +111,13 @@ def plot_oscillation(time_points, cdg: CDG, omega, scaling, title=None):
     mpl.rcParams.update(mpl.rcParamsDefault)
     plt.rcParams.update({"font.size": 15})
     cycle = time_points / T
-    fig, ax = plt.figure(1)
+    plt.figure(1)
     for node in cdg.stateful_nodes:
         phi = node.get_trace(n=0) * scaling
-        ax.plot(cycle, phi)
-    ax.set_title("\phi")
-    ax.set_ylabel("phase (rad)")
-    ax.set_xlabel("\# of cycle (t/T)")
+        plt.plot(cycle, phi)
+    plt.title("\phi")
+    plt.ylabel("phase (rad)")
+    plt.xlabel("\# of cycle (t/T)")
     plt.tight_layout()
     if title:
         plt.savefig(title + ".pdf")

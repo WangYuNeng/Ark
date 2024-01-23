@@ -111,16 +111,13 @@ def plot_oscillation(time_points, cdg: CDG, omega, scaling, title=None):
     mpl.rcParams.update(mpl.rcParamsDefault)
     plt.rcParams.update({"font.size": 15})
     cycle = time_points / T
-    fig, ax = plt.subplots(nrows=2)
+    fig, ax = plt.figure(1)
     for node in cdg.stateful_nodes:
         phi = node.get_trace(n=0) * scaling
-        ax[1].plot(cycle, np.sin(omega * time_points + phi), label=node.name)
-        ax[0].plot(cycle, phi)
-    ax[0].set_title("\phi")
-    ax[0].set_ylabel("phase (rad)")
-    ax[1].set_title("$\sin{(\omega t + \phi)}")
-    ax[1].set_ylabel("Amplitude (V)")
-    ax[1].set_xlabel("\# of cycle (t/T)")
+        ax.plot(cycle, phi)
+    ax.set_title("\phi")
+    ax.set_ylabel("phase (rad)")
+    ax.set_xlabel("\# of cycle (t/T)")
     plt.tight_layout()
     if title:
         plt.savefig(title + ".pdf")
@@ -210,8 +207,8 @@ def main():
         if cut_size == max_cut_size:
             correct += 1
     if not PLOT:
-        print(f"Sync success rate = {sync_success / N_TIRAL * 100}%")
-        print(f"Correct rate = {correct / N_TIRAL * 100}%")
+        print(f"sync prob = {sync_success / N_TIRAL * 100:.1f}%")
+        print(f"slvd prob = {correct / N_TIRAL * 100:.1f}%")
 
 
 if __name__ == "__main__":

@@ -215,9 +215,9 @@ def nominal_simulation(cdg: CDG, time_range, name, post_process_hook=None):
         post_process_hook(fig, ax)
 
     if name == "idl-tline-linear":
-        filename = "../../output/tln-linear-tline.pdf" % name
+        filename = "../../output/tln-linear-tline.pdf"
     elif name == "idl-tline-branch":
-        filename = "../../output/tln-branch-tline.pdf" % name
+        filename = "../../output/tln-branch-tline.pdf"
     plt.savefig(filename, bbox_inches="tight")
     plt.clf()
 
@@ -274,9 +274,9 @@ def mismatch_simulation(cdg, time_range, name, post_process_hook=None):
         post_process_hook(fig, ax)
 
     if name == "emm-tline-linear":
-        filename = "../../output/tln-gm-mismatch-tline.pdf" % name
+        filename = "../../output/tln-gm-mismatch-tline.pdf"
     elif name == "nmm-tline-linear":
-        filename = "../../output/tln-cint-mismatch-tline.pdf" % name
+        filename = "../../output/tln-cint-mismatch-tline.pdf"
     plt.savefig(filename, bbox_inches="tight")
     plt.clf()
 

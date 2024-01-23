@@ -4,15 +4,15 @@ echo ""
 cd examples/obc
 echo "obc, d=0.01pi"
 python max_cut.py  --n_cycle 5
-ehco ""
+echo ""
 
 echo "obc, d=0.1pi"
 python max_cut.py  --n_cycle 5 --atol 0.1
-ehco ""
+echo ""
 
 echo "ofs-obc, d=0.01pi"
 python max_cut.py  --n_cycle 5 --offset_rstd 0.01
-ehco ""
+echo ""
 
 echo "ofs-obc, d=0.1pi"
 python max_cut.py  --n_cycle 5 --offset_rstd 0.01 --atol 0.1

@@ -108,8 +108,9 @@ spec = CDGSpec(
 system = Ark(
     cdg_spec=spec,
 )
-assert system.validate(cdg=graph)
+system.validate(cdg=graph)
 system.compile(cdg=graph)
+system.dump_prog("../output/crn-prog.py")
 
 time_range = [0, 15]
 time_points = np.linspace(*time_range, 1000)
@@ -125,5 +126,4 @@ plt.xlabel("time")
 plt.ylabel("Value")
 plt.grid()
 plt.legend()
-plt.savefig("crn.png")
-plt.show()
+plt.savefig("../output/crn-multiplication.pdf")

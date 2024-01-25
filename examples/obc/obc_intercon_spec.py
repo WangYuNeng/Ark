@@ -2,6 +2,8 @@
 Example: Coupled Oscillator Network with Possible Interconnects Options
 """
 
+from ark.ark import Ark
+from ark.cdg.cdg import CDG
 from ark.specification.attribute_def import AttrDef
 from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule
@@ -14,24 +16,24 @@ N_GROUP = 2
 obc_intercon_spec = CDGSpec(name="obc-intercon")
 
 #### Type definitions start ####
-Osc = NodeType(name="Osc", order=1)
+Osc = NodeType(name="Osc", attrs={"order": 1})
 Coupling = EdgeType(
     name="Cpl",
-    attr_def=[AttrDef("k", attr_type=float, attr_range=Range(min=-8, max=8))],
+    attrs={"attr_def": {"k": AttrDef(attr_type=float, attr_range=Range(min=0.0))}},
 )
 
-Osc_group = [NodeType(name=f"Osc_G{i}", base=Osc) for i in range(N_GROUP)]
+Osc_group = [NodeType(name=f"Osc_G{i}", bases=Osc) for i in range(N_GROUP)]
 # local connection that has a lower cost
 Coupling_local = EdgeType(
     name="Cpl_l",
-    base=Coupling,
-    attr_def=[AttrDef("cost", attr_type=int, attr_range=Range(exact=1))],
+    bases=Coupling,
+    attrs={"attr_def": {"cost": AttrDef(attr_type=int, attr_range=Range(exact=1))}},
 )
 # global connection that has a higher cost
 Coupling_global = EdgeType(
     name="Cpl_g",
-    base=Coupling,
-    attr_def=[AttrDef("cost", attr_type=int, attr_range=Range(exact=10))],
+    bases=Coupling,
+    attrs={"attr_def": {"cost": AttrDef(attr_type=int, attr_range=Range(exact=10))}},
 )
 cdg_types = [Osc, Coupling] + Osc_group + [Coupling_local, Coupling_global]
 obc_intercon_spec.add_cdg_types(cdg_types)
@@ -65,6 +67,33 @@ obc_intercon_spec.add_validation_rules(val_rules)
 #### Validation rules end ####
 
 if __name__ == "__main__":
-    import ark.visualize.latex_gen as latexlib
+    valid_graph, invalid_graph = CDG(), CDG()
 
-    latexlib.language_to_latex(obc_intercon_spec)
+    # Create a valid graph - connecting oscillators outside groups
+    # with global connection
+    osc0, osc1 = Osc_group[0](), Osc_group[1]()
+    global_cp = Coupling_global(k=1.0, cost=10)
+    self_locking0 = Coupling_local(k=1.0, cost=1)
+    self_locking1 = Coupling_local(k=1.0, cost=1)
+    valid_graph.connect(global_cp, osc0, osc1)
+    valid_graph.connect(self_locking0, osc0, osc0)
+    valid_graph.connect(self_locking1, osc1, osc1)
+
+    # Create an invalid graph - connecting oscillators outside groups
+    # with local connection
+    osc2, osc3 = Osc_group[0](), Osc_group[1]()
+    local_cp = Coupling_local(k=1.0, cost=1)
+    self_locking2 = Coupling_local(k=1.0, cost=1)
+    self_locking3 = Coupling_local(k=1.0, cost=1)
+    invalid_graph.connect(local_cp, osc2, osc3)
+    invalid_graph.connect(self_locking2, osc2, osc2)
+    invalid_graph.connect(self_locking3, osc3, osc3)
+
+    # Validate the graphs
+    system = Ark(cdg_spec=obc_intercon_spec)
+    print("Validating oscillators in different groups coupled with global connection")
+    system.validate(valid_graph)  # pass
+    print("PASSED!\n")
+    print("Validating oscillators in different groups coupled with local connection")
+    system.validate(invalid_graph)  # fail, raise erroe
+    print("PASSED!\n")

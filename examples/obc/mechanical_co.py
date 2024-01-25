@@ -57,6 +57,7 @@ graph.connect(cpl, node1, node2)
 
 # Compile the CDG to an executable dynamical system
 system.compile(cdg=graph)
+system.dump_prog("../../output/mechanical_co-prog.py")
 
 # Specify the simulation time and initial values
 time_range = [0, 10]
@@ -76,5 +77,4 @@ for node in [node1, node2]:
 plt.xlabel("Time")
 plt.ylabel("Displacement")
 plt.legend()
-plt.savefig("co.png")
-plt.show()
+plt.savefig("../../output/mechanical_co-transient.pdf")

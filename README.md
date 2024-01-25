@@ -23,12 +23,19 @@ conda install -c conda-forge pyspice
 ## Run in a container
 
 ```
-docker build -t ark --platform linux/x86\_64 .
-docker run -it ark --platform linux/x86\_64 .
+./build_image.sh
+./run_image.sh
 ```
 
-
 ## Quick Start
+
+To generate the figures and run the experiments in the paper, run
+
+```
+./scripts/run_exp.sh
+```
+
+The results will be stored in `output` directory and also shwon in the terminal.
 
 Here's a very simple example to describe mechanical coupled oscillator governed by the Law of Motion with Ark
 

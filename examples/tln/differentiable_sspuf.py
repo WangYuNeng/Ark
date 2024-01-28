@@ -2,18 +2,12 @@
 Model the SSPUF and Bit-flipping test as a differentiable program.
 """
 
-from functools import partial
-from types import FunctionType
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
 import numpy as np
-import optax
 from jax import config
-from jaxtyping import Array, Float, Int, PyTree
-from tqdm import tqdm
 
 config.update("jax_debug_nans", True)
 
@@ -62,8 +56,16 @@ class SwitchableStarPUF(eqx.Module):
         self.n_order = n_order
 
         if random:
-            self.gm_c = np.random.normal(shape=(line_len, 2))
-            self.gm_l = np.random.normal(shape=(line_len, 2))
+            self.gm_c = np.random.uniform(
+                low=0.5,
+                high=1.5,
+                size=(line_len, 2),
+            )
+            self.gm_l = np.random.uniform(
+                low=0.5,
+                high=1.5,
+                size=(line_len, 2),
+            )
 
         else:
             self.gm_c = np.ones(shape=(line_len, 2))
@@ -215,146 +217,3 @@ class SwitchableStarPUF(eqx.Module):
             integral_exp_mat += at_i_over_factorial_i
             integral_exp_mat_t += at_i_over_factorial_i * tau * (i + 1) / (i + 2)
         return jnp.stack([integral_exp_mat, integral_exp_mat_t])
-
-
-def scaled_sigmoid(x, scale=100.0):
-    return 1.0 / (1.0 + jnp.exp(-x * scale))
-
-
-def diff(model, switch, mismatch, t):
-    return jnp.mean(jnp.abs(jax.vmap(model)(switch, mismatch, t)))
-
-
-def i2o_score(model, switch, mismatch, t, quantize_fn):
-    analog_out = jax.vmap(model)(switch, mismatch, t)
-    digital_out: jax.Array = quantize_fn(analog_out).flatten()
-
-    abs_diff = jnp.abs(digital_out[:-1] - digital_out[1:])
-    return jnp.mean(jnp.abs(abs_diff - 0.5))
-
-
-def random_chls_and_mismatch(batch_size, n_branch, lds_a_shape):
-    while True:
-        switches = np.random.randint(0, 2, size=(batch_size, n_branch))
-        mismatch = np.random.normal(
-            size=(batch_size, 2, *lds_a_shape), loc=1.0, scale=0.1
-        )
-        t = 5e-9 * np.ones(shape=(batch_size,))
-        yield switches, mismatch, t
-
-
-def bf_chls(batch_size, n_branch, lds_a_shape):
-    while True:
-        switches = [np.random.randint(0, 2, size=(n_branch))]
-        flipped_branch = np.random.randint(0, n_branch, size=(batch_size - 1))
-        for i, pos in enumerate(flipped_branch):
-            switches.append(switches[i].copy())
-            switches[-1][pos] ^= 1
-        switches = np.array(switches)
-        mismatch = np.random.normal(size=(2, *lds_a_shape), loc=1.0, scale=0.1)
-        # Use the same mismatch across all batch
-        mismatch = np.repeat(mismatch[np.newaxis, ...], batch_size, axis=0)
-        t = 5e-9 * np.ones(shape=(batch_size,))
-        yield switches, mismatch, t
-
-
-def train(
-    model: SwitchableStarPUF,
-    loss: FunctionType,
-    dataloader: FunctionType,
-    optim: optax.GradientTransformation,
-    batch_size: int,
-    steps: int,
-    print_every: int,
-):
-    """Toy example that minimizes the difference between two stars.
-    We know that a simple solution is to make every weight 0.
-    """
-
-    opt_state = optim.init(eqx.filter(model, eqx.is_array))
-    n_branch, lds_a_shape = model.n_branch, model.lds_a_shape
-    loader = dataloader(batch_size, n_branch, lds_a_shape)
-
-    # Always wrap everything -- computing gradients, running the optimiser, updating
-    # the model -- into a single JIT region. This ensures things run as fast as
-    # possible.
-    @eqx.filter_jit
-    def make_step(
-        model: SwitchableStarPUF,
-        opt_state: PyTree,
-        switch: Array,
-        mismatch: Array,
-        t: Float,
-    ):
-        loss_value, grads = eqx.filter_value_and_grad(loss)(model, switch, mismatch, t)
-        updates, opt_state = optim.update(grads, opt_state, model)
-        model = eqx.apply_updates(model, updates)
-        return model, opt_state, loss_value
-
-    for step, (switches, mismatch, t) in zip(range(steps), loader):
-        model, opt_state, train_loss = make_step(
-            model, opt_state, switches, mismatch, t
-        )
-        if (step % print_every) == 0 or (step == steps - 1):
-            print(f"{step=}, train_loss={train_loss.item()}")
-            print(f"gm_c:\n{model.gm_c}")
-            print(f"gm_l:\n{model.gm_l}")
-    return model
-
-
-LEARNING_RATE = 1e-2
-N_BRANCH, LINE_LEN, N_ORDER = 4, 4, 40
-BATCH_SIZE, STEPS, PRINT_EVERY = 128, 500, 50
-
-optim = optax.adamw(LEARNING_RATE)
-
-# Minimize the difference between two stars: easy case
-model = SwitchableStarPUF(n_branch=1, line_len=LINE_LEN, n_order=N_ORDER)
-print(model.gm_c, model.gm_l)
-model = train(
-    model=model,
-    loss=diff,
-    dataloader=random_chls_and_mismatch,
-    optim=optim,
-    batch_size=BATCH_SIZE,
-    steps=STEPS,
-    print_every=PRINT_EVERY,
-)
-
-
-# Minimize the difference between two stars: arger case
-model = SwitchableStarPUF(n_branch=N_BRANCH, line_len=LINE_LEN, n_order=N_ORDER)
-print(model.gm_c, model.gm_l)
-model = train(
-    model=model,
-    loss=diff,
-    dataloader=random_chls_and_mismatch,
-    optim=optim,
-    batch_size=BATCH_SIZE,
-    steps=STEPS,
-    print_every=PRINT_EVERY,
-)
-
-
-# Bit-flipping test
-model = SwitchableStarPUF(n_branch=N_BRANCH, line_len=LINE_LEN, n_order=N_ORDER)
-i2o_sigmoid = partial(i2o_score, quantize_fn=scaled_sigmoid)
-
-# Sanity Check
-n_branch, lds_a_shape = model.n_branch, model.lds_a_shape
-for i, (switches, mismatch, t) in zip(
-    range(10), bf_chls(BATCH_SIZE, n_branch, lds_a_shape)
-):
-    loss_value, grads = i2o_sigmoid(model, switches, mismatch, t)
-    print(loss_value)
-
-print(model.gm_c, model.gm_l)
-model = train(
-    model=model,
-    loss=i2o_sigmoid,
-    dataloader=bf_chls,
-    optim=optim,
-    batch_size=BATCH_SIZE,
-    steps=STEPS,
-    print_every=PRINT_EVERY,
-)

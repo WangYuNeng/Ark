@@ -1,3 +1,4 @@
+import argparse
 from functools import partial
 from types import FunctionType
 
@@ -13,6 +14,25 @@ from jax import config
 from jaxtyping import Array, Float, PyTree
 
 config.update("jax_debug_nans", True)
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--learning_rate", type=float, default=5e-2)
+parser.add_argument("--n_branch", type=int, default=10)
+parser.add_argument("--line_len", type=int, default=4)
+parser.add_argument("--n_order", type=int, default=40)
+parser.add_argument("--readout_time", type=float, default=10e-9)
+parser.add_argument("--rand_init", action="store_true")
+parser.add_argument("--batch_size", type=int, default=256)
+parser.add_argument("--steps", type=int, default=200)
+parser.add_argument("--print_every", type=int, default=1)
+parser.add_argument("--logistic_k", type=float, default=40)
+parser.add_argument("--wandb", action="store_true")
+args = parser.parse_args()
+
+if args.wandb:
+    wandb_run = wandb.init(
+        config=vars(args),
+    )
 
 
 def plot_single_star_rsp(model, switch, mismatch, time_points):
@@ -132,9 +152,13 @@ def train(
         )
         if (step % print_every) == 0 or (step == steps - 1):
             val_loss = validate(model, switches, mismatch, t)
-            wandb_run.log(
-                {"train_loss": train_loss.item(), "validation_loss": val_loss.item()}
-            )
+            if args.wandb:
+                wandb_run.log(
+                    {
+                        "train_loss": train_loss.item(),
+                        "validation_loss": val_loss.item(),
+                    }
+                )
             print(
                 f"{step=}, train_loss={train_loss.item()}, validation_loss={val_loss.item()}"
             )
@@ -146,31 +170,20 @@ def train(
     return model
 
 
-LEARNING_RATE = 5e-2
-N_BRANCH, LINE_LEN, N_ORDER = 10, 4, 40
-READOUT_TIME = 10e-9
-RAND_INIT = False
-BATCH_SIZE, STEPS, PRINT_EVERY = 256, 200, 1
-LOGISTIC_K = 40
+LEARNING_RATE = args.learning_rate
+N_BRANCH = args.n_branch
+LINE_LEN = args.line_len
+N_ORDER = args.n_order
+READOUT_TIME = args.readout_time
+RAND_INIT = args.rand_init
+BATCH_SIZE = args.batch_size
+STEPS = args.steps
+PRINT_EVERY = args.print_every
+LOGISTIC_K = args.logistic_k
 
 optim = optax.adamw(LEARNING_RATE, weight_decay=0)
 rand_loader = partial(random_chls_and_mismatch, readout_time=READOUT_TIME)
 bf_loader = partial(bf_chls, readout_time=READOUT_TIME)
-
-wandb_run = wandb.init(
-    config={
-        "learning_rate": LEARNING_RATE,
-        "n_branch": N_BRANCH,
-        "line_len": LINE_LEN,
-        "n_order": N_ORDER,
-        "readout_time": READOUT_TIME,
-        "rand_init": RAND_INIT,
-        "batch_size": BATCH_SIZE,
-        "steps": STEPS,
-        "print_every": PRINT_EVERY,
-        "logistic_k": LOGISTIC_K,
-    }
-)
 
 # # Sanity check, single star response is correct
 # model = SwitchableStarPUF(n_branch=N_BRANCH, line_len=LINE_LEN, n_order=N_ORDER)

@@ -56,6 +56,11 @@ Sw = EdgeType(
 CapWeight = NodeType(
     name="CapWeight",
     bases=Cap,
+    attrs={
+        "attr_def": {
+            "c": AttrDef(attr_type=FunctionType, nargs=1),
+        },
+    },
 )
 
 CapSAR = NodeType(
@@ -69,8 +74,8 @@ inp_cweight_conn = ProdRule(
     Inp,
     CapWeight,
     DST,
-    (SRC.vin(TIME) - VAR(DST))
-    / DST.c
+    (-SRC.vin(TIME) - VAR(DST))
+    / DST.c(TIME)
     * (
         EDGE.ctrl(TIME) * EDGE.Gon / (EDGE.Gon * SRC.r + 1)
         + (-EDGE.ctrl(TIME) + 1) * EDGE.Goff / (EDGE.Goff * SRC.r + 1)
@@ -82,7 +87,7 @@ cweight_sar_conn = ProdRule(
     CapSAR,
     SRC,
     (-VAR(SRC) - VAR(DST))
-    / SRC.c
+    / SRC.c(TIME)
     * (EDGE.ctrl(TIME) * EDGE.Gon + (-EDGE.ctrl(TIME) + 1) * EDGE.Goff),
 )
 
@@ -97,8 +102,9 @@ sar_cweight_conn = ProdRule(
 )
 prod_rules = [inp_cweight_conn, cweight_sar_conn, sar_cweight_conn]
 cdg_types = [Cap, Inp, Sw, CapWeight, CapSAR]
-spec = CDGSpec(cdg_types=cdg_types, production_rules=prod_rules, validation_rules=None)
-system = Ark(cdg_spec=spec)
+scmm_spec = CDGSpec(
+    cdg_types=cdg_types, production_rules=prod_rules, validation_rules=None
+)
 
 
 def clk(t, period, duty_cycle, offset):
@@ -107,56 +113,79 @@ def clk(t, period, duty_cycle, offset):
     return float(t <= duty_cycle * period)
 
 
-def vdd(t, val):
+def sequential_array(t, period, arr):
+    """Return the value at a given clock cycle
+
+    if value out of range, return the last value
+
+    Args:
+        t (float): time
+        period (float): period of the clock
+        val_array (list): list of values at each clock cycle
+
+    Returns:
+        float: value at the t // period clock cycle
+    """
+    idx = int(t / period)
+    if idx >= len(arr):
+        return arr[-1]
+    return arr[idx]
+
+
+def constant(t, val):
     return val
 
 
-# N-path filter implementation
-C_RATIO = 39
-C1 = 300e-10
-C2 = C1 * C_RATIO
-G_ON = 1e6
-G_OFF = 0.0
-R_IN = 1e-6
-FREQ = 1e9
-VDD = partial(vdd, val=1.0)
+if __name__ == "__main__":
+    system = Ark(cdg_spec=scmm_spec)
 
-TIME_RANGE = [0, 20 / FREQ]
+    # N-path filter implementation
+    C_RATIO = 39
+    C1 = 300e-10
+    C2 = C1 * C_RATIO
+    G_ON = 1e6
+    G_OFF = 0.0
+    R_IN = 1e-6
+    FREQ = 1e9
+    VDD = partial(constant, val=-1.0)
 
+    c1_fixed = partial(constant, val=C1)
 
-phi1 = partial(clk, period=1 / FREQ, duty_cycle=0.5, offset=0)
-phi2 = partial(clk, period=1 / FREQ, duty_cycle=0.5, offset=0.5 / FREQ)
+    TIME_RANGE = [0, 20 / FREQ]
 
-scmm = CDG()
-inp = Inp(vin=VDD, r=R_IN)
-cweight = CapWeight(c=C1)
-csar = CapSAR(c=C2)
-sw1 = Sw(ctrl=phi1, Gon=G_ON, Goff=G_OFF)
-sw2 = Sw(ctrl=phi2, Gon=G_ON, Goff=G_OFF)
-scmm.connect(sw1, inp, cweight)
-scmm.connect(sw2, cweight, csar)
+    phi1 = partial(clk, period=1 / FREQ, duty_cycle=0.5, offset=0)
+    phi2 = partial(clk, period=1 / FREQ, duty_cycle=0.5, offset=0.5 / FREQ)
 
-system.compile(cdg=scmm)
-scmm.initialize_all_states(val=0)
+    scmm = CDG()
+    inp = Inp(vin=VDD, r=R_IN)
+    cweight = CapWeight(c=c1_fixed)
+    csar = CapSAR(c=C2)
+    sw1 = Sw(ctrl=phi1, Gon=G_ON, Goff=G_OFF)
+    sw2 = Sw(ctrl=phi2, Gon=G_ON, Goff=G_OFF)
+    scmm.connect(sw1, inp, cweight)
+    scmm.connect(sw2, cweight, csar)
 
-system.print_prog()
+    system.compile(cdg=scmm)
+    scmm.initialize_all_states(val=0)
 
-time_points = np.linspace(*TIME_RANGE, 1000)
-system.execute(
-    cdg=scmm,
-    time_eval=time_points,
-)
+    system.print_prog()
 
-fig, ax = plt.subplots(nrows=5)
-ax[0].plot(time_points, [VDD(t) for t in time_points], label="Input")
-ax[0].legend()
-for i, (node, phi) in enumerate(zip([cweight, csar], [phi1, phi2])):
-    trace = node.get_trace(n=0)
-    ax[2 * i + 1].plot(
-        time_points, [phi(t) for t in time_points], label="phi %d" % (i + 1)
+    time_points = np.linspace(*TIME_RANGE, 1000)
+    system.execute(
+        cdg=scmm,
+        time_eval=time_points,
     )
-    ax[2 * i + 1].legend()
-    ax[2 * (i + 1)].plot(time_points, trace, label="Cap %d" % (i + 1))
-    ax[2 * (i + 1)].legend()
-plt.tight_layout()
-plt.show()
+
+    fig, ax = plt.subplots(nrows=5)
+    ax[0].plot(time_points, [VDD(t) for t in time_points], label="Input")
+    ax[0].legend()
+    for i, (node, phi) in enumerate(zip([cweight, csar], [phi1, phi2])):
+        trace = node.get_trace(n=0)
+        ax[2 * i + 1].plot(
+            time_points, [phi(t) for t in time_points], label="phi %d" % (i + 1)
+        )
+        ax[2 * i + 1].legend()
+        ax[2 * (i + 1)].plot(time_points, trace, label="Cap %d" % (i + 1))
+        ax[2 * (i + 1)].legend()
+    plt.tight_layout()
+    plt.show()

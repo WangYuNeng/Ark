@@ -59,6 +59,7 @@ CapWeight = NodeType(
     attrs={
         "attr_def": {
             "c": AttrDef(attr_type=FunctionType, nargs=1),
+            # Function type to support sequential scheduling of the weights
         },
     },
 )
@@ -74,11 +75,12 @@ inp_cweight_conn = ProdRule(
     Inp,
     CapWeight,
     DST,
-    (-SRC.vin(TIME) - VAR(DST))
-    / DST.c(TIME)
+    (-SRC.vin(TIME) - VAR(DST))  # -SRC.vin so that the sign is correct
+    / DST.c(TIME)  # Require non-zero capacitance
     * (
         EDGE.ctrl(TIME) * EDGE.Gon / (EDGE.Gon * SRC.r + 1)
         + (-EDGE.ctrl(TIME) + 1) * EDGE.Goff / (EDGE.Goff * SRC.r + 1)
+        # Require non-zero ON resistance for finite Gon
     ),
 )
 cweight_sar_conn = ProdRule(
@@ -128,6 +130,8 @@ def sequential_array(t, period, arr):
     """
     idx = int(t / period)
     if idx >= len(arr):
+        # TODO: Need to come up with a different way to handle
+        # out of bound query for future jax compatibility.
         return arr[-1]
     return arr[idx]
 

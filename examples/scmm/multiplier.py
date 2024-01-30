@@ -1,3 +1,4 @@
+import sys
 from functools import partial
 from types import FunctionType
 
@@ -33,13 +34,15 @@ if __name__ == "__main__":
     R_IN = 1e-9
     FREQ = 1e9
 
-    in_val = np.array([1, 0, -1, 2, -1, -2])
-    weight = np.array([2, 3, 1, 4, 2, 1]) * C1
+    vec_len = int(sys.argv[1])
+
+    in_val = np.random.randint(-4, 5, size=vec_len)
+    weight = np.random.randint(1, 5, size=vec_len) * C1
 
     vin = weight_to_sequential(in_val, 1 / FREQ)
     c1 = weight_to_sequential(weight, 1 / FREQ)
 
-    TIME_RANGE = [0, 6 / FREQ]
+    TIME_RANGE = [0, vec_len / FREQ]
 
     phi1 = partial(clk, period=1 / FREQ, duty_cycle=0.5, offset=0)
     phi2 = partial(clk, period=1 / FREQ, duty_cycle=0.5, offset=0.5 / FREQ)
@@ -79,12 +82,19 @@ if __name__ == "__main__":
     plt.show()
     plt.clf()
 
-    ideal_cumsum_fn = partial(
-        sequential_array, arr=np.cumsum(in_val * weight / C1), period=1 / FREQ
-    )
-    ideal_cumsum = [ideal_cumsum_fn(t) for t in time_points]
-    scmm_cumsum = csar.get_trace(n=0) * C_RATIO
-    plt.plot(time_points, ideal_cumsum, label="Ideal")
-    plt.plot(time_points, scmm_cumsum, label="SCMM")
+    readout_point = [i / FREQ for i in range(1, vec_len + 1)]
+    ideal_cumsum = np.cumsum(in_val * weight / C1) / C_RATIO
+
+    k = C2 / (C2 + np.abs(weight))
+    mu = weight / C2
+    a_arr = [
+        [mu[j] * np.prod(k[j : i + 1]) for j in range(i + 1)] for i in range(len(k))
+    ]
+    scmm_analytic = [np.sum(a_arr[i] * in_val[: i + 1]) for i in range(len(a_arr))]
+
+    scmm_cumsum = csar.get_trace(n=0)
+    plt.plot(readout_point, ideal_cumsum, label="Ideal", marker="^")
+    plt.plot(readout_point, scmm_analytic, label="SCMM Analytical", marker="o")
+    plt.plot(time_points, scmm_cumsum, label="V_C2")
     plt.legend()
     plt.show()

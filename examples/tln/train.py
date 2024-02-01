@@ -23,6 +23,7 @@ parser.add_argument("--n_order", type=int, default=40)
 parser.add_argument("--readout_time", type=float, default=10e-9)
 parser.add_argument("--rand_init", action="store_true")
 parser.add_argument("--batch_size", type=int, default=256)
+parser.add_argument("--inst_per_branch", type=int, default=1)
 parser.add_argument("--steps", type=int, default=200)
 parser.add_argument("--print_every", type=int, default=1)
 parser.add_argument("--logistic_k", type=float, default=40)
@@ -61,7 +62,7 @@ def shifted_sign(x):
 
 def logistic(x, k=10.0):
     """Smooth approximation of the ideal ADC with the logistic function."""
-    return 1.0 / (1.0 + jnp.exp(-x * k))
+    return 0.5 * (jnp.tanh(x * k / 2) + 1)
 
 
 def diff(model, switch, mismatch, t):
@@ -86,7 +87,29 @@ def random_chls_and_mismatch(batch_size, n_branch, lds_a_shape, readout_time):
         yield switches, mismatch, t
 
 
-def bf_chls(batch_size, n_branch, lds_a_shape, readout_time):
+def bf_chls(
+    batch_size: int,
+    inst_per_batch: int,
+    n_branch: int,
+    lds_a_shape: tuple[int, int],
+    readout_time: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Bit-flipping test training data generator.
+
+    Args:
+        batch_size (int): size of the batch
+        inst_per_batch (int): # of instance (mismatch)to sample per batch
+        (batch_size // inst_per_batch should an integer >> inst_per_batch)
+        n_branch (int): # of branches in the star PUF
+        lds_a_shape (tuple[int, int]): shape of the PUF matrix
+        readout_time (float): readout time of the PUF
+
+    Yields:
+        switches (np.ndarray): batch of switches
+        mismatch (np.ndarray): batch of mismatch samples
+        t (np.ndarray): batch of readout time
+    """
+    assert batch_size % inst_per_batch == 0
     while True:
         switches = [np.random.randint(0, 2, size=(n_branch))]
         flipped_branch = np.random.randint(0, n_branch, size=(batch_size - 1))
@@ -94,9 +117,14 @@ def bf_chls(batch_size, n_branch, lds_a_shape, readout_time):
             switches.append(switches[i].copy())
             switches[-1][pos] ^= 1
         switches = np.array(switches)
-        mismatch = np.random.normal(size=(2, *lds_a_shape), loc=1.0, scale=0.1)
-        # Use the same mismatch across all batch
-        mismatch = np.repeat(mismatch[np.newaxis, ...], batch_size, axis=0)
+
+        # Generate inst_per_batch mismatch samples
+        mismatches = np.random.normal(
+            size=(inst_per_batch, 2, *lds_a_shape), loc=1.0, scale=0.1
+        )
+        # Repeat each mismatch samples batch_size // inst_per_batch times
+        # and stack them together
+        mismatch = np.repeat(mismatches, int(batch_size // inst_per_batch), axis=0)
 
         # Sanity check: use different mismatch the i2o score should be 0
         # mismatch = np.random.normal(
@@ -113,6 +141,7 @@ def train(
     dataloader: FunctionType,
     optim: optax.GradientTransformation,
     batch_size: int,
+    inst_per_branch: int,
     steps: int,
     print_every: int,
 ):
@@ -122,7 +151,7 @@ def train(
 
     opt_state = optim.init(eqx.filter(model, eqx.is_array))
     n_branch, lds_a_shape = model.n_branch, model.lds_a_shape
-    loader = dataloader(batch_size, n_branch, lds_a_shape)
+    loader = dataloader(batch_size, inst_per_branch, n_branch, lds_a_shape)
 
     # Always wrap everything -- computing gradients, running the optimiser, updating
     # the model -- into a single JIT region. This ensures things run as fast as
@@ -166,6 +195,8 @@ def train(
             print(f"gm_l:\n{model.gm_l}")
             print(f"gmc_diff:\n{model.gm_c - prev_gmc}")
             print(f"gml_diff:\n{model.gm_l - prev_gml}")
+            print(f"c_val:\n{model.c_val}")
+            print(f"l_val:\n{model.l_val}")
             prev_gmc, prev_gml = model.gm_c, model.gm_l
     return model
 
@@ -177,11 +208,12 @@ N_ORDER = args.n_order
 READOUT_TIME = args.readout_time
 RAND_INIT = args.rand_init
 BATCH_SIZE = args.batch_size
+INST_PER_BRANCH = args.inst_per_branch
 STEPS = args.steps
 PRINT_EVERY = args.print_every
 LOGISTIC_K = args.logistic_k
 
-optim = optax.adamw(LEARNING_RATE, weight_decay=0)
+optim = optax.adam(LEARNING_RATE)
 rand_loader = partial(random_chls_and_mismatch, readout_time=READOUT_TIME)
 bf_loader = partial(bf_chls, readout_time=READOUT_TIME)
 
@@ -236,6 +268,7 @@ i2o_ideal = partial(i2o_score, quantize_fn=shifted_sign)
 #     print(ideal_loss, approx_loss)
 
 print(model.gm_c, model.gm_l)
+print(model.c_val, model.l_val)
 model = train(
     model=model,
     loss=i2o_sigmoid,
@@ -243,6 +276,7 @@ model = train(
     dataloader=bf_loader,
     optim=optim,
     batch_size=BATCH_SIZE,
+    inst_per_branch=INST_PER_BRANCH,
     steps=STEPS,
     print_every=PRINT_EVERY,
 )

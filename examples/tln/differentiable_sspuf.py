@@ -18,9 +18,13 @@ class SwitchableStarPUF(eqx.Module):
     - n_branch: # of branches to switch
     - line_len: # of LC section in each branch
     - n_order: # of order to approximate the matrix exponential
-    - gm_c: Gm of integrators associated with capacitors
-    - gm_l: Gm of integrators associated with inductors
-    - lc_val: The value of the LC components
+    - gm_c: Trainable Gm of integrators associated with capacitors
+    - gm_l: Trainable Gm of integrators associated with inductors
+    - c_val: Trainable weights for C components
+    (c_val[-1] is the middle capacitor)
+    - l_val: Trainable weights for L components
+    - lc_val_base: The base value of the LC components
+    (l, c = lc_val_base * lc_val)
     - lds_a: The A matrix in the state-space representation of the
     SwithcableStar.
     - t: The time point of the output
@@ -32,7 +36,9 @@ class SwitchableStarPUF(eqx.Module):
     lds_a_shape: tuple[int, int]
     gm_c: jax.Array
     gm_l: jax.Array
-    lc_val: int = 1e-9
+    c_val: jax.Array
+    l_val: jax.Array
+    lc_val_base: int = 1e-9
     pulse_amplitude: float = 1.0
     pulse_t1: float = 0.5e-9
     pulse_t2: float = 1.5e-9
@@ -66,10 +72,14 @@ class SwitchableStarPUF(eqx.Module):
                 high=1.5,
                 size=(line_len, 2),
             )
+            self.c_val = np.random.uniform(low=0.5, high=1.5, size=(line_len + 1))
+            self.l_val = np.random.uniform(low=0.5, high=1.5, size=(line_len))
 
         else:
             self.gm_c = np.ones(shape=(line_len, 2))
             self.gm_l = np.ones(shape=(line_len, 2))
+            self.c_val = np.ones(shape=(line_len + 1))
+            self.l_val = np.ones(shape=(line_len))
 
     def __call__(self, switch: jax.Array, mismatch: jax.Array, t: jax.typing.DTypeLike):
         """Compute the analog PUF response at time t.
@@ -107,7 +117,7 @@ class SwitchableStarPUF(eqx.Module):
             a_sw_mm = a_sw_mm.at[0, 1 + i * self.line_len * 2].multiply(sw_val)
 
         b_mat = jnp.zeros(shape=(lds_a.shape[0], 1))
-        b_mat = b_mat.at[0, 0].set(1 / self.lc_val)
+        b_mat = b_mat.at[0, 0].set(1 / self.lc_val_base * self.c_val[-1])
         c_mat = jnp.zeros(shape=(1, lds_a.shape[0]))
         c_mat = c_mat.at[0, 0].set(1)
 
@@ -153,12 +163,14 @@ class SwitchableStarPUF(eqx.Module):
             for j in range(sub_mat_len - 1):
                 if j % 2 == 0:
                     c_idx = j // 2
-                    a_i = a_i.at[j, j + 1].set(-self.gm_c[c_idx, 1])
-                    a_i = a_i.at[j + 1, j].set(self.gm_c[c_idx, 0])
+                    a_i = a_i.at[j, j + 1].set(-self.gm_c[c_idx, 1] / self.l_val[c_idx])
+                    a_i = a_i.at[j + 1, j].set(self.gm_c[c_idx, 0] / self.c_val[c_idx])
                 else:
                     l_idx = j // 2 + 1
-                    a_i = a_i.at[j, j + 1].set(-self.gm_l[l_idx, 1])
-                    a_i = a_i.at[j + 1, j].set(self.gm_l[l_idx, 0])
+                    a_i = a_i.at[j, j + 1].set(
+                        -self.gm_l[l_idx, 1] / self.c_val[l_idx - 1]
+                    )
+                    a_i = a_i.at[j + 1, j].set(self.gm_l[l_idx, 0] / self.l_val[l_idx])
             return a_i
 
         ai_row_mats = [ith_diag_sub_mat() for _ in range(n_branch)]
@@ -173,10 +185,10 @@ class SwitchableStarPUF(eqx.Module):
         mid_to_branch_col = jnp.zeros(shape=(sub_mat_len * n_branch, 1))
         for i in range(n_branch):
             mid_to_branch_row = mid_to_branch_row.at[0, i * sub_mat_len].set(
-                -self.gm_l[0, 1]
+                -self.gm_l[0, 1] / self.c_val[-1]
             )
             mid_to_branch_col = mid_to_branch_col.at[i * sub_mat_len, 0].set(
-                self.gm_l[0, 0]
+                self.gm_l[0, 0] / self.l_val[0]
             )
 
         A_1_to_n = jnp.vstack([mid_to_branch_row] + ai_row_mats)
@@ -186,7 +198,7 @@ class SwitchableStarPUF(eqx.Module):
         )
 
         # Scale by LC values
-        LC_mat = jnp.eye(A_mat.shape[0]) / self.lc_val
+        LC_mat = jnp.eye(A_mat.shape[0]) / self.lc_val_base
 
         lds_a = jnp.matmul(LC_mat, A_mat)
         return lds_a

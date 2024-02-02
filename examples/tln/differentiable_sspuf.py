@@ -45,7 +45,12 @@ class SwitchableStarPUF(eqx.Module):
     pulse_t3: float = 2.0e-9
 
     def __init__(
-        self, n_branch: int, line_len: int, n_order: int = 40, random: bool = False
+        self,
+        n_branch: int,
+        line_len: int,
+        n_order: int = 40,
+        random: bool = False,
+        init_vals: dict = None,
     ) -> None:
         """Initialize the SwitchableStar topology.
 
@@ -61,7 +66,12 @@ class SwitchableStarPUF(eqx.Module):
         self.lds_a_shape = (1 + n_branch * line_len * 2, 1 + n_branch * line_len * 2)
         self.n_order = n_order
 
-        if random:
+        if init_vals:
+            self.gm_c = init_vals["gm_c"]
+            self.gm_l = init_vals["gm_l"]
+            self.c_val = init_vals["c_val"]
+            self.l_val = init_vals["l_val"]
+        elif random:
             self.gm_c = np.random.uniform(
                 low=0.5,
                 high=1.5,

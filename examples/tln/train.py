@@ -15,26 +15,6 @@ from jaxtyping import Array, Float, PyTree
 
 config.update("jax_debug_nans", True)
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--learning_rate", type=float, default=5e-2)
-parser.add_argument("--n_branch", type=int, default=10)
-parser.add_argument("--line_len", type=int, default=4)
-parser.add_argument("--n_order", type=int, default=40)
-parser.add_argument("--readout_time", type=float, default=10e-9)
-parser.add_argument("--rand_init", action="store_true")
-parser.add_argument("--batch_size", type=int, default=256)
-parser.add_argument("--inst_per_branch", type=int, default=1)
-parser.add_argument("--steps", type=int, default=200)
-parser.add_argument("--print_every", type=int, default=1)
-parser.add_argument("--logistic_k", type=float, default=40)
-parser.add_argument("--wandb", action="store_true")
-args = parser.parse_args()
-
-if args.wandb:
-    wandb_run = wandb.init(
-        config=vars(args),
-    )
-
 
 def plot_single_star_rsp(model, switch, mismatch, time_points):
     """Sanity check: Plot the transient response of a single star
@@ -70,6 +50,13 @@ def diff(model, switch, mismatch, t):
 
 
 def i2o_score(model, switch, mismatch, t, quantize_fn):
+    """
+    Analog_out: raw star difference
+    digital_out: quantized star difference
+
+    E.g., [1,0,0,1,0] -> abs_diff =[1,0,1,1] (with ideal quantization)
+                      -> i2o_score = 0.25
+    """
     analog_out = jax.vmap(model)(switch, mismatch, t)
     digital_out: jax.Array = quantize_fn(analog_out).flatten()
 
@@ -141,17 +128,13 @@ def train(
     dataloader: FunctionType,
     optim: optax.GradientTransformation,
     batch_size: int,
-    inst_per_branch: int,
+    inst_per_batch: int,
     steps: int,
     print_every: int,
 ):
-    """Toy example that minimizes the difference between two stars.
-    We know that a simple solution is to make every weight 0.
-    """
-
     opt_state = optim.init(eqx.filter(model, eqx.is_array))
     n_branch, lds_a_shape = model.n_branch, model.lds_a_shape
-    loader = dataloader(batch_size, inst_per_branch, n_branch, lds_a_shape)
+    loader = dataloader(batch_size, inst_per_batch, n_branch, lds_a_shape)
 
     # Always wrap everything -- computing gradients, running the optimiser, updating
     # the model -- into a single JIT region. This ensures things run as fast as
@@ -201,82 +184,78 @@ def train(
     return model
 
 
-LEARNING_RATE = args.learning_rate
-N_BRANCH = args.n_branch
-LINE_LEN = args.line_len
-N_ORDER = args.n_order
-READOUT_TIME = args.readout_time
-RAND_INIT = args.rand_init
-BATCH_SIZE = args.batch_size
-INST_PER_BRANCH = args.inst_per_branch
-STEPS = args.steps
-PRINT_EVERY = args.print_every
-LOGISTIC_K = args.logistic_k
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--learning_rate", type=float, default=5e-2)
+    parser.add_argument("--n_branch", type=int, default=10)
+    parser.add_argument("--line_len", type=int, default=4)
+    parser.add_argument("--n_order", type=int, default=40)
+    parser.add_argument("--readout_time", type=float, default=10e-9)
+    parser.add_argument("--rand_init", action="store_true")
+    parser.add_argument("--batch_size", type=int, default=256)
+    parser.add_argument("--inst_per_batch", type=int, default=1)
+    parser.add_argument("--steps", type=int, default=200)
+    parser.add_argument("--print_every", type=int, default=1)
+    parser.add_argument("--logistic_k", type=float, default=40)
+    parser.add_argument("--wandb", action="store_true")
+    args = parser.parse_args()
 
-optim = optax.adam(LEARNING_RATE)
-rand_loader = partial(random_chls_and_mismatch, readout_time=READOUT_TIME)
-bf_loader = partial(bf_chls, readout_time=READOUT_TIME)
+    if args.wandb:
+        wandb_run = wandb.init(
+            config=vars(args),
+        )
 
-# # Sanity check, single star response is correct
-# model = SwitchableStarPUF(n_branch=N_BRANCH, line_len=LINE_LEN, n_order=N_ORDER)
-# for switches, mismatch, _ in rand_loader(BATCH_SIZE, N_BRANCH, model.lds_a_shape):
-#     plot_single_star_rsp(model, switches, mismatch, np.linspace(2e-9, 20e-9, 100))
-#     if input() != "c":
-#         exit()
+    LEARNING_RATE = args.learning_rate
+    N_BRANCH = args.n_branch
+    LINE_LEN = args.line_len
+    N_ORDER = args.n_order
+    READOUT_TIME = args.readout_time
+    RAND_INIT = args.rand_init
+    BATCH_SIZE = args.batch_size
+    INST_PER_BATCH = args.inst_per_batch
+    STEPS = args.steps
+    PRINT_EVERY = args.print_every
+    LOGISTIC_K = args.logistic_k
 
-# # Minimize the difference between two stars: easy case
-# print(model.gm_c, model.gm_l)
-# model = train(
-#     model=model,
-#     loss=diff,
-#     dataloader=rand_loader,
-#     optim=optim,
-#     batch_size=BATCH_SIZE,
-#     steps=STEPS,
-#     print_every=PRINT_EVERY,
-# )
+    optim = optax.adam(LEARNING_RATE)
+    rand_loader = partial(random_chls_and_mismatch, readout_time=READOUT_TIME)
+    bf_loader = partial(bf_chls, readout_time=READOUT_TIME)
 
+    # # Sanity check, single star response is correct
+    # model = SwitchableStarPUF(n_branch=N_BRANCH, line_len=LINE_LEN, n_order=N_ORDER)
+    # for switches, mismatch, _ in rand_loader(BATCH_SIZE, N_BRANCH, model.lds_a_shape):
+    #     plot_single_star_rsp(model, switches, mismatch, np.linspace(2e-9, 20e-9, 100))
+    #     if input() != "c":
+    #         exit()
 
-# # Minimize the difference between two stars: arger case
-# model = SwitchableStarPUF(n_branch=N_BRANCH, line_len=LINE_LEN, n_order=N_ORDER)
-# print(model.gm_c, model.gm_l)
-# model = train(
-#     model=model,
-#     loss=diff,
-#     dataloader=rand_loader,
-#     optim=optim,
-#     batch_size=BATCH_SIZE,
-#     steps=STEPS,
-#     print_every=PRINT_EVERY,
-# )
+    model = SwitchableStarPUF(
+        n_branch=N_BRANCH,
+        line_len=LINE_LEN,
+        n_order=N_ORDER,
+        random=RAND_INIT,
+    )
+    i2o_sigmoid = partial(i2o_score, quantize_fn=partial(logistic, k=LOGISTIC_K))
+    i2o_ideal = partial(i2o_score, quantize_fn=shifted_sign)
 
+    # # Sanity Check
+    # n_branch, lds_a_shape = model.n_branch, model.lds_a_shape
+    # for i, (switches, mismatch, t) in zip(
+    #     range(10), bf_chls(BATCH_SIZE, n_branch, lds_a_shape, READOUT_TIME)
+    # ):
+    #     ideal_loss = i2o_ideal(model, switches, mismatch, t)
+    #     approx_loss = i2o_sigmoid(model, switches, mismatch, t)
+    #     print(ideal_loss, approx_loss)
 
-# Bit-flipping test
-model = SwitchableStarPUF(
-    n_branch=N_BRANCH, line_len=LINE_LEN, n_order=N_ORDER, random=RAND_INIT
-)
-i2o_sigmoid = partial(i2o_score, quantize_fn=partial(logistic, k=LOGISTIC_K))
-i2o_ideal = partial(i2o_score, quantize_fn=shifted_sign)
-
-# # Sanity Check
-# n_branch, lds_a_shape = model.n_branch, model.lds_a_shape
-# for i, (switches, mismatch, t) in zip(
-#     range(10), bf_chls(BATCH_SIZE, n_branch, lds_a_shape, READOUT_TIME)
-# ):
-#     ideal_loss = i2o_ideal(model, switches, mismatch, t)
-#     approx_loss = i2o_sigmoid(model, switches, mismatch, t)
-#     print(ideal_loss, approx_loss)
-
-print(model.gm_c, model.gm_l)
-print(model.c_val, model.l_val)
-model = train(
-    model=model,
-    loss=i2o_sigmoid,
-    val_loss=i2o_ideal,
-    dataloader=bf_loader,
-    optim=optim,
-    batch_size=BATCH_SIZE,
-    inst_per_branch=INST_PER_BRANCH,
-    steps=STEPS,
-    print_every=PRINT_EVERY,
-)
+    print(model.gm_c, model.gm_l)
+    print(model.c_val, model.l_val)
+    model = train(
+        model=model,
+        loss=i2o_sigmoid,
+        val_loss=i2o_ideal,
+        dataloader=bf_loader,
+        optim=optim,
+        batch_size=BATCH_SIZE,
+        inst_per_batch=INST_PER_BATCH,
+        steps=STEPS,
+        print_every=PRINT_EVERY,
+    )

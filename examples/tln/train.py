@@ -222,7 +222,7 @@ def I2O_chls(
 def train(
     model: SwitchableStarPUF,
     loss: FunctionType,
-    val_loss: FunctionType,  # Due to approximation, use another loss function for validation
+    precise_loss: FunctionType,  # Due to approximation, use another loss function for validation
     dataloader,  # Python generator
     optim: optax.GradientTransformation,
     steps: int,
@@ -248,25 +248,28 @@ def train(
 
     @eqx.filter_jit
     def validate(model: SwitchableStarPUF, switch: Array, mismatch: Array, t: Float):
-        loss_value, _ = eqx.filter_value_and_grad(val_loss)(model, switch, mismatch, t)
+        loss_value, _ = eqx.filter_value_and_grad(precise_loss)(
+            model, switch, mismatch, t
+        )
         return loss_value
 
     prev_gmc, prev_gml = model.gm_c, model.gm_l
     for step, (switches, mismatch, t) in zip(range(steps), dataloader):
+        if (step % print_every) == 0 or (step == steps - 1):
+            train_loss_precise = validate(model, switches, mismatch, t)
         model, opt_state, train_loss = make_step(
             model, opt_state, switches, mismatch, t
         )
         if (step % print_every) == 0 or (step == steps - 1):
-            val_loss = validate(model, switches, mismatch, t)
             if args.wandb:
                 wandb_run.log(
                     {
                         "train_loss": train_loss.item(),
-                        "validation_loss": val_loss.item(),
+                        "loss_precise": train_loss_precise.item(),
                     }
                 )
             print(
-                f"{step=}, train_loss={train_loss.item()}, validation_loss={val_loss.item()}"
+                f"{step=}, train_loss={train_loss.item()}, loss_precise={train_loss_precise.item()}"
             )
             print(f"gm_c:\n{model.gm_c}")
             print(f"gm_l:\n{model.gm_l}")
@@ -288,7 +291,7 @@ if __name__ == "__main__":
     parser.add_argument("--readout_time", type=float, default=10e-9)
     parser.add_argument("--rand_init", action="store_true")
     parser.add_argument("--batch_size", type=int, default=256)
-    parser.add_argument("--chl_per_inst", type=int, default=64)
+    parser.add_argument("--chl_per_bit", type=int, default=64)
     parser.add_argument("--inst_per_batch", type=int, default=1)
     parser.add_argument("--steps", type=int, default=200)
     parser.add_argument("--print_every", type=int, default=1)
@@ -309,7 +312,7 @@ if __name__ == "__main__":
     READOUT_TIME = args.readout_time
     RAND_INIT = args.rand_init
     BATCH_SIZE = args.batch_size
-    CHL_PER_INST = args.chl_per_inst
+    CHL_PER_BIT = args.chl_per_bit
     INST_PER_BATCH = args.inst_per_batch
     STEPS = args.steps
     PRINT_EVERY = args.print_every
@@ -338,13 +341,13 @@ if __name__ == "__main__":
             BATCH_SIZE, INST_PER_BATCH, N_BRANCH, model.lds_a_shape, READOUT_TIME
         )
         train_loss = partial(bf_loss, quantize_fn=partial(logistic, k=LOGISTIC_K))
-        train_loss_ideal = partial(bf_loss, quantize_fn=step)
+        train_loss_precise = partial(bf_loss, quantize_fn=step)
     elif LOSS == "i2o":
         loader = I2O_chls(
-            INST_PER_BATCH, CHL_PER_INST, N_BRANCH, model.lds_a_shape, READOUT_TIME
+            INST_PER_BATCH, CHL_PER_BIT, N_BRANCH, model.lds_a_shape, READOUT_TIME
         )
         train_loss = partial(i2o_loss, quantize_fn=partial(logistic, k=LOGISTIC_K))
-        train_loss_ideal = partial(i2o_loss, quantize_fn=step)
+        train_loss_precise = partial(i2o_loss, quantize_fn=step)
 
     # # Sanity Check
     # n_branch, lds_a_shape = model.n_branch, model.lds_a_shape
@@ -360,7 +363,7 @@ if __name__ == "__main__":
     model = train(
         model=model,
         loss=train_loss,
-        val_loss=train_loss_ideal,
+        precise_loss=train_loss_precise,
         dataloader=loader,
         optim=optim,
         steps=STEPS,

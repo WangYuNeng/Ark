@@ -16,7 +16,7 @@ parser.add_argument("--n_order", type=int, default=40)
 parser.add_argument("--readout_time", type=float, default=10e-9)
 parser.add_argument("--rand_init", action="store_true")
 parser.add_argument("--batch_size", type=int, default=256)
-parser.add_argument("--chl_per_inst", type=int, default=64)
+parser.add_argument("--chl_per_bit", type=int, default=64)
 parser.add_argument("--inst_per_batch", type=int, default=1)
 parser.add_argument("--steps", type=int, default=200)
 parser.add_argument("--logistic_k", type=float, default=40)
@@ -30,7 +30,7 @@ N_ORDER = args.n_order
 READOUT_TIME = args.readout_time
 RAND_INIT = args.rand_init
 BATCH_SIZE = args.batch_size
-CHL_PER_INST = args.chl_per_inst
+CHL_PER_BIT = args.chl_per_bit
 INST_PER_BATCH = args.inst_per_batch
 STEPS = args.steps
 LOGISTIC_K = args.logistic_k
@@ -92,7 +92,7 @@ print(model.gm_c, model.gm_l)
 print(model.c_val, model.l_val)
 
 loader = I2O_chls(
-    INST_PER_BATCH, CHL_PER_INST, N_BRANCH, model.lds_a_shape, READOUT_TIME
+    INST_PER_BATCH, CHL_PER_BIT, N_BRANCH, model.lds_a_shape, READOUT_TIME
 )
 i2o_ideal = partial(i2o_loss, quantize_fn=step)
 jax.jit(i2o_ideal)

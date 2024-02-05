@@ -31,8 +31,8 @@ def plot_single_star_rsp(model, switch, mismatch, time_points):
     plt.close()
 
 
-def shifted_sign(x):
-    """Shifted sign function that maps x to {0, 1} for ideal PUF ADC.
+def step(x):
+    """step function that maps x to {0, 1} for ideal PUF ADC.
 
     If use this for optimization, the gradient can't pass through.
     All parameters are hardly updated.
@@ -49,19 +49,71 @@ def diff(model, switch, mismatch, t):
     return jnp.mean(jnp.abs(jax.vmap(model)(switch, mismatch, t)))
 
 
-def i2o_score(model, switch, mismatch, t, quantize_fn):
-    """
+def bf_loss(model, switch, mismatch, t, quantize_fn):
+    """Calculating Bit-flipping Test Loss.
+
+    It is a weaker version of I2O score, but easier to sample and compute.
+    (Low bf loss is necessary but insufficient for high I2O loss)
+
     Analog_out: raw star difference
     digital_out: quantized star difference
 
     E.g., [1,0,0,1,0] -> abs_diff =[1,0,1,1] (with ideal quantization)
-                      -> i2o_score = 0.25
+                      -> bf_score = 0.25
     """
     analog_out = jax.vmap(model)(switch, mismatch, t)
     digital_out: jax.Array = quantize_fn(analog_out).flatten()
 
     abs_diff = jnp.abs(digital_out[:-1] - digital_out[1:])
     return jnp.abs(jnp.mean(abs_diff) - 0.5)
+
+
+def i2o_loss(
+    model: SwitchableStarPUF,
+    switch: Array,
+    mismatch: Array,
+    t: float,
+    quantize_fn,
+):
+    """Calculating the I2O score.
+
+    Analog_out: raw star difference
+    digital_out: quantized star difference
+
+    Args:
+        model (SwitchableStarPUF): PUF model
+        switches (Array): batch of switches in the shape of
+            (inst_per_batch, chl_per_bit, 1 + n_bit, n_bit)
+        mismatch (Array): batch of mismatch samples in the shape of
+            (inst_per_batch, 2, *lds_a_shape)
+        t (float): scalar readout time same as the readout_time
+        quantize_fn : ADC quantization function
+    """
+    inst_per_batch, chl_per_bit, _, n_bit = switch.shape
+    analog_out = jax.vmap(model, in_axes=(0, 0, None))(
+        switch.reshape(-1, n_bit),
+        mismatch.repeat(chl_per_bit * (1 + n_bit), axis=0).reshape(
+            -1, 2, *model.lds_a_shape
+        ),
+        t,
+    )
+    digital_out: jax.Array = quantize_fn(analog_out).reshape(
+        inst_per_batch, chl_per_bit, 1 + n_bit
+    )
+
+    dists = jnp.abs(
+        jnp.array(
+            [
+                [
+                    jnp.mean(jnp.abs(digital_out[i, :, 0] - digital_out[i, :, j])) - 0.5
+                    for j in range(1, n_bit + 1)
+                ]
+                for i in range(inst_per_batch)
+            ]
+        )
+    )
+
+    return jnp.mean(dists)
 
 
 def random_chls_and_mismatch(batch_size, n_branch, lds_a_shape, readout_time):
@@ -77,7 +129,7 @@ def random_chls_and_mismatch(batch_size, n_branch, lds_a_shape, readout_time):
 def bf_chls(
     batch_size: int,
     inst_per_batch: int,
-    n_branch: int,
+    n_bit: int,
     lds_a_shape: tuple[int, int],
     readout_time: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -86,8 +138,8 @@ def bf_chls(
     Args:
         batch_size (int): size of the batch
         inst_per_batch (int): # of instance (mismatch)to sample per batch
-        (batch_size // inst_per_batch should an integer >> inst_per_batch)
-        n_branch (int): # of branches in the star PUF
+        (batch_size // inst_per_batch should be an integer >> inst_per_batch)
+        n_bit (int): # of bits (branches) in the star PUF
         lds_a_shape (tuple[int, int]): shape of the PUF matrix
         readout_time (float): readout time of the PUF
 
@@ -98,8 +150,8 @@ def bf_chls(
     """
     assert batch_size % inst_per_batch == 0
     while True:
-        switches = [np.random.randint(0, 2, size=(n_branch))]
-        flipped_branch = np.random.randint(0, n_branch, size=(batch_size - 1))
+        switches = [np.random.randint(0, 2, size=(n_bit))]
+        flipped_branch = np.random.randint(0, n_bit, size=(batch_size - 1))
         for i, pos in enumerate(flipped_branch):
             switches.append(switches[i].copy())
             switches[-1][pos] ^= 1
@@ -121,20 +173,62 @@ def bf_chls(
         yield switches, mismatch, t
 
 
+def I2O_chls(
+    inst_per_batch: int,
+    chl_per_bit: int,
+    n_bit: int,
+    lds_a_shape: tuple[int, int],
+    readout_time: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """I2O score training data generator.
+
+    Args:
+        chl_per_bit (int): size of the batch
+        inst_per_batch (int): # of instance (mismatch)to sample per batch
+        (batch_size // inst_per_batch * n_branch should be an integer)
+        n_bit (int): # of bits (branches) in the star PUF
+        lds_a_shape (tuple[int, int]): shape of the PUF matrix
+        readout_time (float): readout time of the PUF
+
+    Yields:
+        switches (np.ndarray): batch of switches in the shape of
+            (inst_per_batch, chl_per_bit, 1 + n_bit, n_bit)
+        mismatch (np.ndarray): batch of mismatch samples in the shape of
+            (inst_per_batch, 2, *lds_a_shape)
+        t (float): scalar readout time same as the readout_time
+    """
+    while True:
+        switches = []
+        for _ in range(inst_per_batch):
+            switch_in_inst = []
+            for _ in range(chl_per_bit):
+                base_chl = np.random.randint(0, 2, size=(n_bit))
+                flipped_chls = [base_chl]
+                for i in range(n_bit):
+                    flipped_chl = base_chl.copy()
+                    flipped_chl[i] ^= 1
+                    flipped_chls.append(flipped_chl)
+                switch_in_inst.append(flipped_chls)
+            switches.append(switch_in_inst)
+
+        switches = np.array(switches)
+        mismatch = np.random.normal(
+            size=(inst_per_batch, 2, *lds_a_shape), loc=1.0, scale=0.1
+        )
+        t = readout_time
+        yield switches, mismatch, t
+
+
 def train(
     model: SwitchableStarPUF,
     loss: FunctionType,
     val_loss: FunctionType,  # Due to approximation, use another loss function for validation
-    dataloader: FunctionType,
+    dataloader,  # Python generator
     optim: optax.GradientTransformation,
-    batch_size: int,
-    inst_per_batch: int,
     steps: int,
     print_every: int,
 ):
     opt_state = optim.init(eqx.filter(model, eqx.is_array))
-    n_branch, lds_a_shape = model.n_branch, model.lds_a_shape
-    loader = dataloader(batch_size, inst_per_batch, n_branch, lds_a_shape)
 
     # Always wrap everything -- computing gradients, running the optimiser, updating
     # the model -- into a single JIT region. This ensures things run as fast as
@@ -158,7 +252,7 @@ def train(
         return loss_value
 
     prev_gmc, prev_gml = model.gm_c, model.gm_l
-    for step, (switches, mismatch, t) in zip(range(steps), loader):
+    for step, (switches, mismatch, t) in zip(range(steps), dataloader):
         model, opt_state, train_loss = make_step(
             model, opt_state, switches, mismatch, t
         )
@@ -186,6 +280,7 @@ def train(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--loss", type=str, default="bf")
     parser.add_argument("--learning_rate", type=float, default=5e-2)
     parser.add_argument("--n_branch", type=int, default=10)
     parser.add_argument("--line_len", type=int, default=4)
@@ -193,6 +288,7 @@ if __name__ == "__main__":
     parser.add_argument("--readout_time", type=float, default=10e-9)
     parser.add_argument("--rand_init", action="store_true")
     parser.add_argument("--batch_size", type=int, default=256)
+    parser.add_argument("--chl_per_inst", type=int, default=64)
     parser.add_argument("--inst_per_batch", type=int, default=1)
     parser.add_argument("--steps", type=int, default=200)
     parser.add_argument("--print_every", type=int, default=1)
@@ -205,6 +301,7 @@ if __name__ == "__main__":
             config=vars(args),
         )
 
+    LOSS = args.loss
     LEARNING_RATE = args.learning_rate
     N_BRANCH = args.n_branch
     LINE_LEN = args.line_len
@@ -212,16 +309,18 @@ if __name__ == "__main__":
     READOUT_TIME = args.readout_time
     RAND_INIT = args.rand_init
     BATCH_SIZE = args.batch_size
+    CHL_PER_INST = args.chl_per_inst
     INST_PER_BATCH = args.inst_per_batch
     STEPS = args.steps
     PRINT_EVERY = args.print_every
     LOGISTIC_K = args.logistic_k
 
+    print("Config:", vars(args))
+
     optim = optax.adam(LEARNING_RATE)
-    rand_loader = partial(random_chls_and_mismatch, readout_time=READOUT_TIME)
-    bf_loader = partial(bf_chls, readout_time=READOUT_TIME)
 
     # # Sanity check, single star response is correct
+    # rand_loader = partial(random_chls_and_mismatch, readout_time=READOUT_TIME)
     # model = SwitchableStarPUF(n_branch=N_BRANCH, line_len=LINE_LEN, n_order=N_ORDER)
     # for switches, mismatch, _ in rand_loader(BATCH_SIZE, N_BRANCH, model.lds_a_shape):
     #     plot_single_star_rsp(model, switches, mismatch, np.linspace(2e-9, 20e-9, 100))
@@ -234,8 +333,18 @@ if __name__ == "__main__":
         n_order=N_ORDER,
         random=RAND_INIT,
     )
-    i2o_sigmoid = partial(i2o_score, quantize_fn=partial(logistic, k=LOGISTIC_K))
-    i2o_ideal = partial(i2o_score, quantize_fn=shifted_sign)
+    if LOSS == "bf":
+        loader = bf_chls(
+            BATCH_SIZE, INST_PER_BATCH, N_BRANCH, model.lds_a_shape, READOUT_TIME
+        )
+        train_loss = partial(bf_loss, quantize_fn=partial(logistic, k=LOGISTIC_K))
+        train_loss_ideal = partial(bf_loss, quantize_fn=step)
+    elif LOSS == "i2o":
+        loader = I2O_chls(
+            INST_PER_BATCH, CHL_PER_INST, N_BRANCH, model.lds_a_shape, READOUT_TIME
+        )
+        train_loss = partial(i2o_loss, quantize_fn=partial(logistic, k=LOGISTIC_K))
+        train_loss_ideal = partial(i2o_loss, quantize_fn=step)
 
     # # Sanity Check
     # n_branch, lds_a_shape = model.n_branch, model.lds_a_shape
@@ -250,12 +359,10 @@ if __name__ == "__main__":
     print(model.c_val, model.l_val)
     model = train(
         model=model,
-        loss=i2o_sigmoid,
-        val_loss=i2o_ideal,
-        dataloader=bf_loader,
+        loss=train_loss,
+        val_loss=train_loss_ideal,
+        dataloader=loader,
         optim=optim,
-        batch_size=BATCH_SIZE,
-        inst_per_batch=INST_PER_BATCH,
         steps=STEPS,
         print_every=PRINT_EVERY,
     )

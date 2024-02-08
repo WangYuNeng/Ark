@@ -297,12 +297,19 @@ if __name__ == "__main__":
     parser.add_argument("--print_every", type=int, default=1)
     parser.add_argument("--logistic_k", type=float, default=40)
     parser.add_argument("--wandb", action="store_true")
+    parser.add_argument("--tag", type=str, default=None)
     args = parser.parse_args()
 
     if args.wandb:
-        wandb_run = wandb.init(
-            config=vars(args),
-        )
+        if args.tag:
+            wandb_run = wandb.init(
+                config=vars(args),
+                tags=[args.tag],
+            )
+        else:
+            wandb_run = wandb.init(
+                config=vars(args),
+            )
 
     LOSS = args.loss
     LEARNING_RATE = args.learning_rate

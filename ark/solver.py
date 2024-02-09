@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Any
 
 import numpy as np
 from pysmt.shortcuts import And, Equals, Int, Plus, Symbol, get_model
@@ -12,7 +13,7 @@ class Solver(ABC):
         pass
 
     @abstractmethod
-    def solve_validation_matrix(self, matrix, constraints):
+    def solve_validation_matrix(self, matrix, constraints) -> Any:
         pass
 
 

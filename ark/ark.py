@@ -1,6 +1,6 @@
 """Wrapper class for the ARK framework"""
 from types import FunctionType
-from typing import Optional
+from typing import Optional, Iterable
 
 from ark.cdg.cdg import CDG, CDGExecutionData, CDGNode
 
@@ -23,8 +23,8 @@ class Ark:
 
     def __init__(
         self,
-        validator: Optional[ArkValidator] = ArkValidator(solver=SMTSolver()),
-        compiler: Optional[ArkCompiler] = ArkCompiler(rewrite=RewriteGen()),
+        validator: ArkValidator = ArkValidator(solver=SMTSolver()),
+        compiler: ArkCompiler = ArkCompiler(rewrite=RewriteGen()),
         cdg_spec: Optional[CDGSpec] = None,
     ) -> None:
         """Initialize the ARK framework
@@ -82,12 +82,12 @@ class Ark:
         self,
         cdg: Optional[CDG] = None,
         cdg_execution_data: Optional[CDGExecutionData] = None,
-        time_eval: list[float] = None,
+        time_eval: list[float] | None = None,
         init_seed: Optional[int] = None,
         sim_seed: int = 0,
         store_inplace: bool = True,
         **kwargs,
-    ) -> None | dict[CDGNode, list[list[float]]]:
+    ) -> None | dict[str, list[list[float]]]:
         """Execute the compiled program with the given CDG or CDG data
 
         The traces of the stateful nodes are stored CDGNodes if store_inplace is True.
@@ -104,7 +104,7 @@ class Ark:
             store_inplace (bool, optional): Store the execution results in cdg.
             Defaults to True.
         Returns:
-            None | dict[CDGNode, list[list[float]]]: The mapping from stateful nodes
+            None | dict[CDGNode, list[list[float]] | None]: The mapping from stateful nodes
             to execution traces if store_inplace is False.
         """
         assert self._prog is not None, "Program is not compiled."
@@ -114,11 +114,15 @@ class Ark:
             if cdg_execution_data:
                 Warning("CDG provided. CDG data is ignored.")
             cdg_execution_data = cdg.execution_data(seed=init_seed)
+
+        assert cdg_execution_data is not None
         node_to_init_val, switch_to_val, element_to_attr = cdg_execution_data
 
         init_states = self._map_init_state(node_to_init_val)
         switch_vals = self._map_switch_val(switch_to_val)
         attr_vals = self._map_attr_val(element_to_attr)
+
+        assert time_eval is not None
         sol = self._prog(
             time_range=[time_eval[0], time_eval[-1]],
             init_states=init_states,
@@ -133,6 +137,7 @@ class Ark:
                 raise ValueError("CDG must be provided to store the results in-place.")
             self._store_exec_results(cdg, sol)
         else:
+            assert self._node_mapping is not None
             return {
                 node: [
                     sol.y[self._node_mapping[node] + order]

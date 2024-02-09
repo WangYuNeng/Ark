@@ -1,11 +1,8 @@
-print('Starting python imports')
-import functools
-import re
 from dataclasses import dataclass
+from functools import wraps, partial
 from typing import Callable, Self
 from warnings import warn
 
-print('Starting loading libraries')
 import numpy as np
 import diffrax as dr
 import equinox as eqx
@@ -15,22 +12,20 @@ import jax.random as jrandom
 import pint
 import sympy as sp
 
-print('Finished loading libraries')
-
 from ark.cdg.cdg import CDG
-print('Loaded CDG')
+
 from ark.compiler import ArkCompiler
-print('Loaded ArkCompiler')
+
 from ark.rewrite import SympyRewriteGen
-print('Loaded SympyRewriteGen')
+
 from ark.simulate.sample_mismatch import get_attr_spec
-print('Loaded get_attr_spec')
+
 from ark.specification.attribute_def import AttrDef
-print('Loaded AttrDef')
+
 from ark.specification.rule_keyword import sympy_function
-print('Loaded sympy_function')
+
 from ark.specification.specification import CDGSpec
-print('Loaded CDGSpec')
+
 
 units = pint.get_application_registry()
 
@@ -54,26 +49,112 @@ def _make_symbols_positive(eq: sp.Eq) -> sp.Eq:
     return eq.subs(to_replace)
 
 
-def augment_with_error(f: callable, constant_error_rates: jax.Array) -> callable:
+class AugmentedState(eqx.Module):
+    y: jax.Array
+    y_error: jax.Array
+    theta_error: jax.Array
+
+    def __init__(self, y, y_error, theta_error):
+        self.y = y
+        self.y_error = y_error
+        self.theta_error = theta_error
+
+    def __iter__(self):
+        return iter((self.y, self.y_error, self.theta_error))
+
+
+def augment_with_error(
+    *,
+    f: callable,
+    initial_state: jax.Array,
+    num_parameters: int,
+    constant_error_rates: jax.Array,
+) -> callable:
     """
     Construct a new dy/dt that also captures the propagation of error information.
     """
 
-    @functools.wraps(f)
-    def new_f(t, y_aug, args) -> jax.Array:
-        y, errors = jnp.split(y_aug, [y_aug.shape[0] // 2])
+    @wraps(f)
+    def new_f(t, y_aug: AugmentedState, args) -> AugmentedState:
+        n_theta = len(args)
+        y, _y_error_val, theta_error_val = y_aug
 
-        def f_of_y(y):
+        # Previous value for dy/dtheta
+        z = theta_error_val  # (transients, parameters)
+
+        # y, error_val = jnp.split(y_aug, [y_aug.shape[0] // 2])
+
+        # args = theta
+        def f_of_y(y, t, args):
             return f(t, y, args)
 
-        _primals, tangents = eqx.filter_jvp(fn=f_of_y, primals=(y,), tangents=(errors,))
-        augmented_value = tangents + constant_error_rates
+        def f_of_args(args, t, y):
+            return f(t, y, args)
+        
+
+        partial_theta_f = jax.jacobian(f_of_args, argnums=0)(args, t, y)
+        partial_y_f = jax.vmap(lambda z_param_j: eqx.filter_jvp(f_of_y, (y,), (z_param_j,), t=t, args=args), in_axes=1, out_axes=1)(z)[1]
+        print(partial_theta_f, partial_y_f)
+
+        dz_dt = partial_y_f + partial_theta_f
+
+
+        # Compute tr(J @ Sigma) which turns out to be just tr(J)
+        def compute_diag_y(x, inp, fn, i, t, args):
+            return fn(inp.at[i].set(x), t, args)[i]
+
+        def compute_diag_theta(x, args, inp, fn, i, t):
+            return fn(args.at[i].set(x), t, inp)
+
+        @partial(jax.vmap, in_axes=(None, None, 0, None, None))
+        def compute_grad_diag_y(inp, fn, i, t, args):
+            return eqx.filter_grad(compute_diag_y)(inp[i], inp, fn, i, t, args)
+
+        # @partial(jax.vmap, in_axes=(None, None, 0, None, None))
+        # def compute_grad_diag_theta(inp, fn, i, t, args):
+        #     return eqx.filter_grad(compute_diag_theta)
+
+        idcs = jnp.arange(y.shape[0])
+        # print(idcs.shape)
+        # Trace of the Jacobian multiplied with the covariance matrix
+        y_additional_error = jnp.sum(compute_grad_diag_y(y, f_of_y, idcs, t, args))
+
+        # @eqx.filter_vmap(in_axes=(1,), out_axes=1)
+        # def theta_tangents(theta_error_col):
+        #     print(y.shape, theta_error_col.shape)
+        #     return eqx.filter_jvp(f_of_y, primals=(y,), tangents=(theta_error_col,), t=t, args=args)[1]
+
+        # _theta_primals, theta_tangents = eqx.filter_jvp(
+        #     f_of_y, primals=(y,), tangents=(theta_error_val,), t=t, args=args
+        # )
+        # print(theta_error_val.shape)
+        # theta_additional_error = theta_tangents(theta_error_val)
+        # jax.debug.print('theta_additional_error={theta_additional_error}', theta_additional_error=theta_additional_error)
+
+        # y_error_val = y_error_val + y_additional_error
+        # theta_error_val = theta_error_val + theta_additional_error
+
         f_value = f(t, y, args)
 
         # Stitch y and errors back together
-        return jnp.concatenate((f_value, augmented_value), axis=0)
+        # print(theta_additional_error)
+        print('ode augmented', f_value.shape, y_additional_error.shape, dz_dt.shape)
+        diff_state = AugmentedState(
+            y=f_value,  # (num_transient, )
+            y_error=y_additional_error,  # (num_transient, )
+            theta_error=dz_dt,  # (num_parameters, )
+        )
+        return diff_state
 
-    return new_f
+    num_transient = initial_state.shape[0]
+    augmented_initial_state = AugmentedState(
+        y=initial_state,
+        y_error=jnp.zeros_like(initial_state),
+        theta_error=jnp.zeros(shape=(num_transient, num_parameters,)),
+    )
+    print('initial augmented: ', augmented_initial_state.y.shape, augmented_initial_state.y_error.shape, augmented_initial_state.theta_error.shape)
+
+    return new_f, augmented_initial_state
 
 
 @sympy_function
@@ -250,7 +331,7 @@ class DynamicalSystem:
     def f(self):
         transient_symbols = self.transient_symbols()
         parameter_symbols = self.parameter_symbols()
-        time_symbol = self.time_symbol()
+        (time_symbol, _) = self.time_symbol()
 
         all_symbols = (
             [time_symbol]
@@ -282,7 +363,7 @@ class DynamicalSystem:
     ) -> dr.Solution:
         jax.debug.print("Starting system solve...")
 
-        time_scale = self.symbol_types[self.time_symbol()].time_scale
+        time_scale = self.time_symbol()[1].time_scale
         # f(t, y, args)
         f = self.f
 
@@ -316,27 +397,26 @@ class DynamicalSystem:
         )
         return system_solution
 
-    @eqx.filter_jit
     def solve_system_with_sensitivity(
         self, initial_values: jax.Array, parameter_values: jax.Array, saveat: dr.SaveAt
     ) -> dr.Solution:
         jax.debug.print("Starting system solve with sensitivity...")
+
         # f = dy/dt for the dynamical system
         f = self.f
 
         # Augment with sensitivity information
         SENSITIVITY_SCALE = 1.0
-        f_aug = augment_with_error(
+        f_aug, augmented_initial_values = augment_with_error(
             f=f,
+            initial_state=initial_values,
+            num_parameters=parameter_values.shape[0],
             constant_error_rates=jnp.full_like(
                 initial_values, fill_value=SENSITIVITY_SCALE
             ),
         )
-        augmented_initial_values = jnp.concatenate(
-            (initial_values, jnp.zeros_like(initial_values)), axis=0
-        )
 
-        time_scale = self.symbol_types[self.time_symbol()].time_scale
+        time_scale = self.time_symbol()[1].time_scale
 
         max_steps = 1_000
         t1 = 75e-9 / time_scale
@@ -382,6 +462,10 @@ class DynamicalSystem:
         new_diffeqs = [fn(eq) for eq in self.diffeqs]
         return DynamicalSystem(new_diffeqs, symbol_types=self.symbol_types)
 
+    def map_rhs(self, fn: Callable[[sp.Expr], sp.Expr]) -> Self:
+        new_diffeqs = [sp.Eq(eq.lhs, fn(eq.rhs)) for eq in self.diffeqs]
+        return DynamicalSystem(new_diffeqs, symbol_types=self.symbol_types)
+
     def transient_symbols(self) -> dict[sp.Symbol, SymbolType.Transient]:
         return {
             symbol: type
@@ -396,9 +480,9 @@ class DynamicalSystem:
             if isinstance(type, SymbolType.Parameter)
         }
 
-    def time_symbol(self) -> sp.Symbol:
+    def time_symbol(self) -> tuple[sp.Symbol, SymbolType.Time]:
         return next(
-            symbol
+            (symbol, type)
             for symbol, type in self.symbol_types.items()
             if isinstance(type, SymbolType.Time)
         )
@@ -424,7 +508,7 @@ class DynamicalSystem:
         # Time rescaling
         # self.symbol_types[self.time_symbol()]
         k = sp.symbols("k", positive=True)
-        t = self.time_symbol()
+        (t, _) = self.time_symbol()
 
         def fix_equation(equation):
             rhs = equation.rhs
@@ -438,7 +522,9 @@ class DynamicalSystem:
                 ]
                 return sp.Piecewise(*new_args)
 
-            rhs = (rhs.replace(sp.Piecewise, fix_piecewise_ts) * time_scale_factor).factor()
+            rhs = (
+                rhs.replace(sp.Piecewise, fix_piecewise_ts) * time_scale_factor
+            ).factor()
             equation = equation.__class__(lhs=equation.lhs, rhs=rhs)
             equation = equation.subs(k, time_scale_factor)
             rhs = equation.rhs.factor()
@@ -451,7 +537,16 @@ class DynamicalSystem:
         return set().union(*[eq.free_symbols for eq in self.diffeqs])
 
 
+
 class CircuitSystem(eqx.Module):
+    """
+    Circuit system with parameter values that can be sampled from.
+
+    Running this multicore on CPU:
+    The input dimension to be parallelized over must be sharded in the appropriate dimension (this is also true for multi-GPU).
+    Also remember to set the XLA compile flags correctly (which is done by ark.simulate.utils.jax_settings when specifying the device).
+    """
+
     dynamical_system: DynamicalSystem = eqx.field(static=True)
     "Dynamical system for simulation and parameter metadata"
 
@@ -472,9 +567,10 @@ class CircuitSystem(eqx.Module):
             min_val = valid_range.min if valid_range.min is not None else -jnp.inf
             max_val = valid_range.max if valid_range.max is not None else jnp.inf
             return min_val, max_val
+
         min_max = [get_min_max(v.variability) for k, v in parameter_symbols.items()]
         clamp_array = np.array(min_max).T
-        print(f'{clamp_array.shape=}')
+        print(f"{clamp_array.shape=}")
         print(clamp_array)
 
         new_state = jnp.clip(state, clamp_array[0], clamp_array[1])

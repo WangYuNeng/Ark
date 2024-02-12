@@ -1,6 +1,7 @@
 import argparse
 from functools import partial
 from types import FunctionType
+from typing import Generator
 
 import equinox as eqx
 import jax
@@ -9,7 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import optax
 import wandb
-from differentiable_sspuf import SwitchableStarPUF
+from differentiable_sspuf import SSPUF_MatrixExp, SwitchableStarPUF
 from jax import config
 from jaxtyping import Array, Float, PyTree
 
@@ -132,7 +133,7 @@ def bf_chls(
     n_bit: int,
     lds_a_shape: tuple[int, int],
     readout_time: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> Generator[tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """Bit-flipping test training data generator.
 
     Args:
@@ -179,7 +180,7 @@ def I2O_chls(
     n_bit: int,
     lds_a_shape: tuple[int, int],
     readout_time: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> Generator[tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """I2O score training data generator.
 
     Args:
@@ -283,7 +284,10 @@ def train(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--loss", type=str, default="bf")
+    parser.add_argument(
+        "--model", type=str, required=True, choices=["MatrixExp", "ODE"]
+    )
+    parser.add_argument("--loss", type=str, default="bf", choices=["bf", "i2o"])
     parser.add_argument("--learning_rate", type=float, default=5e-2)
     parser.add_argument("--n_branch", type=int, default=10)
     parser.add_argument("--line_len", type=int, default=4)
@@ -311,6 +315,7 @@ if __name__ == "__main__":
                 config=vars(args),
             )
 
+    MODEL = args.model
     LOSS = args.loss
     LEARNING_RATE = args.learning_rate
     N_BRANCH = args.n_branch
@@ -337,24 +342,30 @@ if __name__ == "__main__":
     #     if input() != "c":
     #         exit()
 
-    model = SwitchableStarPUF(
-        n_branch=N_BRANCH,
-        line_len=LINE_LEN,
-        n_order=N_ORDER,
-        random=RAND_INIT,
-    )
-    if LOSS == "bf":
-        loader = bf_chls(
-            BATCH_SIZE, INST_PER_BATCH, N_BRANCH, model.lds_a_shape, READOUT_TIME
+    if MODEL == "MatrixExp":
+        model = SSPUF_MatrixExp(
+            n_branch=N_BRANCH,
+            line_len=LINE_LEN,
+            n_order=N_ORDER,
+            random=RAND_INIT,
         )
-        train_loss = partial(bf_loss, quantize_fn=partial(logistic, k=LOGISTIC_K))
-        train_loss_precise = partial(bf_loss, quantize_fn=step)
-    elif LOSS == "i2o":
-        loader = I2O_chls(
-            INST_PER_BATCH, CHL_PER_BIT, N_BRANCH, model.lds_a_shape, READOUT_TIME
-        )
-        train_loss = partial(i2o_loss, quantize_fn=partial(logistic, k=LOGISTIC_K))
-        train_loss_precise = partial(i2o_loss, quantize_fn=step)
+        if LOSS == "bf":
+            loader = bf_chls(
+                BATCH_SIZE, INST_PER_BATCH, N_BRANCH, model.lds_a_shape, READOUT_TIME
+            )
+            train_loss = partial(bf_loss, quantize_fn=partial(logistic, k=LOGISTIC_K))
+            train_loss_precise = partial(bf_loss, quantize_fn=step)
+        elif LOSS == "i2o":
+            loader = I2O_chls(
+                INST_PER_BATCH, CHL_PER_BIT, N_BRANCH, model.lds_a_shape, READOUT_TIME
+            )
+            train_loss = partial(i2o_loss, quantize_fn=partial(logistic, k=LOGISTIC_K))
+            train_loss_precise = partial(i2o_loss, quantize_fn=step)
+
+    elif MODEL == "ODE":
+        pass
+    else:
+        raise ValueError("Unknown model")
 
     # # Sanity Check
     # n_branch, lds_a_shape = model.n_branch, model.lds_a_shape

@@ -2,12 +2,20 @@
 Model the SSPUF and Bit-flipping test as a differentiable program.
 """
 
+from functools import partial
+from typing import Callable
 
+import diffrax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import config
+from puf import create_switchable_star_cdg
+from spec import mm_tln_spec
+
+from ark.cdg.cdg import CDG
+from ark.compiler import ArkCompiler
 
 config.update("jax_debug_nans", True)
 
@@ -17,7 +25,6 @@ class SwitchableStarPUF(eqx.Module):
 
     - n_branch: # of branches to switch
     - line_len: # of LC section in each branch
-    - n_order: # of order to approximate the matrix exponential
     - gm_c: Trainable Gm of integrators associated with capacitors
     - gm_l: Trainable Gm of integrators associated with inductors
     - c_val: Trainable weights for C components
@@ -25,15 +32,11 @@ class SwitchableStarPUF(eqx.Module):
     - l_val: Trainable weights for L components
     - lc_val_base: The base value of the LC components
     (l, c = lc_val_base * lc_val)
-    - lds_a: The A matrix in the state-space representation of the
-    SwithcableStar.
     - t: The time point of the output
     """
 
     n_branch: int
     line_len: int
-    n_order: int
-    lds_a_shape: tuple[int, int]
     gm_c: jax.Array
     gm_l: jax.Array
     c_val: jax.Array
@@ -48,7 +51,6 @@ class SwitchableStarPUF(eqx.Module):
         self,
         n_branch: int,
         line_len: int,
-        n_order: int = 40,
         random: bool = False,
         init_vals: dict = None,
     ) -> None:
@@ -63,8 +65,6 @@ class SwitchableStarPUF(eqx.Module):
             Defaults to False, initializing with gm_c=gm_l=1.0, t=20e-9.
         """
         self.n_branch, self.line_len = n_branch, line_len
-        self.lds_a_shape = (1 + n_branch * line_len * 2, 1 + n_branch * line_len * 2)
-        self.n_order = n_order
 
         if init_vals:
             self.gm_c = init_vals["gm_c"]
@@ -100,6 +100,67 @@ class SwitchableStarPUF(eqx.Module):
             switch (jax.Array): An array of {0,1} value denoting whether the branches
             are ON or OFF.
             mismatch (jax.Array): Two arrays of random value to model the mismatch.
+            t (jax.typing.DTypeLike): The time point of the output.
+
+        Returns:
+            jax.typing.DTypeLike: The output of the SwitchableStar at time t.
+        """
+        raise NotImplementedError
+
+
+class SSPUF_MatrixExp(SwitchableStarPUF):
+    """SwitchableStar PUF in transmission lines.
+
+    - n_branch: # of branches to switch
+    - line_len: # of LC section in each branch
+    - n_order: # of order to approximate the matrix exponential
+    - gm_c: Trainable Gm of integrators associated with capacitors
+    - gm_l: Trainable Gm of integrators associated with inductors
+    - c_val: Trainable weights for C components
+    (c_val[-1] is the middle capacitor)
+    - l_val: Trainable weights for L components
+    - lc_val_base: The base value of the LC components
+    (l, c = lc_val_base * lc_val)
+    - lds_a: The A matrix in the state-space representation of the
+    SwithcableStar.
+    - t: The time point of the output
+    """
+
+    n_order: int
+    lds_a_shape: tuple[int, int]
+
+    def __init__(
+        self,
+        n_branch: int,
+        line_len: int,
+        n_order: int = 40,
+        random: bool = False,
+        init_vals: dict = None,
+    ) -> None:
+        """Initialize the SwitchableStar topology.
+
+        Args:
+            n_branch (int): # of branches to switch.
+            line_len (int): # of LC section in each branch.
+            n_order (int, optional): # of order to approximate the matrix exponential.
+            Defaults to 40.
+            random (bool, optional): Randomize the initial state.
+            Defaults to False, initializing with gm_c=gm_l=1.0, t=20e-9.
+        """
+        super().__init__(n_branch, line_len, random, init_vals)
+        self.lds_a_shape = (1 + n_branch * line_len * 2, 1 + n_branch * line_len * 2)
+        self.n_order = n_order
+
+    def __call__(self, switch: jax.Array, mismatch: jax.Array, t: jax.typing.DTypeLike):
+        """Compute the analog PUF response at time t.
+
+        The response is the difference between two stars under two mismatch samples.
+
+        Args:
+            switch (jax.Array): An array of {0,1} value denoting whether the branches
+            are ON or OFF.
+            mismatch (jax.Array): Two arrays of random value to model the mismatch.
+            t (jax.typing.DTypeLike): The time point of the output.
 
         Returns:
             jax.typing.DTypeLike: The output of the SwitchableStar at time t.
@@ -239,3 +300,243 @@ class SwitchableStarPUF(eqx.Module):
             integral_exp_mat += at_i_over_factorial_i
             integral_exp_mat_t += at_i_over_factorial_i * tau * (i + 1) / (i + 2)
         return jnp.stack([integral_exp_mat, integral_exp_mat_t])
+
+
+compiler = ArkCompiler()
+InpI = mm_tln_spec.node_type("InpI")
+MmV = mm_tln_spec.node_type("MmV")
+MmI = mm_tln_spec.node_type("MmI")
+MmE = mm_tln_spec.edge_type("MmE")
+IdealE = mm_tln_spec.edge_type("IdealE")
+
+
+def pulse_jax(
+    t, amplitude=1, delay=0, rise_time=5e-9, fall_time=5e-9, pulse_width=10e-9
+):
+    """Trapezoidal pulse function that is compatible with JAX"""
+    t_offset = t - delay
+    return jnp.where(
+        t_offset < rise_time,
+        amplitude * t_offset / rise_time,
+        np.where(
+            t_offset < pulse_width + rise_time,
+            amplitude,
+            np.where(
+                t_offset < pulse_width + rise_time + fall_time,
+                amplitude * (1 - (t_offset - pulse_width - rise_time) / fall_time),
+                0,
+            ),
+        ),
+    )
+
+
+class SSPUF_ODE(SwitchableStarPUF):
+    """SwitchableStar PUF in transmission lines implemented with ODEs.
+
+    - n_branch: # of branches to switch
+    - line_len: # of LC section in each branch
+    - n_order: # of order to approximate the matrix exponential
+    - gm_c: Trainable Gm of integrators associated with capacitors
+    - gm_l: Trainable Gm of integrators associated with inductors
+    - c_val: Trainable weights for C components
+    (c_val[-1] is the middle capacitor)
+    - l_val: Trainable weights for L components
+    - lc_val_base: The base value of the LC components
+    (l, c = lc_val_base * lc_val)
+    - lds_a: The A matrix in the state-space representation of the
+    SwithcableStar.
+    - t: The time point of the output
+
+    - ode_fn: The ODE form of the SwitchableStarPUF
+    - middle_c_mapping: The mapping of the middle capacitors in the CDG (2)
+    - switch_args_mapping: The mapping of the switch arguments in the CDG (2, n_branch)
+    - c_args_mapping: The mapping of the C components in the CDG (line_len, 2, n_branch)
+    - l_args_mapping: The mapping of the L components in the CDG (line_len, 2, n_branch)
+    - gmc_args_mapping: The mapping of the Gm of C components in the CDG
+    (line_len, 2, 2, n_branch)
+    - gml_args_mapping: The mapping of the Gm of L components in the CDG
+    (line_len, 2, 2, n_branch)
+    - n_state: The # of state variables in the ODE
+    - n_num_attrs: The # of numerical attributes in the CDG
+    - read_out_idx: The index of the middle capacitors in the ODE state variables
+    """
+
+    ode_fn: Callable
+    middle_c_mapping: np.ndarray
+    switch_args_mapping: np.ndarray
+    c_args_mapping: np.ndarray
+    l_args_mapping: np.ndarray
+    gmc_args_mapping: np.ndarray
+    gml_args_mapping: np.ndarray
+    n_state: int
+    n_num_attrs: int
+    read_out_idx: tuple[int, int]
+
+    def __init__(
+        self,
+        n_branch: int,
+        line_len: int,
+        random: bool = False,
+        init_vals: dict = None,
+    ) -> None:
+        """Initialize the SwitchableStar topology.
+
+        Args:
+            n_branch (int): # of branches to switch.
+            line_len (int): # of LC section in each branch.
+            n_order (int, optional): # of order to approximate the matrix exponential.
+            Defaults to 40.
+            random (bool, optional): Randomize the initial state.
+            Defaults to False, initializing with gm_c=gm_l=1.0, t=20e-9.
+        """
+        super().__init__(n_branch, line_len, random, init_vals)
+        self._create_and_compile_cdg()
+
+    def __call__(self, switch: jax.Array, mismatch: jax.Array, t: jax.typing.DTypeLike):
+        """Compute the analog PUF response at time t.
+
+        The response is the difference between two stars under two mismatch samples.
+
+        Args:
+            switch (jax.Array): An array of {0,1} value denoting whether the branches
+            are ON or OFF.
+            mismatch (jax.Array): Two arrays of random value to model the mismatch.
+
+        Returns:
+            jax.typing.DTypeLike: The output of the SwitchableStar at time t.
+        """
+        args = jnp.zeros(self.n_num_attrs)
+
+        for star_idx in range(2):
+            # Set the middle capacitance
+            args = args.at[self.middle_c_mapping[star_idx]].set(
+                self.lc_val_base * self.c_val[-1]
+            )
+            for br_idx in range(self.n_branch):
+                # Connect/Disconnect the branches by Turning ON/OFF the switches
+                args = args.at[self.switch_args_mapping[star_idx, br_idx]].set(
+                    switch[br_idx]
+                )
+
+                for lc_idx in range(self.line_len):
+                    pass
+
+        solution = diffrax.diffeqsolve(
+            diffrax.ODETerm(self.ode_fn),
+            diffrax.Tsit5(),
+            t0=0,
+            t1=t,
+            dt0=t,
+            y0=jnp.zeros(self.n_state),
+            stepsize_controller=diffrax.PIDController(rtol=1e-3, atol=1e-5),
+            saveat=diffrax.SaveAt(ts=t),
+            args=0,
+        )
+        return solution.ys[self.read_out_idx[0]] - solution.ys[self.read_out_idx[1]]
+
+    def _create_and_compile_cdg(self) -> CDG:
+        puf, middle_caps, switch_pairs, branch_pairs = create_switchable_star_cdg(
+            n_bits=self.n_branch,
+            line_len=self.line_len,
+            v_nt=MmV,
+            i_nt=MmI,
+            et=MmE,
+            self_et=IdealE,
+            inp_nt=InpI,
+        )
+
+        (
+            ode_fn,
+            node_mapping,
+            switch_mapping,
+            num_attr_mapping,
+            fn_attr_mapping,
+        ) = compiler.compile_odeterm(cdg=puf, cdg_spec=mm_tln_spec)
+
+        pulse_input = partial(
+            pulse_jax,
+            amplitude=1,
+            delay=0,
+            rise_time=self.pulse_t1,
+            fall_time=self.pulse_t3 - self.pulse_t2,
+            pulse_width=self.pulse_t2 - self.pulse_t1,
+        )
+        self.ode_fn = partial(ode_fn, fargs=[pulse_input, pulse_input])
+
+        # Create the mapping for the arguments
+        # l,c nominal params (line_len) maps to each branch on 2 stars
+        # gm nominal params on forward and backward direction (line_len, 2)
+        # maps to each branch on 2 stars
+        c_args_mapping = np.zeros((self.line_len, 2, self.n_branch), dtype=int)
+        l_args_mapping = np.zeros((self.line_len, 2, self.n_branch), dtype=int)
+        gmc_args_mapping = np.zeros((self.line_len, 2, 2, self.n_branch), dtype=int)
+        gml_args_mapping = np.zeros((self.line_len, 2, 2, self.n_branch), dtype=int)
+
+        self.middle_c_mapping = np.array(
+            [num_attr_mapping[f"{cap.name}"]["c"] for cap in middle_caps]
+        )
+        self.switch_args_mapping = np.array(
+            [[switch_mapping[sw.name] for sw in switches] for switches in switch_pairs]
+        )
+        gml_args_mapping[0] = (
+            jnp.array(
+                [
+                    [
+                        [
+                            num_attr_mapping[f"{sw.name}"]["wt"],
+                            num_attr_mapping[f"{sw.name}"]["ws"],
+                        ]
+                        for sw in switches
+                    ]
+                    for switches in switch_pairs
+                ]
+            )
+            .swapaxes(0, -1)
+            .swapaxes(-1, -2)
+        )
+
+        for star_idx, star_branches in enumerate(branch_pairs):
+            for branch_idx, branch_item in enumerate(star_branches):
+                _, vnodes, inodes, edges = branch_item
+                c_args_mapping[:, star_idx, branch_idx] = np.array(
+                    [num_attr_mapping[f"{cap.name}"]["c"] for cap in vnodes]
+                )
+                l_args_mapping[:, star_idx, branch_idx] = np.array(
+                    [num_attr_mapping[f"{ind.name}"]["l"] for ind in inodes]
+                )
+                gmc_args_mapping[:, :, star_idx, branch_idx] = np.array(
+                    [
+                        [
+                            num_attr_mapping[f"{edge.name}"]["wt"],
+                            num_attr_mapping[f"{edge.name}"]["ws"],
+                        ]
+                        for edge in edges[::2]
+                    ]
+                )
+                gml_args_mapping[1:, :, star_idx, branch_idx] = np.array(
+                    [
+                        [
+                            num_attr_mapping[f"{edge.name}"]["wt"],
+                            num_attr_mapping[f"{edge.name}"]["ws"],
+                        ]
+                        for edge in edges[1::2]
+                    ]
+                )
+
+        self.c_args_mapping = c_args_mapping
+        self.l_args_mapping = l_args_mapping
+        self.gmc_args_mapping = gmc_args_mapping
+        self.gml_args_mapping = gml_args_mapping
+        self.n_state = len(node_mapping)
+        self.n_num_attrs = sum([len(vals) for vals in num_attr_mapping.values()]) + len(
+            switch_mapping
+        )
+        self.read_out_idx = [node_mapping[f"{cap.name}"] for cap in middle_caps]
+
+        return
+
+
+if __name__ == "__main__":
+    n_branch = 4
+    line_len = 2
+    sspuf_neural_ode = SSPUF_NeuralODE(n_branch, line_len)

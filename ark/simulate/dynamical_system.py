@@ -25,34 +25,20 @@ from ark.specification.attribute_def import AttrDef
 from ark.specification.rule_keyword import sympy_function
 
 from ark.specification.specification import CDGSpec
+from ark.simulate._equation_transforms import collapse_derivative, make_symbols_positive
 
 
 units = pint.get_application_registry()
 
-
-def _collapse_derivative(pair: tuple[sp.Symbol, sp.Expr]) -> sp.Eq:
-    """Turns tuple of derivative + sympy expression into a single sympy equation."""
-    if (var_name := pair[0].name).startswith("ddt_"):
-        symbol = sp.symbols(var_name[4:])
-        equation = sp.Eq(sp.Derivative(symbol, sp.symbols("time")), pair[1])
-        return equation.subs(sp.symbols("time"), sp.symbols("t"))
-    else:
-        raise ValueError(f"Not a derivative expression: {pair}")
-
-
-def _make_symbols_positive(eq: sp.Eq) -> sp.Eq:
-    """Turn all sympy symbols positive"""
-    to_replace = {}
-    for symbol in eq.free_symbols:
-        if symbol.is_Symbol:
-            to_replace[symbol] = sp.Symbol(name=symbol.name, positive=True)
-    return eq.subs(to_replace)
-
-
 class AugmentedState(eqx.Module):
     y: jax.Array
+    "Main state variable for system, contains the transient variables. Shape (num_transient, )"
+
     y_error: jax.Array
+    "A single term (scalar) for the sensitivity of the transient variables at the current time with respect to equal noise in all transient parameters."
+
     theta_error: jax.Array
+    "A matrix of sensitivities of the transient variables at the current time with respect to all parameters. Shape (num_transient, num_parameters)"
 
     def __init__(self, y, y_error, theta_error):
         self.y = y
@@ -76,8 +62,14 @@ def augment_with_error(
 
     @wraps(f)
     def new_f(t, y_aug: AugmentedState, args) -> AugmentedState:
+        # Cast to jnp.bfloat16 for better performance
+        t = jnp.array(t, dtype=jnp.bfloat16)
         n_theta = len(args)
+
         y, _y_error_val, theta_error_val = y_aug
+        y = jnp.array(y, dtype=jnp.bfloat16)
+        theta_error_val = jnp.array(theta_error_val, dtype=jnp.bfloat16)
+        args = jnp.array(args, dtype=jnp.bfloat16)
 
         # Previous value for dy/dtheta
         z = theta_error_val  # (transients, parameters)
@@ -92,67 +84,49 @@ def augment_with_error(
             return f(t, y, args)
         
 
+        # ∂f/∂theta
         partial_theta_f = jax.jacobian(f_of_args, argnums=0)(args, t, y)
+        # ∂f/∂y * dy/dtheta
         partial_y_f = jax.vmap(lambda z_param_j: eqx.filter_jvp(f_of_y, (y,), (z_param_j,), t=t, args=args), in_axes=1, out_axes=1)(z)[1]
-        print(partial_theta_f, partial_y_f)
 
+        # We have f = dy/dt and z = dy/dtheta, so dz/dt = df/dtheta
+        # dz/dt = df/dtheta = (∂f/∂y * dy/dtheta) + ∂f/∂theta
         dz_dt = partial_y_f + partial_theta_f
 
-
+        # Computing the sensitivity of the state with respect noise in transient state
         # Compute tr(J @ Sigma) which turns out to be just tr(J)
         def compute_diag_y(x, inp, fn, i, t, args):
             return fn(inp.at[i].set(x), t, args)[i]
-
-        def compute_diag_theta(x, args, inp, fn, i, t):
-            return fn(args.at[i].set(x), t, inp)
 
         @partial(jax.vmap, in_axes=(None, None, 0, None, None))
         def compute_grad_diag_y(inp, fn, i, t, args):
             return eqx.filter_grad(compute_diag_y)(inp[i], inp, fn, i, t, args)
 
-        # @partial(jax.vmap, in_axes=(None, None, 0, None, None))
-        # def compute_grad_diag_theta(inp, fn, i, t, args):
-        #     return eqx.filter_grad(compute_diag_theta)
-
         idcs = jnp.arange(y.shape[0])
-        # print(idcs.shape)
+
         # Trace of the Jacobian multiplied with the covariance matrix
         y_additional_error = jnp.sum(compute_grad_diag_y(y, f_of_y, idcs, t, args))
 
-        # @eqx.filter_vmap(in_axes=(1,), out_axes=1)
-        # def theta_tangents(theta_error_col):
-        #     print(y.shape, theta_error_col.shape)
-        #     return eqx.filter_jvp(f_of_y, primals=(y,), tangents=(theta_error_col,), t=t, args=args)[1]
-
-        # _theta_primals, theta_tangents = eqx.filter_jvp(
-        #     f_of_y, primals=(y,), tangents=(theta_error_val,), t=t, args=args
-        # )
-        # print(theta_error_val.shape)
-        # theta_additional_error = theta_tangents(theta_error_val)
-        # jax.debug.print('theta_additional_error={theta_additional_error}', theta_additional_error=theta_additional_error)
-
-        # y_error_val = y_error_val + y_additional_error
-        # theta_error_val = theta_error_val + theta_additional_error
-
         f_value = f(t, y, args)
 
-        # Stitch y and errors back together
-        # print(theta_additional_error)
         print('ode augmented', f_value.shape, y_additional_error.shape, dz_dt.shape)
         diff_state = AugmentedState(
             y=f_value,  # (num_transient, )
-            y_error=y_additional_error,  # (num_transient, )
-            theta_error=dz_dt,  # (num_parameters, )
+            y_error=y_additional_error,  # ()
+            theta_error=dz_dt,  # (num_transient, num_parameters)
         )
+        assert diff_state.y.shape == y.shape
+        assert diff_state.y_error.shape == ()
+        assert diff_state.theta_error.shape == (y.shape[0], num_parameters)
+
         return diff_state
 
     num_transient = initial_state.shape[0]
     augmented_initial_state = AugmentedState(
         y=initial_state,
-        y_error=jnp.zeros_like(initial_state),
+        y_error=jnp.zeros(shape=()),
         theta_error=jnp.zeros(shape=(num_transient, num_parameters,)),
     )
-    print('initial augmented: ', augmented_initial_state.y.shape, augmented_initial_state.y_error.shape, augmented_initial_state.theta_error.shape)
 
     return new_f, augmented_initial_state
 
@@ -239,7 +213,7 @@ class DynamicalSystem:
         compiler = ArkCompiler(rewrite=SympyRewriteGen())
         sympy_pairs = compiler.compile_sympy(cdg=cdg, cdg_spec=spec, help_fn=[])
         sympy_diffeqs = [
-            _make_symbols_positive(_collapse_derivative(pair)) for pair in sympy_pairs
+            make_symbols_positive(collapse_derivative(pair)) for pair in sympy_pairs
         ]
 
         InpI_0_fn = sp.Function("InpI_0_fn")
@@ -423,8 +397,12 @@ class DynamicalSystem:
         dt0 = t1 / max_steps
 
         term = dr.ODETerm(f_aug)
-        solver = dr.Tsit5()
+        solver = dr.Tsit5(
+            # scan_kind='lax',
+        )
         adjoint = dr.RecursiveCheckpointAdjoint()
+        # adjoint = dr.BacksolveAdjoint()
+        print(f'Using adjoint {adjoint}')
 
         system_solution = dr.diffeqsolve(
             terms=term,
@@ -437,6 +415,7 @@ class DynamicalSystem:
             saveat=saveat,
             max_steps=max_steps,
             adjoint=adjoint,
+            # progress_meter=dr.TqdmProgressMeter(),
         )
         system_solution = eqx.tree_at(
             where=lambda x: x.ts,
@@ -537,102 +516,3 @@ class DynamicalSystem:
         return set().union(*[eq.free_symbols for eq in self.diffeqs])
 
 
-
-class CircuitSystem(eqx.Module):
-    """
-    Circuit system with parameter values that can be sampled from.
-
-    Running this multicore on CPU:
-    The input dimension to be parallelized over must be sharded in the appropriate dimension (this is also true for multi-GPU).
-    Also remember to set the XLA compile flags correctly (which is done by ark.simulate.utils.jax_settings when specifying the device).
-    """
-
-    dynamical_system: DynamicalSystem = eqx.field(static=True)
-    "Dynamical system for simulation and parameter metadata"
-
-    parameter_state: jax.Array
-    "Current parameters"
-
-    def clamp_parameters(self):
-        state = self.parameter_state
-        parameter_symbols = self.dynamical_system.parameter_symbols()
-
-        # Create parameter minimum and maximum arrays
-        def get_min_max(attr_def: AttrDef) -> tuple[float, float]:
-            valid_range = attr_def.valid_range
-            if valid_range is None:
-                return -jnp.inf, jnp.inf
-            if (exact := valid_range.exact) is not None:
-                return exact, exact
-            min_val = valid_range.min if valid_range.min is not None else -jnp.inf
-            max_val = valid_range.max if valid_range.max is not None else jnp.inf
-            return min_val, max_val
-
-        min_max = [get_min_max(v.variability) for k, v in parameter_symbols.items()]
-        clamp_array = np.array(min_max).T
-        print(f"{clamp_array.shape=}")
-        print(clamp_array)
-
-        new_state = jnp.clip(state, clamp_array[0], clamp_array[1])
-
-        return eqx.tree_at(lambda t: t.parameter_state, self, replace=new_state)
-
-    def simulate(self, saveat: dr.SaveAt = dr.SaveAt(t1=True)) -> dr.Solution:
-        solution = self.dynamical_system.solve_system(
-            initial_values=jnp.zeros(
-                len(self.dynamical_system.transient_symbols()), dtype=float
-            ),
-            parameter_values=self.parameter_state,
-            saveat=saveat,
-        )
-        return solution
-
-    def simulate_with_sensitivity(self, saveat: dr.SaveAt(t1=True)) -> dr.Solution:
-        solution = self.dynamical_system.solve_system_with_sensitivity(
-            initial_values=jnp.zeros(
-                len(self.dynamical_system.transient_symbols()), dtype=float
-            ),
-            parameter_values=self.parameter_state,
-            saveat=saveat,
-        )
-        return solution
-
-    def sample_solve(
-        self, key=jax.Array, saveat: dr.SaveAt = dr.SaveAt(t1=True)
-    ) -> dr.Solution:
-        sampled_parameters = self.dynamical_system.sample_parameters(
-            nominal_values=self.parameter_state, key=key
-        )
-        manufactured_cs = CircuitSystem(
-            dynamical_system=self.dynamical_system, parameter_state=sampled_parameters
-        )
-        return manufactured_cs.simulate(saveat)
-
-    def sample_solve_with_sensitivity(
-        self, key=jax.Array, saveat: dr.SaveAt = dr.SaveAt(t1=True)
-    ) -> dr.Solution:
-        sampled_parameters = self.dynamical_system.sample_parameters(
-            nominal_values=self.parameter_state, key=key
-        )
-        manufactured_cs = CircuitSystem(
-            dynamical_system=self.dynamical_system, parameter_state=sampled_parameters
-        )
-        return manufactured_cs.simulate_with_sensitivity(saveat)
-
-    @eqx.filter_jit
-    def multi_solve(
-        self,
-        num_samples: int,
-        key: jax.Array = jrandom.PRNGKey(0),
-        saveat: dr.SaveAt = dr.SaveAt(t1=True),
-    ) -> dr.Solution:
-        # Create a set of seeds to vectorize over
-        # n_devices = len(jax.devices())
-        rngs = jrandom.bits(key=key, shape=(num_samples, 2), dtype=jnp.uint32)
-        rngs = jax.device_put(
-            rngs, jax.sharding.PositionalSharding(jax.devices()).reshape((-1, 1))
-        )
-
-        return eqx.filter_vmap(CircuitSystem.sample_solve, in_axes=(None, 0, None))(
-            self, rngs, saveat
-        )

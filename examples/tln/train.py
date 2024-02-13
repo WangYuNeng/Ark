@@ -12,7 +12,7 @@ import optax
 import wandb
 from differentiable_sspuf import SSPUF_MatrixExp, SwitchableStarPUF
 from jax import config
-from jaxtyping import Array, Float, PyTree
+from jaxtyping import Array, PyTree
 
 config.update("jax_debug_nans", True)
 
@@ -94,7 +94,7 @@ def i2o_loss(
     analog_out = jax.vmap(model, in_axes=(0, 0, None))(
         switch.reshape(-1, n_bit),
         mismatch.repeat(chl_per_bit * (1 + n_bit), axis=0).reshape(
-            -1, 2, *model.lds_a_shape
+            -1, 2, model.mismatch_len
         ),
         t,
     )
@@ -131,9 +131,9 @@ def bf_chls(
     batch_size: int,
     inst_per_batch: int,
     n_bit: int,
-    lds_a_shape: tuple[int, int],
+    mismatch_len: int,
     readout_time: float,
-) -> Generator[tuple[np.ndarray, np.ndarray, np.ndarray]]:
+) -> Generator[jax.Array, jax.Array, jax.typing.DTypeLike]:
     """Bit-flipping test training data generator.
 
     Args:
@@ -141,13 +141,13 @@ def bf_chls(
         inst_per_batch (int): # of instance (mismatch)to sample per batch
         (batch_size // inst_per_batch should be an integer >> inst_per_batch)
         n_bit (int): # of bits (branches) in the star PUF
-        lds_a_shape (tuple[int, int]): shape of the PUF matrix
+        mismatch (int): length of mismatch sampling for one star
         readout_time (float): readout time of the PUF
 
     Yields:
-        switches (np.ndarray): batch of switches
-        mismatch (np.ndarray): batch of mismatch samples
-        t (np.ndarray): batch of readout time
+        switches (jax.Array): batch of switches
+        mismatch (jax.Array): batch of mismatch samples
+        t (jax.typing.DTypeLike): batch of readout time
     """
     assert batch_size % inst_per_batch == 0
     while True:
@@ -160,7 +160,7 @@ def bf_chls(
 
         # Generate inst_per_batch mismatch samples
         mismatches = np.random.normal(
-            size=(inst_per_batch, 2, *lds_a_shape), loc=1.0, scale=0.1
+            size=(inst_per_batch, 2, mismatch_len), loc=1.0, scale=0.1
         )
         # Repeat each mismatch samples batch_size // inst_per_batch times
         # and stack them together
@@ -170,17 +170,17 @@ def bf_chls(
         # mismatch = np.random.normal(
         #     size=(batch_size, 2, *lds_a_shape), loc=1.0, scale=0.1
         # )
-        t = readout_time * np.ones(shape=(batch_size,))
-        yield switches, mismatch, t
+        t = readout_time
+        yield jnp.array(switches), jnp.array(mismatch), t
 
 
 def I2O_chls(
     inst_per_batch: int,
     chl_per_bit: int,
     n_bit: int,
-    lds_a_shape: tuple[int, int],
+    mismatch_len: int,
     readout_time: float,
-) -> Generator[tuple[np.ndarray, np.ndarray, np.ndarray]]:
+) -> Generator[jax.Array, jax.Array, jax.typing.DTypeLike]:
     """I2O score training data generator.
 
     Args:
@@ -188,15 +188,15 @@ def I2O_chls(
         inst_per_batch (int): # of instance (mismatch)to sample per batch
         (batch_size // inst_per_batch * n_branch should be an integer)
         n_bit (int): # of bits (branches) in the star PUF
-        lds_a_shape (tuple[int, int]): shape of the PUF matrix
+        mismatch_len (int): length of the mismatch vector
         readout_time (float): readout time of the PUF
 
     Yields:
-        switches (np.ndarray): batch of switches in the shape of
+        switches (jax.Array): batch of switches in the shape of
             (inst_per_batch, chl_per_bit, 1 + n_bit, n_bit)
-        mismatch (np.ndarray): batch of mismatch samples in the shape of
-            (inst_per_batch, 2, *lds_a_shape)
-        t (float): scalar readout time same as the readout_time
+        mismatch (jax.Array): batch of mismatch samples in the shape of
+            (inst_per_batch, 2, mismatch_len)
+        t (jax.typing.DTypeLike): scalar readout time same as the readout_time
     """
     while True:
         switches = []
@@ -214,17 +214,17 @@ def I2O_chls(
 
         switches = np.array(switches)
         mismatch = np.random.normal(
-            size=(inst_per_batch, 2, *lds_a_shape), loc=1.0, scale=0.1
+            size=(inst_per_batch, 2, mismatch_len), loc=1.0, scale=0.1
         )
         t = readout_time
-        yield switches, mismatch, t
+        yield jnp.array(switches), jnp.array(mismatch), t
 
 
 def train(
     model: SwitchableStarPUF,
     loss: FunctionType,
     precise_loss: FunctionType,  # Due to approximation, use another loss function for validation
-    dataloader,  # Python generator
+    dataloader: Generator[jax.Array, jax.Array, jax.typing.DTypeLike],
     optim: optax.GradientTransformation,
     steps: int,
     print_every: int,
@@ -238,9 +238,9 @@ def train(
     def make_step(
         model: SwitchableStarPUF,
         opt_state: PyTree,
-        switch: Array,
-        mismatch: Array,
-        t: Float,
+        switch: jax.Array,
+        mismatch: jax.Array,
+        t: jax.typing.DTypeLike,
     ):
         loss_value, grads = eqx.filter_value_and_grad(loss)(model, switch, mismatch, t)
         updates, opt_state = optim.update(grads, opt_state, model)
@@ -248,7 +248,12 @@ def train(
         return model, opt_state, loss_value
 
     @eqx.filter_jit
-    def validate(model: SwitchableStarPUF, switch: Array, mismatch: Array, t: Float):
+    def validate(
+        model: SwitchableStarPUF,
+        switch: jax.Array,
+        mismatch: jax.Array,
+        t: jax.typing.DTypeLike,
+    ):
         loss_value, _ = eqx.filter_value_and_grad(precise_loss)(
             model, switch, mismatch, t
         )
@@ -351,13 +356,13 @@ if __name__ == "__main__":
         )
         if LOSS == "bf":
             loader = bf_chls(
-                BATCH_SIZE, INST_PER_BATCH, N_BRANCH, model.lds_a_shape, READOUT_TIME
+                BATCH_SIZE, INST_PER_BATCH, N_BRANCH, model.mismatch_len, READOUT_TIME
             )
             train_loss = partial(bf_loss, quantize_fn=partial(logistic, k=LOGISTIC_K))
             train_loss_precise = partial(bf_loss, quantize_fn=step)
         elif LOSS == "i2o":
             loader = I2O_chls(
-                INST_PER_BATCH, CHL_PER_BIT, N_BRANCH, model.lds_a_shape, READOUT_TIME
+                INST_PER_BATCH, CHL_PER_BIT, N_BRANCH, model.mismatch_len, READOUT_TIME
             )
             train_loss = partial(i2o_loss, quantize_fn=partial(logistic, k=LOGISTIC_K))
             train_loss_precise = partial(i2o_loss, quantize_fn=step)

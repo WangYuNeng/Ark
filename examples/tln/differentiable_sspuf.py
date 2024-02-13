@@ -33,6 +33,7 @@ class SwitchableStarPUF(eqx.Module):
     - lc_val_base: The base value of the LC components
     (l, c = lc_val_base * lc_val)
     - t: The time point of the output
+    - mismatch_len: The length required for the mismatch vector
     """
 
     n_branch: int
@@ -46,6 +47,8 @@ class SwitchableStarPUF(eqx.Module):
     pulse_t1: float = 0.5e-9
     pulse_t2: float = 1.5e-9
     pulse_t3: float = 2.0e-9
+    mismatch_len: int
+    param_split_idx: list[int]
 
     def __init__(
         self,
@@ -91,6 +94,24 @@ class SwitchableStarPUF(eqx.Module):
             self.c_val = np.ones(shape=(line_len + 1))
             self.l_val = np.ones(shape=(line_len))
 
+        self.mismatch_len = (
+            len(self.gm_c) * 2
+            + len(self.gm_l) * 2
+            + len(self.c_val[:-1])
+            + len(self.l_val)
+        ) * n_branch + 1
+
+        param_len = np.array(
+            [
+                len(self.gm_c) * 2,
+                len(self.gm_l) * 2,
+                len(self.c_val) - 1,
+                len(self.l_val),
+            ]
+            * self.n_branch
+        )
+        self.param_split_idx = np.cumsum(param_len).tolist()
+
     def __call__(self, switch: jax.Array, mismatch: jax.Array, t: jax.typing.DTypeLike):
         """Compute the analog PUF response at time t.
 
@@ -106,6 +127,37 @@ class SwitchableStarPUF(eqx.Module):
             jax.typing.DTypeLike: The output of the SwitchableStar at time t.
         """
         raise NotImplementedError
+
+    def _apply_mismatch_single_star(self, mismatch: jax.Array):
+        """Apply the mismatch to the components of a single star and return
+        the mismatched parameters.
+
+        Args:
+            mismatch (jax.Array): The mismatch values.
+            The length of the mismatch should be self.mismatch_len.
+
+        Returns:
+            tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.typing.DTypeLike]:
+            The mismatched components for each branch and the middle capacitor.
+        """
+        mismatch_split = jnp.split(mismatch, self.param_split_idx)
+        gmc_mm, gml_mm, c_mm, l_mm = [], [], [], []
+        for i in range(self.n_branch):
+            gmc_mm.append(mismatch_split[i * 4].reshape(self.gm_c.shape) * self.gm_c)
+            gml_mm.append(
+                mismatch_split[i * 4 + 1].reshape(self.gm_l.shape) * self.gm_l
+            )
+            c_mm.append(mismatch_split[i * 4 + 2] * self.c_val[:-1])
+            l_mm.append(mismatch_split[i * 4 + 3] * self.l_val)
+
+        middle_c_mm = mismatch_split[-1][0] * self.c_val[-1]
+        return (
+            jnp.array(gmc_mm),
+            jnp.array(gml_mm),
+            jnp.array(c_mm),
+            jnp.array(l_mm),
+            middle_c_mm,
+        )
 
 
 class SSPUF_MatrixExp(SwitchableStarPUF):
@@ -165,12 +217,27 @@ class SSPUF_MatrixExp(SwitchableStarPUF):
         Returns:
             jax.typing.DTypeLike: The output of the SwitchableStar at time t.
         """
-        rsp0 = self._calc_one_star_rsp(switch, mismatch[0], t)
-        rsp1 = self._calc_one_star_rsp(switch, mismatch[1], t)
-        return rsp0 - rsp1
+        rsp = []
+        for mm_arr in mismatch:
+            gmc_mm, gml_mm, c_mm, l_mm, middle_c_mm = self._apply_mismatch_single_star(
+                mm_arr
+            )
+            rsp.append(
+                self._calc_one_star_rsp(
+                    switch, gmc_mm, gml_mm, c_mm, l_mm, middle_c_mm, t
+                )
+            )
+        return rsp[0] - rsp[1]
 
     def _calc_one_star_rsp(
-        self, switch: jax.Array, mismatch: jax.Array, t: jax.typing.DTypeLike
+        self,
+        switch: jax.Array,
+        gmc_mm: jax.Array,
+        gml_mm: jax.Array,
+        c_mm: jax.Array,
+        l_mm: jax.Array,
+        middle_c_mm: jax.typing.DTypeLike,
+        t: jax.typing.DTypeLike,
     ) -> jax.typing.DTypeLike:
         """Compute the transient response of a SwitchableStar at time t.
 
@@ -182,13 +249,14 @@ class SSPUF_MatrixExp(SwitchableStarPUF):
         Returns:
             jax.typing.DTypeLike: The output of the SwitchableStar at time t.
         """
-        lds_a = self._calc_lds_a_matrix()
-        a_sw_mm = jnp.multiply(lds_a, mismatch)
+        lds_a = self._calc_lds_a_matrix(gmc_mm, gml_mm, c_mm, l_mm)
+        a_sw_mm = lds_a
+        # a_sw_mm = jnp.multiply(lds_a, mismatch)
         for i, sw_val in enumerate(switch):
             a_sw_mm = a_sw_mm.at[0, 1 + i * self.line_len * 2].multiply(sw_val)
 
         b_mat = jnp.zeros(shape=(lds_a.shape[0], 1))
-        b_mat = b_mat.at[0, 0].set(1 / self.lc_val_base * self.c_val[-1])
+        b_mat = b_mat.at[0, 0].set(1 / self.lc_val_base / middle_c_mm)
         c_mat = jnp.zeros(shape=(1, lds_a.shape[0]))
         c_mat = c_mat.at[0, 0].set(1)
 
@@ -224,27 +292,33 @@ class SSPUF_MatrixExp(SwitchableStarPUF):
         sol = amp * jnp.matmul(jnp.matmul(c_mat, expm_t), input_integral)
         return sol
 
-    def _calc_lds_a_matrix(self) -> jax.Array:
+    def _calc_lds_a_matrix(
+        self,
+        gmc_mm: jax.Array,
+        gml_mm: jax.Array,
+        c_mm: jax.Array,
+        l_mm: jax.Array,
+    ) -> jax.Array:
         """Calculate the A matrix of the SwitchableStar in state-space repr."""
         sub_mat_len = 2 * self.line_len
         n_branch = self.n_branch
 
-        def ith_diag_sub_mat():
+        def ith_diag_sub_mat(i: jax.typing.DTypeLike):
             a_i = jnp.zeros(shape=(sub_mat_len, sub_mat_len))
             for j in range(sub_mat_len - 1):
                 if j % 2 == 0:
                     c_idx = j // 2
-                    a_i = a_i.at[j, j + 1].set(-self.gm_c[c_idx, 1] / self.l_val[c_idx])
-                    a_i = a_i.at[j + 1, j].set(self.gm_c[c_idx, 0] / self.c_val[c_idx])
+                    a_i = a_i.at[j, j + 1].set(-gmc_mm[i, c_idx, 1] / l_mm[i, c_idx])
+                    a_i = a_i.at[j + 1, j].set(gmc_mm[i, c_idx, 0] / c_mm[i, c_idx])
                 else:
                     l_idx = j // 2 + 1
                     a_i = a_i.at[j, j + 1].set(
-                        -self.gm_l[l_idx, 1] / self.c_val[l_idx - 1]
+                        -gml_mm[i, l_idx, 1] / c_mm[i, l_idx - 1]
                     )
-                    a_i = a_i.at[j + 1, j].set(self.gm_l[l_idx, 0] / self.l_val[l_idx])
+                    a_i = a_i.at[j + 1, j].set(gml_mm[i, l_idx, 0] / l_mm[i, l_idx])
             return a_i
 
-        ai_row_mats = [ith_diag_sub_mat() for _ in range(n_branch)]
+        ai_row_mats = [ith_diag_sub_mat(i) for i in range(n_branch)]
         for i, diag_mat in enumerate(ai_row_mats):
             left_zeros = jnp.zeros(shape=(sub_mat_len, sub_mat_len * i))
             right_zeros = jnp.zeros(
@@ -256,10 +330,10 @@ class SSPUF_MatrixExp(SwitchableStarPUF):
         mid_to_branch_col = jnp.zeros(shape=(sub_mat_len * n_branch, 1))
         for i in range(n_branch):
             mid_to_branch_row = mid_to_branch_row.at[0, i * sub_mat_len].set(
-                -self.gm_l[0, 1] / self.c_val[-1]
+                -gml_mm[i, 0, 1] / c_mm[i, -1]
             )
             mid_to_branch_col = mid_to_branch_col.at[i * sub_mat_len, 0].set(
-                self.gm_l[0, 0] / self.l_val[0]
+                gml_mm[i, 0, 0] / l_mm[i, 0]
             )
 
         A_1_to_n = jnp.vstack([mid_to_branch_row] + ai_row_mats)
@@ -539,4 +613,4 @@ class SSPUF_ODE(SwitchableStarPUF):
 if __name__ == "__main__":
     n_branch = 4
     line_len = 2
-    sspuf_neural_ode = SSPUF_NeuralODE(n_branch, line_len)
+    sspuf_neural_ode = SSPUF_ODE(n_branch, line_len)

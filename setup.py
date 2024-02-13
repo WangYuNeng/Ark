@@ -15,5 +15,6 @@ setup(
         "palettable>=3.3.3",
         "pylatexenc>=2.10",
         "graphviz>=0.20.1",
+        "z3-solver",
     ],
 )

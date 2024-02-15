@@ -424,6 +424,7 @@ class SSPUF_ODE(SwitchableStarPUF):
     - t: The time point of the output
 
     - ode_fn: The ODE form of the SwitchableStarPUF
+    - n_time_point: The # of time points to solve the ODE
     - middle_c_mapping: The mapping of the middle capacitors in the CDG (2)
     - switch_args_mapping: The mapping of the switch arguments in the CDG (2, n_branch)
     - c_args_mapping: The mapping of the C components in the CDG (line_len, 2, n_branch)
@@ -438,6 +439,7 @@ class SSPUF_ODE(SwitchableStarPUF):
     """
 
     ode_fn: Callable
+    n_time_point: int
     middle_c_mapping: np.ndarray
     switch_args_mapping: np.ndarray
     c_args_mapping: np.ndarray
@@ -452,6 +454,7 @@ class SSPUF_ODE(SwitchableStarPUF):
         self,
         n_branch: int,
         line_len: int,
+        n_time_point: int,
         random: bool = False,
         init_vals: dict = None,
     ) -> None:
@@ -466,6 +469,7 @@ class SSPUF_ODE(SwitchableStarPUF):
             Defaults to False, initializing with gm_c=gm_l=1.0, t=20e-9.
         """
         super().__init__(n_branch, line_len, random, init_vals)
+        self.n_time_point = n_time_point
         self._create_and_compile_cdg()
 
     def __call__(self, switch: jax.Array, mismatch: jax.Array, t: jax.typing.DTypeLike):
@@ -507,7 +511,7 @@ class SSPUF_ODE(SwitchableStarPUF):
             diffrax.Tsit5(),
             t0=0,
             t1=t,
-            dt0=t,
+            dt0=t / self.n_time_point,
             y0=jnp.zeros(self.n_state),
             saveat=diffrax.SaveAt(ts=[t]),
             args=args,
@@ -575,7 +579,7 @@ class SSPUF_ODE(SwitchableStarPUF):
         for star_idx, star_branches in enumerate(branch_pairs):
             for branch_idx, branch_item in enumerate(star_branches):
                 _, vnodes, inodes, edges = branch_item
-                c_args_mapping[:star_idx, branch_idx, :] = np.array(
+                c_args_mapping[star_idx, branch_idx, :] = np.array(
                     [num_attr_mapping[f"{cap.name}"]["c"] for cap in vnodes]
                 )
                 l_args_mapping[star_idx, branch_idx, :] = np.array(

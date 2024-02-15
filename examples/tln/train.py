@@ -297,6 +297,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_branch", type=int, default=10)
     parser.add_argument("--line_len", type=int, default=4)
     parser.add_argument("--n_order", type=int, default=40)
+    parser.add_argument("--n_time_points", type=int, default=100)
     parser.add_argument("--readout_time", type=float, default=10e-9)
     parser.add_argument("--rand_init", action="store_true")
     parser.add_argument("--batch_size", type=int, default=256)
@@ -326,6 +327,7 @@ if __name__ == "__main__":
     N_BRANCH = args.n_branch
     LINE_LEN = args.line_len
     N_ORDER = args.n_order
+    N_TIME_POINTS = args.n_time_points
     READOUT_TIME = args.readout_time
     RAND_INIT = args.rand_init
     BATCH_SIZE = args.batch_size
@@ -339,14 +341,6 @@ if __name__ == "__main__":
 
     optim = optax.adam(LEARNING_RATE)
 
-    # # Sanity check, single star response is correct
-    # rand_loader = partial(random_chls_and_mismatch, readout_time=READOUT_TIME)
-    # model = SwitchableStarPUF(n_branch=N_BRANCH, line_len=LINE_LEN, n_order=N_ORDER)
-    # for switches, mismatch, _ in rand_loader(BATCH_SIZE, N_BRANCH, model.lds_a_shape):
-    #     plot_single_star_rsp(model, switches, mismatch, np.linspace(2e-9, 20e-9, 100))
-    #     if input() != "c":
-    #         exit()
-
     if MODEL == "MatrixExp":
         model = SSPUF_MatrixExp(
             n_branch=N_BRANCH,
@@ -355,7 +349,12 @@ if __name__ == "__main__":
             random=RAND_INIT,
         )
     elif MODEL == "ODE":
-        model = SSPUF_ODE(n_branch=N_BRANCH, line_len=LINE_LEN, random=RAND_INIT)
+        model = SSPUF_ODE(
+            n_branch=N_BRANCH,
+            line_len=LINE_LEN,
+            n_time_point=N_TIME_POINTS,
+            random=RAND_INIT,
+        )
     else:
         raise ValueError("Unknown model")
 
@@ -371,15 +370,6 @@ if __name__ == "__main__":
         )
         train_loss = partial(i2o_loss, quantize_fn=partial(logistic, k=LOGISTIC_K))
         train_loss_precise = partial(i2o_loss, quantize_fn=step)
-
-    # # Sanity Check
-    # n_branch, lds_a_shape = model.n_branch, model.lds_a_shape
-    # for i, (switches, mismatch, t) in zip(
-    #     range(10), bf_chls(BATCH_SIZE, n_branch, lds_a_shape, READOUT_TIME)
-    # ):
-    #     ideal_loss = i2o_ideal(model, switches, mismatch, t)
-    #     approx_loss = i2o_sigmoid(model, switches, mismatch, t)
-    #     print(ideal_loss, approx_loss)
 
     print(model.gm_c, model.gm_l)
     print(model.c_val, model.l_val)

@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import optax
 import wandb
-from differentiable_sspuf import SSPUF_MatrixExp, SwitchableStarPUF
+from differentiable_sspuf import SSPUF_ODE, SSPUF_MatrixExp, SwitchableStarPUF
 from jax import config
 from jaxtyping import Array, PyTree
 
@@ -292,7 +292,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model", type=str, required=True, choices=["MatrixExp", "ODE"]
     )
-    parser.add_argument("--loss", type=str, default="bf", choices=["bf", "i2o"])
+    parser.add_argument("--loss", type=str, default="i2o", choices=["bf", "i2o"])
     parser.add_argument("--learning_rate", type=float, default=5e-2)
     parser.add_argument("--n_branch", type=int, default=10)
     parser.add_argument("--line_len", type=int, default=4)
@@ -354,23 +354,23 @@ if __name__ == "__main__":
             n_order=N_ORDER,
             random=RAND_INIT,
         )
-        if LOSS == "bf":
-            loader = bf_chls(
-                BATCH_SIZE, INST_PER_BATCH, N_BRANCH, model.mismatch_len, READOUT_TIME
-            )
-            train_loss = partial(bf_loss, quantize_fn=partial(logistic, k=LOGISTIC_K))
-            train_loss_precise = partial(bf_loss, quantize_fn=step)
-        elif LOSS == "i2o":
-            loader = I2O_chls(
-                INST_PER_BATCH, CHL_PER_BIT, N_BRANCH, model.mismatch_len, READOUT_TIME
-            )
-            train_loss = partial(i2o_loss, quantize_fn=partial(logistic, k=LOGISTIC_K))
-            train_loss_precise = partial(i2o_loss, quantize_fn=step)
-
     elif MODEL == "ODE":
-        pass
+        model = SSPUF_ODE(n_branch=N_BRANCH, line_len=LINE_LEN, random=RAND_INIT)
     else:
         raise ValueError("Unknown model")
+
+    if LOSS == "bf":
+        loader = bf_chls(
+            BATCH_SIZE, INST_PER_BATCH, N_BRANCH, model.mismatch_len, READOUT_TIME
+        )
+        train_loss = partial(bf_loss, quantize_fn=partial(logistic, k=LOGISTIC_K))
+        train_loss_precise = partial(bf_loss, quantize_fn=step)
+    elif LOSS == "i2o":
+        loader = I2O_chls(
+            INST_PER_BATCH, CHL_PER_BIT, N_BRANCH, model.mismatch_len, READOUT_TIME
+        )
+        train_loss = partial(i2o_loss, quantize_fn=partial(logistic, k=LOGISTIC_K))
+        train_loss_precise = partial(i2o_loss, quantize_fn=step)
 
     # # Sanity Check
     # n_branch, lds_a_shape = model.n_branch, model.lds_a_shape

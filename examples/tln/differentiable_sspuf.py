@@ -139,6 +139,8 @@ class SwitchableStarPUF(eqx.Module):
         Returns:
             tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.typing.DTypeLike]:
             The mismatched components for each branch and the middle capacitor.
+            gmc_mm and gml_mm have the shape of (n_branch, line_len, 2).
+            c_mm and l_mm have the shape of (n_branch, line_len).
         """
         mismatch_split = jnp.split(mismatch, self.param_split_idx)
         gmc_mm, gml_mm, c_mm, l_mm = [], [], [], []
@@ -392,10 +394,10 @@ def pulse_jax(
     return jnp.where(
         t_offset < rise_time,
         amplitude * t_offset / rise_time,
-        np.where(
+        jnp.where(
             t_offset < pulse_width + rise_time,
             amplitude,
-            np.where(
+            jnp.where(
                 t_offset < pulse_width + rise_time + fall_time,
                 amplitude * (1 - (t_offset - pulse_width - rise_time) / fall_time),
                 0,
@@ -479,21 +481,26 @@ class SSPUF_ODE(SwitchableStarPUF):
         Returns:
             jax.typing.DTypeLike: The output of the SwitchableStar at time t.
         """
+
         args = jnp.zeros(self.n_num_attrs)
 
         for star_idx in range(2):
+            gmc_mm, gml_mm, c_mm, l_mm, middle_c_mm = self._apply_mismatch_single_star(
+                mismatch[star_idx]
+            )
             # Set the middle capacitance
             args = args.at[self.middle_c_mapping[star_idx]].set(
-                self.lc_val_base * self.c_val[-1]
+                self.lc_val_base * middle_c_mm
             )
-            for br_idx in range(self.n_branch):
-                # Connect/Disconnect the branches by Turning ON/OFF the switches
-                args = args.at[self.switch_args_mapping[star_idx, br_idx]].set(
-                    switch[br_idx]
-                )
-
-                for lc_idx in range(self.line_len):
-                    pass
+            args = args.at[self.switch_args_mapping[star_idx, :]].set(switch)
+            args = args.at[self.c_args_mapping[star_idx, :, :]].set(
+                self.lc_val_base * c_mm
+            )
+            args = args.at[self.l_args_mapping[star_idx, :, :]].set(
+                self.lc_val_base * l_mm
+            )
+            args = args.at[self.gmc_args_mapping[star_idx, :, :, :]].set(gmc_mm)
+            args = args.at[self.gml_args_mapping[star_idx, :, :, :]].set(gml_mm)
 
         solution = diffrax.diffeqsolve(
             diffrax.ODETerm(self.ode_fn),
@@ -502,11 +509,11 @@ class SSPUF_ODE(SwitchableStarPUF):
             t1=t,
             dt0=t,
             y0=jnp.zeros(self.n_state),
-            stepsize_controller=diffrax.PIDController(rtol=1e-3, atol=1e-5),
-            saveat=diffrax.SaveAt(ts=t),
-            args=0,
+            saveat=diffrax.SaveAt(ts=[t]),
+            args=args,
         )
-        return solution.ys[self.read_out_idx[0]] - solution.ys[self.read_out_idx[1]]
+        sol = solution.ys.squeeze()
+        return sol[self.read_out_idx[0]] - sol[self.read_out_idx[1]]
 
     def _create_and_compile_cdg(self) -> CDG:
         puf, middle_caps, switch_pairs, branch_pairs = create_switchable_star_cdg(
@@ -541,10 +548,10 @@ class SSPUF_ODE(SwitchableStarPUF):
         # l,c nominal params (line_len) maps to each branch on 2 stars
         # gm nominal params on forward and backward direction (line_len, 2)
         # maps to each branch on 2 stars
-        c_args_mapping = np.zeros((self.line_len, 2, self.n_branch), dtype=int)
-        l_args_mapping = np.zeros((self.line_len, 2, self.n_branch), dtype=int)
-        gmc_args_mapping = np.zeros((self.line_len, 2, 2, self.n_branch), dtype=int)
-        gml_args_mapping = np.zeros((self.line_len, 2, 2, self.n_branch), dtype=int)
+        c_args_mapping = np.zeros((2, self.n_branch, self.line_len), dtype=int)
+        l_args_mapping = np.zeros((2, self.n_branch, self.line_len), dtype=int)
+        gmc_args_mapping = np.zeros((2, self.n_branch, self.line_len, 2), dtype=int)
+        gml_args_mapping = np.zeros((2, self.n_branch, self.line_len, 2), dtype=int)
 
         self.middle_c_mapping = np.array(
             [num_attr_mapping[f"{cap.name}"]["c"] for cap in middle_caps]
@@ -552,33 +559,29 @@ class SSPUF_ODE(SwitchableStarPUF):
         self.switch_args_mapping = np.array(
             [[switch_mapping[sw.name] for sw in switches] for switches in switch_pairs]
         )
-        gml_args_mapping[0] = (
-            jnp.array(
+        gml_args_mapping[:, :, 0, :] = jnp.array(
+            [
                 [
                     [
-                        [
-                            num_attr_mapping[f"{sw.name}"]["wt"],
-                            num_attr_mapping[f"{sw.name}"]["ws"],
-                        ]
-                        for sw in switches
+                        num_attr_mapping[f"{sw.name}"]["wt"],
+                        num_attr_mapping[f"{sw.name}"]["ws"],
                     ]
-                    for switches in switch_pairs
+                    for sw in switches
                 ]
-            )
-            .swapaxes(0, -1)
-            .swapaxes(-1, -2)
+                for switches in switch_pairs
+            ]
         )
 
         for star_idx, star_branches in enumerate(branch_pairs):
             for branch_idx, branch_item in enumerate(star_branches):
                 _, vnodes, inodes, edges = branch_item
-                c_args_mapping[:, star_idx, branch_idx] = np.array(
+                c_args_mapping[:star_idx, branch_idx, :] = np.array(
                     [num_attr_mapping[f"{cap.name}"]["c"] for cap in vnodes]
                 )
-                l_args_mapping[:, star_idx, branch_idx] = np.array(
+                l_args_mapping[star_idx, branch_idx, :] = np.array(
                     [num_attr_mapping[f"{ind.name}"]["l"] for ind in inodes]
                 )
-                gmc_args_mapping[:, :, star_idx, branch_idx] = np.array(
+                gmc_args_mapping[star_idx, branch_idx, :, :] = np.array(
                     [
                         [
                             num_attr_mapping[f"{edge.name}"]["wt"],
@@ -587,7 +590,7 @@ class SSPUF_ODE(SwitchableStarPUF):
                         for edge in edges[::2]
                     ]
                 )
-                gml_args_mapping[1:, :, star_idx, branch_idx] = np.array(
+                gml_args_mapping[star_idx, branch_idx, 1:, :] = np.array(
                     [
                         [
                             num_attr_mapping[f"{edge.name}"]["wt"],

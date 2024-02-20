@@ -15,6 +15,7 @@ from jax import config
 from jaxtyping import Array, PyTree
 
 config.update("jax_debug_nans", True)
+config.update("jax_enable_x64", True)
 
 
 def plot_single_star_rsp(model, switch, mismatch, time_points):

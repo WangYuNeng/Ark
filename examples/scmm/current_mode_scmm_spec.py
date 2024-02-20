@@ -2,6 +2,7 @@
 Example: Switch-capacitor Convolution with current mode integration
 https://ieeexplore.ieee.org/document/9250500
 """
+
 from functools import partial
 from types import FunctionType
 
@@ -97,6 +98,7 @@ if __name__ == "__main__":
     system.execute(
         cdg=scmm,
         time_eval=time_points,
+        max_step=1e-3,
     )
 
     plt.plot(time_points, c0.get_trace(n=0), label="V_C")

@@ -1,4 +1,5 @@
 import argparse
+import time
 from functools import partial
 from types import FunctionType
 from typing import Generator
@@ -228,6 +229,7 @@ def train(
     dataloader: Generator[jax.Array, jax.Array, jax.typing.DTypeLike],
     optim: optax.GradientTransformation,
     steps: int,
+    checkpoint: str,
     print_every: int,
 ):
     opt_state = optim.init(eqx.filter(model, eqx.is_array))
@@ -261,6 +263,7 @@ def train(
         return loss_value
 
     prev_gmc, prev_gml = model.gm_c, model.gm_l
+    best_loss_precise = 0.5  # Upper bound of the i2o and bit-flipping test loss
     for step, (switches, mismatch, t) in zip(range(steps), dataloader):
         if (step % print_every) == 0 or (step == steps - 1):
             train_loss_precise = validate(model, switches, mismatch, t)
@@ -285,6 +288,10 @@ def train(
             print(f"c_val:\n{model.c_val}")
             print(f"l_val:\n{model.l_val}")
             prev_gmc, prev_gml = model.gm_c, model.gm_l
+
+        if train_loss_precise < best_loss_precise:
+            best_loss_precise = train_loss_precise
+            eqx.tree_serialise_leaves(checkpoint, model)
     return model
 
 
@@ -311,15 +318,20 @@ if __name__ == "__main__":
     parser.add_argument("--tag", type=str, default=None)
     args = parser.parse_args()
 
+    CHECKPOINT = f"checkpoint/{time.strftime('%Y%m%d-%H%M%S')}_{time.time():.0f}.eqx"
+
+    train_config = vars(args)
+    train_config["checkpoint"] = CHECKPOINT
+
     if args.wandb:
         if args.tag:
             wandb_run = wandb.init(
-                config=vars(args),
+                config=train_config,
                 tags=[args.tag],
             )
         else:
             wandb_run = wandb.init(
-                config=vars(args),
+                config=train_config,
             )
 
     MODEL = args.model
@@ -338,7 +350,7 @@ if __name__ == "__main__":
     PRINT_EVERY = args.print_every
     LOGISTIC_K = args.logistic_k
 
-    print("Config:", vars(args))
+    print("Config:", train_config)
 
     optim = optax.adam(LEARNING_RATE)
 
@@ -381,5 +393,6 @@ if __name__ == "__main__":
         dataloader=loader,
         optim=optim,
         steps=STEPS,
+        checkpoint=CHECKPOINT,
         print_every=PRINT_EVERY,
     )

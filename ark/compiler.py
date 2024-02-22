@@ -1,10 +1,13 @@
 """Compiler for CDG to dynamical system simulation"""
+
 import ast
 import copy
 import inspect
+from functools import partial
 from itertools import product
 from types import FunctionType
 
+import jax.numpy as jnp
 import numpy as np
 import scipy
 import sympy
@@ -13,7 +16,7 @@ from tqdm import tqdm
 
 from ark.cdg.cdg import CDG, CDGEdge, CDGNode
 from ark.reduction import Reduction
-from ark.rewrite import BaseRewriteGen
+from ark.rewrite import BaseRewriteGen, RewriteGen
 from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule, ProdRuleId
 from ark.specification.rule_keyword import SRC, TIME, Target, kw_name
@@ -200,12 +203,17 @@ class ArkCompiler:
     )
     PROG_NAME = "dynamics"
 
-    def __init__(self, rewrite: BaseRewriteGen) -> None:
+    def __init__(self, rewrite: BaseRewriteGen = RewriteGen()) -> None:
         self._rewrite = rewrite
         self._node_to_state_var = {}
         self._ode_fn_io_names = []
         self._switch_mapping = {}
-        self._namespace = {"np": np, "scipy": scipy, "scipy.integrate": integrate}
+        self._namespace = {
+            "np": np,
+            "scipy": scipy,
+            "scipy.integrate": integrate,
+            "jnp": jnp,
+        }
         self._prog_ast = None
         self._ode_term_ast = None
         self._gen_rule_dict = {}
@@ -395,7 +403,9 @@ class ArkCompiler:
                     value=mk_var(self.FN_ARGS),
                 )
             )
-        _, ode_stmts = self._compile_ode_fn(cdg, cdg_spec, ode_fn_io_names)
+        _, ode_stmts = self._compile_ode_fn(
+            cdg, cdg_spec, ode_fn_io_names, return_jax=True
+        )
         stmts.extend(ode_stmts)
         arguments = ast.arguments(
             posonlyargs=[],
@@ -575,7 +585,7 @@ class ArkCompiler:
             attr_mapping[ele.name] = {}
             for attr_name, attr in ele.attrs.items():
                 if separate_fn_attr:
-                    if isinstance(attr, FunctionType):
+                    if isinstance(attr, FunctionType) or isinstance(attr, partial):
                         attr_mapping[ele.name][attr_name] = False
                     else:
                         attr_mapping[ele.name][attr_name] = True
@@ -591,7 +601,7 @@ class ArkCompiler:
         )
 
     def _compile_ode_fn(
-        self, cdg: CDG, cdg_spec: CDGSpec, io_names: list[str]
+        self, cdg: CDG, cdg_spec: CDGSpec, io_names: list[str], return_jax: bool = False
     ) -> tuple[ast.FunctionDef, list[ast.stmt]]:
         """Compile the cdg to the ode function for scipy.integrate.solve_ivp simulation
 
@@ -606,6 +616,7 @@ class ArkCompiler:
             cdg (CDG): The input CDG
             cdg_spec (CDGSpec): Specification
             io_names (list[str]): names of the state variables `var1, var2, ...`
+            return_jax (bool): whether the return value is a list or a jax array.
 
         """
 
@@ -691,19 +702,44 @@ class ArkCompiler:
                     )
 
         # Return statement of the ode function
-        stmts.append(
-            set_ctx(
-                ast.Return(
-                    ast.List(
-                        [
-                            mk_var(n_state(ddt(name, order=1)))
-                            for name in input_return_names
-                        ]
-                    )
-                ),
-                ast.Load,
+        if not return_jax:
+            stmts.append(
+                set_ctx(
+                    ast.Return(
+                        ast.List(
+                            [
+                                mk_var(n_state(ddt(name, order=1)))
+                                for name in input_return_names
+                            ]
+                        )
+                    ),
+                    ast.Load,
+                )
             )
-        )
+        else:
+            stmts.append(
+                set_ctx(
+                    ast.Return(
+                        ast.Call(
+                            ast.Attribute(
+                                value=mk_var("jnp"),
+                                attr="array",
+                                ctx=ast.Load(),
+                            ),
+                            args=[
+                                ast.List(
+                                    [
+                                        mk_var(n_state(ddt(name, order=1)))
+                                        for name in input_return_names
+                                    ]
+                                )
+                            ],
+                            keywords=[],
+                        )
+                    ),
+                    ast.Load,
+                )
+            )
 
         arguments = ast.arguments(
             posonlyargs=[],

@@ -30,6 +30,9 @@ class SwitchableStarPUF(eqx.Module):
     - c_val: Trainable weights for C components
     (c_val[-1] is the middle capacitor)
     - l_val: Trainable weights for L components
+    - g_val: Trainable weights for parallel conductance with C components
+    (Except for the middle capacitor)
+    - r_val: Trainable weights for serial resistance with L components
     - lc_val_base: The base value of the LC components
     (l, c = lc_val_base * lc_val)
     - t: The time point of the output
@@ -38,10 +41,13 @@ class SwitchableStarPUF(eqx.Module):
 
     n_branch: int
     line_len: int
+    lossiness: str
     gm_c: jax.Array
     gm_l: jax.Array
     c_val: jax.Array
     l_val: jax.Array
+    g_val: jax.Array
+    r_val: jax.Array
     lc_val_base: int = 1e-9
     pulse_amplitude: float = 1.0
     pulse_t1: float = 0.5e-9
@@ -54,8 +60,9 @@ class SwitchableStarPUF(eqx.Module):
         self,
         n_branch: int,
         line_len: int,
-        random: bool = False,
+        random: str = None,
         init_vals: dict = None,
+        lossiness: str = None,
     ) -> None:
         """Initialize the SwitchableStar topology.
 
@@ -66,15 +73,23 @@ class SwitchableStarPUF(eqx.Module):
             Defaults to 40.
             random (bool, optional): Randomize the initial state.
             Defaults to False, initializing with gm_c=gm_l=1.0, t=20e-9.
+            lossiness: Specify the how lossy the t-lines are
+                - None: No loss
+                - "terminal": Loss only in the terminal loads
+                - "all": Loss all branches
         """
         self.n_branch, self.line_len = n_branch, line_len
+        self.lossiness = lossiness
 
         if init_vals:
             self.gm_c = init_vals["gm_c"]
             self.gm_l = init_vals["gm_l"]
             self.c_val = init_vals["c_val"]
             self.l_val = init_vals["l_val"]
-        elif random:
+            self.r_val = init_vals["r_val"]
+            self.g_val = init_vals["g_val"]
+
+        elif random == "uniform":
             self.gm_c = np.random.uniform(
                 low=0.5,
                 high=1.5,
@@ -87,18 +102,48 @@ class SwitchableStarPUF(eqx.Module):
             )
             self.c_val = np.random.uniform(low=0.5, high=1.5, size=(line_len + 1))
             self.l_val = np.random.uniform(low=0.5, high=1.5, size=(line_len))
+            self.g_val = np.random.uniform(low=-1, high=1, size=(line_len))
+            self.r_val = np.random.uniform(low=-1, high=1, size=(line_len))
 
-        else:
+        elif random == "normal":
+            self.gm_c = np.random.normal(
+                loc=1.0,
+                scale=0.1,
+                size=(line_len, 2),
+            )
+            self.gm_l = np.random.normal(
+                loc=1.0,
+                scale=0.1,
+                size=(line_len, 2),
+            )
+            self.c_val = np.random.normal(loc=1.0, scale=0.1, size=(line_len + 1))
+            self.l_val = np.random.normal(loc=1.0, scale=0.1, size=(line_len))
+            self.g_val = np.random.normal(loc=0.0, scale=0.1, size=(line_len))
+            self.r_val = np.random.normal(loc=0.0, scale=0.1, size=(line_len))
+
+        elif random is None or random == "None":  # Default value used in manual design
             self.gm_c = np.ones(shape=(line_len, 2))
             self.gm_l = np.ones(shape=(line_len, 2))
             self.c_val = np.ones(shape=(line_len + 1))
             self.l_val = np.ones(shape=(line_len))
+            self.g_val = np.zeros(shape=(line_len))
+            self.r_val = np.zeros(shape=(line_len))
+
+        if self.lossiness == "terminal":
+            self.g_val[:-1] = self.g_val[:-1] * 0
+            self.r_val = self.r_val * 0
+        elif self.lossiness is None or self.lossiness == "None":
+            self.lossiness = None
+            self.g_val = self.g_val * 0
+            self.r_val = self.r_val * 0
 
         self.mismatch_len = (
             len(self.gm_c) * 2
             + len(self.gm_l) * 2
             + len(self.c_val[:-1])
             + len(self.l_val)
+            + len(self.g_val)
+            + len(self.r_val)
         ) * n_branch + 1
 
         param_len = np.array(
@@ -107,6 +152,8 @@ class SwitchableStarPUF(eqx.Module):
                 len(self.gm_l) * 2,
                 len(self.c_val) - 1,
                 len(self.l_val),
+                len(self.g_val),
+                len(self.r_val),
             ]
             * self.n_branch
         )
@@ -140,17 +187,25 @@ class SwitchableStarPUF(eqx.Module):
             tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.typing.DTypeLike]:
             The mismatched components for each branch and the middle capacitor.
             gmc_mm and gml_mm have the shape of (n_branch, line_len, 2).
-            c_mm and l_mm have the shape of (n_branch, line_len).
+            c_mm, l_mm, g_mm, and r_mm have the shape of (n_branch, line_len).
         """
         mismatch_split = jnp.split(mismatch, self.param_split_idx)
-        gmc_mm, gml_mm, c_mm, l_mm = [], [], [], []
+        gmc_mm, gml_mm, c_mm, l_mm, g_mm, r_mm = [], [], [], [], [], []
         for i in range(self.n_branch):
-            gmc_mm.append(mismatch_split[i * 4].reshape(self.gm_c.shape) * self.gm_c)
+            gmc_mm.append(mismatch_split[i * 6].reshape(self.gm_c.shape) * self.gm_c)
             gml_mm.append(
-                mismatch_split[i * 4 + 1].reshape(self.gm_l.shape) * self.gm_l
+                mismatch_split[i * 6 + 1].reshape(self.gm_l.shape) * self.gm_l
             )
-            c_mm.append(mismatch_split[i * 4 + 2] * self.c_val[:-1])
-            l_mm.append(mismatch_split[i * 4 + 3] * self.l_val)
+            c_mm.append(mismatch_split[i * 6 + 2] * self.c_val[:-1])
+            l_mm.append(mismatch_split[i * 6 + 3] * self.l_val)
+            g_mm.append(mismatch_split[i * 6 + 4] * self.g_val)
+            r_mm.append(mismatch_split[i * 6 + 5] * self.r_val)
+            if self.lossiness == "terminal":
+                g_mm[-1] = g_mm[-1].at[:-1].multiply(0)
+                r_mm[-1] = r_mm[-1] * 0
+            elif self.lossiness is None:
+                g_mm[-1] = g_mm[-1] * 0
+                r_mm[-1] = r_mm[-1] * 0
 
         middle_c_mm = mismatch_split[-1][0] * self.c_val[-1]
         return (
@@ -158,6 +213,8 @@ class SwitchableStarPUF(eqx.Module):
             jnp.array(gml_mm),
             jnp.array(c_mm),
             jnp.array(l_mm),
+            jnp.array(g_mm),
+            jnp.array(r_mm),
             middle_c_mm,
         )
 
@@ -190,6 +247,7 @@ class SSPUF_MatrixExp(SwitchableStarPUF):
         n_order: int = 40,
         random: bool = False,
         init_vals: dict = None,
+        lossiness: str = None,
     ) -> None:
         """Initialize the SwitchableStar topology.
 
@@ -200,10 +258,15 @@ class SSPUF_MatrixExp(SwitchableStarPUF):
             Defaults to 40.
             random (bool, optional): Randomize the initial state.
             Defaults to False, initializing with gm_c=gm_l=1.0, t=20e-9.
+            lossiness: Specify the how lossy the t-lines are
+                - None: No loss
+                - "terminal": Loss only in the terminal loads
+                - "all": Loss all branches
         """
-        super().__init__(n_branch, line_len, random, init_vals)
+        super().__init__(n_branch, line_len, random, init_vals, lossiness)
         self.lds_a_shape = (1 + n_branch * line_len * 2, 1 + n_branch * line_len * 2)
         self.n_order = n_order
+        print("Warning: The optimization of lossy components are not supported yet.")
 
     def __call__(self, switch: jax.Array, mismatch: jax.Array, t: jax.typing.DTypeLike):
         """Compute the analog PUF response at time t.
@@ -221,8 +284,8 @@ class SSPUF_MatrixExp(SwitchableStarPUF):
         """
         rsp = []
         for mm_arr in mismatch:
-            gmc_mm, gml_mm, c_mm, l_mm, middle_c_mm = self._apply_mismatch_single_star(
-                mm_arr
+            gmc_mm, gml_mm, c_mm, l_mm, _, _, middle_c_mm = (
+                self._apply_mismatch_single_star(mm_arr)
             )
             rsp.append(
                 self._calc_one_star_rsp(
@@ -444,6 +507,8 @@ class SSPUF_ODE(SwitchableStarPUF):
     switch_args_mapping: np.ndarray
     c_args_mapping: np.ndarray
     l_args_mapping: np.ndarray
+    g_args_mapping: np.ndarray
+    r_args_mapping: np.ndarray
     gmc_args_mapping: np.ndarray
     gml_args_mapping: np.ndarray
     n_state: int
@@ -457,6 +522,7 @@ class SSPUF_ODE(SwitchableStarPUF):
         n_time_point: int,
         random: bool = False,
         init_vals: dict = None,
+        lossiness: str = None,
     ) -> None:
         """Initialize the SwitchableStar topology.
 
@@ -467,8 +533,12 @@ class SSPUF_ODE(SwitchableStarPUF):
             Defaults to 40.
             random (bool, optional): Randomize the initial state.
             Defaults to False, initializing with gm_c=gm_l=1.0, t=20e-9.
+            lossiness: Specify the how lossy the t-lines are
+                - None: No loss
+                - "terminal": Loss only in the terminal loads
+                - "all": Loss all branches
         """
-        super().__init__(n_branch, line_len, random, init_vals)
+        super().__init__(n_branch, line_len, random, init_vals, lossiness)
         self.n_time_point = n_time_point
         self._create_and_compile_cdg()
 
@@ -489,8 +559,8 @@ class SSPUF_ODE(SwitchableStarPUF):
         args = jnp.zeros(self.n_num_attrs)
 
         for star_idx in range(2):
-            gmc_mm, gml_mm, c_mm, l_mm, middle_c_mm = self._apply_mismatch_single_star(
-                mismatch[star_idx]
+            gmc_mm, gml_mm, c_mm, l_mm, g_mm, r_mm, middle_c_mm = (
+                self._apply_mismatch_single_star(mismatch[star_idx])
             )
             # Set the middle capacitance
             args = args.at[self.middle_c_mapping[star_idx]].set(
@@ -503,6 +573,8 @@ class SSPUF_ODE(SwitchableStarPUF):
             args = args.at[self.l_args_mapping[star_idx, :, :]].set(
                 self.lc_val_base * l_mm
             )
+            args = args.at[self.g_args_mapping[star_idx, :, :]].set(g_mm)
+            args = args.at[self.r_args_mapping[star_idx, :, :]].set(r_mm)
             args = args.at[self.gmc_args_mapping[star_idx, :, :, :]].set(gmc_mm)
             args = args.at[self.gml_args_mapping[star_idx, :, :, :]].set(gml_mm)
 
@@ -549,11 +621,13 @@ class SSPUF_ODE(SwitchableStarPUF):
         self.ode_fn = partial(ode_fn, fargs=[pulse_input, pulse_input])
 
         # Create the mapping for the arguments
-        # l,c nominal params (line_len) maps to each branch on 2 stars
+        # l,c, g, r nominal params (line_len) maps to each branch on 2 stars
         # gm nominal params on forward and backward direction (line_len, 2)
         # maps to each branch on 2 stars
         c_args_mapping = np.zeros((2, self.n_branch, self.line_len), dtype=int)
         l_args_mapping = np.zeros((2, self.n_branch, self.line_len), dtype=int)
+        g_args_mapping = np.zeros((2, self.n_branch, self.line_len), dtype=int)
+        r_args_mapping = np.zeros((2, self.n_branch, self.line_len), dtype=int)
         gmc_args_mapping = np.zeros((2, self.n_branch, self.line_len, 2), dtype=int)
         gml_args_mapping = np.zeros((2, self.n_branch, self.line_len, 2), dtype=int)
 
@@ -585,6 +659,12 @@ class SSPUF_ODE(SwitchableStarPUF):
                 l_args_mapping[star_idx, branch_idx, :] = np.array(
                     [num_attr_mapping[f"{ind.name}"]["l"] for ind in inodes]
                 )
+                g_args_mapping[star_idx, branch_idx, :] = np.array(
+                    [num_attr_mapping[f"{cap.name}"]["g"] for cap in vnodes]
+                )
+                r_args_mapping[star_idx, branch_idx, :] = np.array(
+                    [num_attr_mapping[f"{ind.name}"]["r"] for ind in inodes]
+                )
                 gmc_args_mapping[star_idx, branch_idx, :, :] = np.array(
                     [
                         [
@@ -606,6 +686,8 @@ class SSPUF_ODE(SwitchableStarPUF):
 
         self.c_args_mapping = c_args_mapping
         self.l_args_mapping = l_args_mapping
+        self.g_args_mapping = g_args_mapping
+        self.r_args_mapping = r_args_mapping
         self.gmc_args_mapping = gmc_args_mapping
         self.gml_args_mapping = gml_args_mapping
         self.n_state = len(node_mapping)

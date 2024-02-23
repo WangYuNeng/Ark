@@ -222,6 +222,15 @@ def I2O_chls(
         yield jnp.array(switches), jnp.array(mismatch), t
 
 
+def print_model_params(model):
+    print(f"gm_c:\n{model.gm_c}")
+    print(f"gm_l:\n{model.gm_l}")
+    print(f"c_val:\n{model.c_val}")
+    print(f"g_val:\n{model.g_val}")
+    print(f"l_val:\n{model.l_val}")
+    print(f"r_val:\n{model.r_val}")
+
+
 def train(
     model: SwitchableStarPUF,
     loss: FunctionType,
@@ -262,7 +271,6 @@ def train(
         )
         return loss_value
 
-    prev_gmc, prev_gml = model.gm_c, model.gm_l
     best_loss_precise = 0.5  # Upper bound of the i2o and bit-flipping test loss
     for step, (switches, mismatch, t) in zip(range(steps), dataloader):
         if (step % print_every) == 0 or (step == steps - 1):
@@ -281,13 +289,7 @@ def train(
             print(
                 f"{step=}, train_loss={train_loss.item()}, loss_precise={train_loss_precise.item()}"
             )
-            print(f"gm_c:\n{model.gm_c}")
-            print(f"gm_l:\n{model.gm_l}")
-            print(f"gmc_diff:\n{model.gm_c - prev_gmc}")
-            print(f"gml_diff:\n{model.gm_l - prev_gml}")
-            print(f"c_val:\n{model.c_val}")
-            print(f"l_val:\n{model.l_val}")
-            prev_gmc, prev_gml = model.gm_c, model.gm_l
+            print_model_params(model)
 
         if train_loss_precise < best_loss_precise:
             best_loss_precise = train_loss_precise
@@ -304,16 +306,22 @@ if __name__ == "__main__":
     parser.add_argument("--learning_rate", type=float, default=5e-2)
     parser.add_argument("--n_branch", type=int, default=10)
     parser.add_argument("--line_len", type=int, default=4)
+    parser.add_argument(
+        "--lossiness", type=str, default=None, choices=["None", "terminal", "all"]
+    )
     parser.add_argument("--n_order", type=int, default=40)
     parser.add_argument("--n_time_points", type=int, default=100)
     parser.add_argument("--readout_time", type=float, default=10e-9)
-    parser.add_argument("--rand_init", action="store_true")
+    parser.add_argument(
+        "--rand_init", type=str, default=None, choices=["None", "uniform", "normal"]
+    )
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--chl_per_bit", type=int, default=64)
     parser.add_argument("--inst_per_batch", type=int, default=1)
     parser.add_argument("--steps", type=int, default=200)
     parser.add_argument("--print_every", type=int, default=1)
     parser.add_argument("--logistic_k", type=float, default=40)
+    parser.add_argument("--seed", type=int, default=428)
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--tag", type=str, default=None)
     args = parser.parse_args()
@@ -339,6 +347,7 @@ if __name__ == "__main__":
     LEARNING_RATE = args.learning_rate
     N_BRANCH = args.n_branch
     LINE_LEN = args.line_len
+    LOSSINESS = args.lossiness
     N_ORDER = args.n_order
     N_TIME_POINTS = args.n_time_points
     READOUT_TIME = args.readout_time
@@ -347,10 +356,12 @@ if __name__ == "__main__":
     CHL_PER_BIT = args.chl_per_bit
     INST_PER_BATCH = args.inst_per_batch
     STEPS = args.steps
+    SEED = args.seed
     PRINT_EVERY = args.print_every
     LOGISTIC_K = args.logistic_k
 
     print("Config:", train_config)
+    np.random.seed(SEED)
 
     optim = optax.adam(LEARNING_RATE)
 
@@ -360,6 +371,7 @@ if __name__ == "__main__":
             line_len=LINE_LEN,
             n_order=N_ORDER,
             random=RAND_INIT,
+            lossiness=LOSSINESS,
         )
     elif MODEL == "ODE":
         model = SSPUF_ODE(
@@ -367,6 +379,7 @@ if __name__ == "__main__":
             line_len=LINE_LEN,
             n_time_point=N_TIME_POINTS,
             random=RAND_INIT,
+            lossiness=LOSSINESS,
         )
     else:
         raise ValueError("Unknown model")
@@ -384,8 +397,7 @@ if __name__ == "__main__":
         train_loss = partial(i2o_loss, quantize_fn=partial(logistic, k=LOGISTIC_K))
         train_loss_precise = partial(i2o_loss, quantize_fn=step)
 
-    print(model.gm_c, model.gm_l)
-    print(model.c_val, model.l_val)
+    print_model_params(model)
     model = train(
         model=model,
         loss=train_loss,

@@ -198,14 +198,18 @@ class SwitchableStarPUF(eqx.Module):
             )
             c_mm.append(mismatch_split[i * 6 + 2] * self.c_val[:-1])
             l_mm.append(mismatch_split[i * 6 + 3] * self.l_val)
-            g_mm.append(mismatch_split[i * 6 + 4] * self.g_val)
-            r_mm.append(mismatch_split[i * 6 + 5] * self.r_val)
-            if self.lossiness == "terminal":
-                g_mm[-1] = g_mm[-1].at[:-1].multiply(0)
-                r_mm[-1] = r_mm[-1] * 0
+            if self.lossiness == "all":
+                g_mm_i = mismatch_split[i * 6 + 4]
+                r_mm_i = mismatch_split[i * 6 + 5]
+            elif self.lossiness == "terminal":
+                g_mm_i = jnp.zeros_like(self.g_val)
+                r_mm_i = jnp.zeros_like(self.r_val)
+                g_mm_i = g_mm_i.at[-1].set(mismatch_split[i * 6 + 4][-1])
             elif self.lossiness is None:
-                g_mm[-1] = g_mm[-1] * 0
-                r_mm[-1] = r_mm[-1] * 0
+                g_mm_i = jnp.zeros_like(self.g_val)
+                r_mm_i = jnp.zeros_like(self.r_val)
+            g_mm.append(g_mm_i * self.g_val)
+            r_mm.append(r_mm_i * self.r_val)
 
         middle_c_mm = mismatch_split[-1][0] * self.c_val[-1]
         return (

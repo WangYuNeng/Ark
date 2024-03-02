@@ -35,7 +35,8 @@ def plot_single_star_rsp(model, switch, mismatch, time_points):
 
 
 def step(x):
-    """step function that maps x to {0, 1} for ideal PUF ADC.
+    """step function that maps x to {0, 1} for ideal ADC
+    for arbitrary quantization value.
 
     If use this for optimization, the gradient can't pass through.
     All parameters are hardly updated.
@@ -43,9 +44,36 @@ def step(x):
     return jnp.where(x > 0, 1, 0)
 
 
+def multi_step(x, sep_val: list, k=10.0):
+    """step function that maps x to {0, 1} for ideal multi-bit PUF ADC."""
+    rtv = jnp.zeros_like(x)
+    for i, val in enumerate(sep_val):
+        rtv += jnp.where(x > val, 1, 0) * (1 - 2 * (i % 2))
+    return rtv
+
+
 def logistic(x, k=10.0):
     """Smooth approximation of the ideal ADC with the logistic function."""
     return 0.5 * (jnp.tanh(x * k / 2) + 1)
+
+
+def multi_logistic(x, sep_val: list, k=10.0):
+    """Smooth approximation of the ideal ADC with the logistic function
+    for arbitrary quantization value.
+
+    Args:
+        x (jax.Array): input
+        sep_val (list): list of separation values
+        k (float, optional): steepness of the logistic function. Defaults to 10.0.
+
+    Returns:
+        jax.Array: quantized output
+    """
+    rtv = jnp.zeros_like(x)
+    for i, val in enumerate(sep_val):
+        sign = 1 - 2 * (i % 2)
+        rtv += sign * logistic(x - val, k)
+    return rtv
 
 
 def diff(model, switch, mismatch, t):
@@ -320,6 +348,7 @@ if __name__ == "__main__":
     parser.add_argument("--inst_per_batch", type=int, default=1)
     parser.add_argument("--steps", type=int, default=200)
     parser.add_argument("--print_every", type=int, default=1)
+    parser.add_argument("--quantize_sep_val", nargs="+", type=float)
     parser.add_argument("--logistic_k", type=float, default=40)
     parser.add_argument("--seed", type=int, default=428)
     parser.add_argument("--wandb", action="store_true")
@@ -330,17 +359,6 @@ if __name__ == "__main__":
 
     train_config = vars(args)
     train_config["checkpoint"] = CHECKPOINT
-
-    if args.wandb:
-        if args.tag:
-            wandb_run = wandb.init(
-                config=train_config,
-                tags=[args.tag],
-            )
-        else:
-            wandb_run = wandb.init(
-                config=train_config,
-            )
 
     MODEL = args.model
     LOSS = args.loss
@@ -355,6 +373,8 @@ if __name__ == "__main__":
     BATCH_SIZE = args.batch_size
     CHL_PER_BIT = args.chl_per_bit
     INST_PER_BATCH = args.inst_per_batch
+    QUANTIZE_SEP_VAL = args.quantize_sep_val
+    print("Quantize sep val:", QUANTIZE_SEP_VAL)
     STEPS = args.steps
     SEED = args.seed
     PRINT_EVERY = args.print_every
@@ -385,19 +405,42 @@ if __name__ == "__main__":
         raise ValueError("Unknown model")
 
     if LOSS == "bf":
+        raise NotImplementedError("Bit-flipping test loss is no longer supported!")
         loader = bf_chls(
             BATCH_SIZE, INST_PER_BATCH, N_BRANCH, model.mismatch_len, READOUT_TIME
         )
-        train_loss = partial(bf_loss, quantize_fn=partial(logistic, k=LOGISTIC_K))
-        train_loss_precise = partial(bf_loss, quantize_fn=step)
+        train_loss = partial(
+            bf_loss,
+            quantize_fn=partial(multi_logistic, sep_val=QUANTIZE_SEP_VAL, k=LOGISTIC_K),
+        )
+        train_loss_precise = partial(
+            bf_loss, quantize_fn=partial(multi_step, sep_val=QUANTIZE_SEP_VAL)
+        )
     elif LOSS == "i2o":
         loader = I2O_chls(
             INST_PER_BATCH, CHL_PER_BIT, N_BRANCH, model.mismatch_len, READOUT_TIME
         )
-        train_loss = partial(i2o_loss, quantize_fn=partial(logistic, k=LOGISTIC_K))
-        train_loss_precise = partial(i2o_loss, quantize_fn=step)
+        train_loss = partial(
+            i2o_loss,
+            quantize_fn=partial(multi_logistic, sep_val=QUANTIZE_SEP_VAL, k=LOGISTIC_K),
+        )
+        train_loss_precise = partial(
+            i2o_loss, quantize_fn=partial(multi_step, sep_val=QUANTIZE_SEP_VAL)
+        )
 
     print_model_params(model)
+
+    if args.wandb:
+        if args.tag:
+            wandb_run = wandb.init(
+                config=train_config,
+                tags=[args.tag],
+            )
+        else:
+            wandb_run = wandb.init(
+                config=train_config,
+            )
+
     model = train(
         model=model,
         loss=train_loss,

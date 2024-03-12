@@ -62,6 +62,14 @@ CapWeight = NodeType(
             "c": AttrDef(attr_type=FunctionType, nargs=1),
             # Function type to support sequential scheduling of the weights
             "Vm": AttrDef(attr_type=float),  # Common mode bias voltage
+            "cbase": AttrDef(
+                attr_type=float, attr_range=Range(min=0)
+            ),  # Base capacitance when the weight is 0
+            # Model the weight caps separately for mismatch analysis
+            "c0": AttrDef(attr_type=float, attr_range=Range(min=0)),  # LSB cap
+            "c1": AttrDef(attr_type=float, attr_range=Range(min=0)),
+            "c2": AttrDef(attr_type=float, attr_range=Range(min=0)),
+            "c3": AttrDef(attr_type=float, attr_range=Range(min=0)),  # MSB cap
         },
     },
 )
@@ -78,7 +86,7 @@ inp_cweight_conn = ProdRule(
     CapWeight,
     DST,
     (SRC.vin(TIME) - VAR(DST) - DST.Vm)  # -SRC.vin so that the sign is correct
-    / DST.c(TIME)  # Require non-zero capacitance
+    / DST.c(TIME, DST.cbase, DST.c0, DST.c1, DST.c2, DST.c3)
     * (
         EDGE.ctrl(TIME) * EDGE.Gon / (EDGE.Gon * SRC.r + 1)
         + (-EDGE.ctrl(TIME) + 1) * EDGE.Goff / (EDGE.Goff * SRC.r + 1)
@@ -91,7 +99,7 @@ cweight_sar_conn = ProdRule(
     CapSAR,
     SRC,
     (SRC.Vm - VAR(SRC) - VAR(DST))
-    / SRC.c(TIME)
+    / SRC.c(TIME, SRC.cbase, SRC.c0, SRC.c1, SRC.c2, SRC.c3)
     * (EDGE.ctrl(TIME) * EDGE.Gon + (-EDGE.ctrl(TIME) + 1) * EDGE.Goff),
 )
 
@@ -138,11 +146,28 @@ def sequential_array(t, period, arr):
     return arr[idx]
 
 
+def sequential_cap(time, *cap_vals, bit_arr):
+    """Return the cap value at a given clock cycle
+
+    cap_val[t] = cap_vals[0] + [cap_vals[i] * bit_arr[t][i - 1]
+      for i in range(1, len(cap_vals))]
+    """
+    bits = bit_arr(time)
+    cap_val = cap_vals[0]
+    for i, bit in enumerate(bits):
+        cap_val += cap_vals[i + 1] * bit
+    return cap_val
+
+
 def constant(t, val):
     return val
 
 
 if __name__ == "__main__":
+    raise NotImplementedError(
+        "input and weight for bit version not implemented here! \
+            Please refer to multipler.py for the complete example."
+    )
     system = Ark(cdg_spec=scmm_spec)
 
     # N-path filter implementation

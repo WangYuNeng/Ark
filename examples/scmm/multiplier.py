@@ -5,7 +5,7 @@ from types import FunctionType
 
 import matplotlib.pyplot as plt
 import numpy as np
-from spec import clk, scmm_spec, sequential_array
+from spec import clk, scmm_spec, sequential_array, sequential_cap
 
 from ark.ark import Ark
 from ark.cdg.cdg import CDG
@@ -112,11 +112,11 @@ def weight_bit_to_val(weight_val: list[list[int]]) -> list[float]:
     Returns:
         list[float]: The list of weight values.
     """
-    weight_val_arr = np.array(weight_val, dtype=float)
-    n_bits, n_weights = weight_val_arr.shape
-    weight_val_arr = weight_val_arr * (2 ** np.arange(n_bits)[:, None])
+    weight_val_bits = np.array(weight_val, dtype=float)
+    n_bits, n_weights = weight_val_bits.shape
+    weight_val_arr = weight_val_bits * (2 ** np.arange(n_bits)[:, None])
     weight_val_float = weight_val_arr.sum(axis=0)
-    return weight_val_float
+    return weight_val_bits.T, weight_val_float
 
 
 if __name__ == "__main__":
@@ -158,11 +158,14 @@ if __name__ == "__main__":
     ), "Either vec_len or from_scs should be provided!"
     if args.from_scs:
         scs_data = parse_scs(args.from_scs)
-        in_val = np.array(scs_data["in_val"])[:10]
-        weight = weight_bit_to_val(scs_data["weight_val"])[:10] * C1
+        in_val = np.array(scs_data["in_val"])
+        weight_bit, weight = weight_bit_to_val(scs_data["weight_val"])
+        weight_bit, weight = weight_bit, weight
+        weight *= C1
         assert len(weight) == len(in_val), "Input and weight length mismatch!"
         vin = weight_to_sequential(in_val, 1 / FREQ)
-        c1 = weight_to_sequential(weight, 1 / FREQ)
+        c1_bit = weight_to_sequential(weight_bit, 1 / FREQ)
+        c1_fn = partial(sequential_cap, bit_arr=c1_bit)
         vec_len = len(in_val)
 
     else:
@@ -170,6 +173,9 @@ if __name__ == "__main__":
         in_val = np.random.randint(-4, 5, size=vec_len)
         weight = np.random.randint(1, 5, size=vec_len) * C1
 
+        raise NotImplementedError(
+            "Random input and weight for bit version not implemented!"
+        )
         vin = weight_to_sequential(in_val, 1 / FREQ)
         c1 = weight_to_sequential(weight, 1 / FREQ)
 
@@ -187,7 +193,9 @@ if __name__ == "__main__":
 
     scmm = CDG()
     inp = Inp(vin=vin, r=R_IN)
-    cweight = CapWeight(c=c1, Vm=V_BIAS)
+    cweight = CapWeight(
+        c=c1_fn, Vm=V_BIAS, cbase=C1 / 100, c0=C1, c1=C1 * 2, c2=C1 * 4, c3=C1 * 8
+    )
     csar = CapSAR(c=C2)
     sw1 = Sw(ctrl=phi1, Gon=G_ON, Goff=G_OFF)
     sw2 = Sw(ctrl=phi2, Gon=G_ON, Goff=G_OFF)
@@ -250,17 +258,21 @@ if __name__ == "__main__":
         plt.figure()
         readout_point = [i / FREQ for i in range(1, vec_len + 1)]
         in_val = (in_val - V_BIAS) * -1
-        ideal_cumsum = np.cumsum(in_val * weight / C1) / C_RATIO
+        # in_val = (in_val) * -1
+        # ideal_cumsum = np.cumsum(in_val * weight / C1) / C_RATIO
 
         k = C2 / (C2 + np.abs(weight))
         mu = weight / C2
         a_arr = [
             [mu[j] * np.prod(k[j : i + 1]) for j in range(i + 1)] for i in range(len(k))
         ]
-        scmm_analytic = [np.sum(a_arr[i] * in_val[: i + 1]) for i in range(len(a_arr))]
+        scmm_analytic = np.array(
+            [np.sum(a_arr[i] * in_val[: i + 1]) for i in range(len(a_arr))]
+        )
+        # scmm_analytic += V_BIAS * np.array([np.prod(k[: i + 1]) for i in range(len(k))])
 
         scmm_cumsum = csar.get_trace(n=0) - V_BIAS
-        plt.plot(readout_point, ideal_cumsum, label="Ideal MM", marker="^")
+        # plt.plot(readout_point, ideal_cumsum, label="Ideal MM", marker="^")
         plt.plot(readout_point, scmm_analytic, label="SCMM Analytical", marker="o")
         plt.plot(time_points, scmm_cumsum, label="V_C2")
         plt.legend()

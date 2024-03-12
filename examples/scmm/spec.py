@@ -2,6 +2,7 @@
 Example: Switch-capacitor matrix multiplier (scmm)
 https://ieeexplore.ieee.org/abstract/document/7579580
 """
+
 from functools import partial
 from types import FunctionType
 
@@ -60,6 +61,7 @@ CapWeight = NodeType(
         "attr_def": {
             "c": AttrDef(attr_type=FunctionType, nargs=1),
             # Function type to support sequential scheduling of the weights
+            "Vm": AttrDef(attr_type=float),  # Common mode bias voltage
         },
     },
 )
@@ -75,7 +77,7 @@ inp_cweight_conn = ProdRule(
     Inp,
     CapWeight,
     DST,
-    (-SRC.vin(TIME) - VAR(DST))  # -SRC.vin so that the sign is correct
+    (SRC.vin(TIME) - VAR(DST) - DST.Vm)  # -SRC.vin so that the sign is correct
     / DST.c(TIME)  # Require non-zero capacitance
     * (
         EDGE.ctrl(TIME) * EDGE.Gon / (EDGE.Gon * SRC.r + 1)
@@ -88,7 +90,7 @@ cweight_sar_conn = ProdRule(
     CapWeight,
     CapSAR,
     SRC,
-    (-VAR(SRC) - VAR(DST))
+    (SRC.Vm - VAR(SRC) - VAR(DST))
     / SRC.c(TIME)
     * (EDGE.ctrl(TIME) * EDGE.Gon + (-EDGE.ctrl(TIME) + 1) * EDGE.Goff),
 )
@@ -98,7 +100,7 @@ sar_cweight_conn = ProdRule(
     CapWeight,
     CapSAR,
     DST,
-    (-VAR(SRC) - VAR(DST))
+    (SRC.Vm - VAR(SRC) - VAR(DST))
     / DST.c
     * (EDGE.ctrl(TIME) * EDGE.Gon + (-EDGE.ctrl(TIME) + 1) * EDGE.Goff),
 )
@@ -162,7 +164,7 @@ if __name__ == "__main__":
 
     scmm = CDG()
     inp = Inp(vin=VDD, r=R_IN)
-    cweight = CapWeight(c=c1_fixed)
+    cweight = CapWeight(c=c1_fixed, Vm=0.0)
     csar = CapSAR(c=C2)
     sw1 = Sw(ctrl=phi1, Gon=G_ON, Goff=G_OFF)
     sw2 = Sw(ctrl=phi2, Gon=G_ON, Goff=G_OFF)

@@ -32,14 +32,30 @@ def plot_mc_csv(file_path: str, ax: plt.Axes):
         ax (plt.Axes): The axis to plot on.
     """
     data = np.genfromtxt(file_path, delimiter=",", skip_header=1)
-    time_points = data[:, 0::2].T
+    time_points = data[:, 0::2].T - 30e-9
     mc_runs = data[:, 1::2].T
     for time, run in zip(time_points, mc_runs):
         ax.plot(time, run)
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Voltage (V)")
     ax.set_title("Monte Carlo Simulation")
-    return ax
+    return ax, time_points, mc_runs
+
+
+def align_data(
+    time_points: np.ndarray, data: np.ndarray, target_time: np.ndarray
+) -> np.ndarray:
+    """
+    Align the data to the target time points using linear interpolation.
+
+    Args:
+        time_points (np.ndarray): The time points of the data.
+        data (np.ndarray): The data to align.
+        target_time (np.ndarray): The target time points.
+    Returns:
+        np.ndarray: The aligned data.
+    """
+    return np.interp(target_time, time_points, data)
 
 
 def parse_scs(scs_path: str) -> dict:
@@ -67,7 +83,6 @@ def parse_scs(scs_path: str) -> dict:
             if len(vals) == 1:
                 mode = "WAIT"
             else:
-                assert vals[1].endswith("n"), "Assume time is in ns!"
                 data["in_val"].append(float(vals[2]))
         elif mode == "READ_WEIGHT":
             # Use regex to find data="..." in the line and parse the value
@@ -114,6 +129,7 @@ if __name__ == "__main__":
     parser.add_argument("--g_on", type=float, help="Value of G_ON.", default=1e6)
     parser.add_argument("--g_off", type=float, help="Value of G_OFF.", default=0.0)
     parser.add_argument("--r_in", type=float, help="Value of R_IN.", default=0.0)
+    parser.add_argument("--v_bias", type=float, help="Value of V_BIAS.", default=0.0)
     parser.add_argument(
         "--from_scs", type=str, help="Initialize weight with scs file.", default=None
     )
@@ -135,26 +151,19 @@ if __name__ == "__main__":
     G_OFF = args.g_off
     R_IN = args.r_in
     FREQ = args.freq
-
-    if args.plot_csv:
-        fig, ax = plt.subplots()
-        plot_mc_csv(args.plot_csv, ax)
-        plt.show()
-        plt.close()
+    V_BIAS = args.v_bias
 
     assert (
         args.vec_len or args.from_scs
     ), "Either vec_len or from_scs should be provided!"
     if args.from_scs:
         scs_data = parse_scs(args.from_scs)
-        in_val = scs_data["in_val"]
-        weight = scs_data["weight_val"]
+        in_val = np.array(scs_data["in_val"])[:10]
+        weight = weight_bit_to_val(scs_data["weight_val"])[:10] * C1
+        assert len(weight) == len(in_val), "Input and weight length mismatch!"
+        vin = weight_to_sequential(in_val, 1 / FREQ)
+        c1 = weight_to_sequential(weight, 1 / FREQ)
         vec_len = len(in_val)
-        weights = weight_bit_to_val(weight)
-        assert len(weights) == len(in_val), "Input and weight length mismatch!"
-        vin = weight_to_sequential(in_val[:10], 1 / FREQ)
-        c1 = weight_to_sequential(weights[:10], 1 / FREQ)
-        vec_len = len(in_val[:10])
 
     else:
         vec_len = args.vec_len
@@ -178,7 +187,7 @@ if __name__ == "__main__":
 
     scmm = CDG()
     inp = Inp(vin=vin, r=R_IN)
-    cweight = CapWeight(c=c1)
+    cweight = CapWeight(c=c1, Vm=V_BIAS)
     csar = CapSAR(c=C2)
     sw1 = Sw(ctrl=phi1, Gon=G_ON, Goff=G_OFF)
     sw2 = Sw(ctrl=phi2, Gon=G_ON, Goff=G_OFF)
@@ -186,7 +195,9 @@ if __name__ == "__main__":
     scmm.connect(sw2, cweight, csar)
 
     system.compile(cdg=scmm)
-    scmm.initialize_all_states(val=0)
+    scmm.initialize_all_states(val=0.0)
+    cweight.init_vals = [0]
+    csar.init_vals = [V_BIAS]
 
     system.print_prog()
 
@@ -209,11 +220,36 @@ if __name__ == "__main__":
         ax[2 * (i + 1)].plot(time_points, trace, label="Cap %d" % (i + 1))
         ax[2 * (i + 1)].legend()
     plt.tight_layout()
+    plt.savefig("ark_trasient.png")
     plt.show()
-    plt.clf()
+    plt.close()
+
+    if args.plot_csv:
+        fig, ax = plt.subplots()
+        _, mc_time_points, mc_runs = plot_mc_csv(args.plot_csv, ax)
+        ax.plot(time_points, csar.get_trace(n=0), label="V_C2 (Ark, deterministic)")
+        plt.legend()
+        plt.savefig("ark_mc_compare.png")
+        plt.show()
+        plt.close()
+
+        alignged_run = align_data(
+            mc_time_points[0], np.average(mc_runs, axis=0), time_points
+        )
+        plt.figure()
+        plt.plot(
+            time_points,
+            (csar.get_trace(n=0) - 0.5) / (alignged_run - 0.5),
+        )
+        plt.title("ark sim / spectre sim (both traces are subtracted 0.5 first)")
+        plt.savefig("ark_mc_compare_ratio.png")
+        plt.show()
+        plt.close()
 
     if args.plot_analytical:
+        plt.figure()
         readout_point = [i / FREQ for i in range(1, vec_len + 1)]
+        in_val = (in_val - V_BIAS) * -1
         ideal_cumsum = np.cumsum(in_val * weight / C1) / C_RATIO
 
         k = C2 / (C2 + np.abs(weight))
@@ -223,9 +259,10 @@ if __name__ == "__main__":
         ]
         scmm_analytic = [np.sum(a_arr[i] * in_val[: i + 1]) for i in range(len(a_arr))]
 
-        scmm_cumsum = csar.get_trace(n=0)
-        plt.plot(readout_point, ideal_cumsum, label="Ideal", marker="^")
+        scmm_cumsum = csar.get_trace(n=0) - V_BIAS
+        plt.plot(readout_point, ideal_cumsum, label="Ideal MM", marker="^")
         plt.plot(readout_point, scmm_analytic, label="SCMM Analytical", marker="o")
         plt.plot(time_points, scmm_cumsum, label="V_C2")
         plt.legend()
+        plt.savefig("ark_analytical_compare.png")
         plt.show()

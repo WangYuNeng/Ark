@@ -146,7 +146,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     C_RATIO = args.c_ratio
     C1 = args.c1
-    C2 = C1 * C_RATIO
+    C2 = 15 * C1 * C_RATIO
     G_ON = args.g_on
     G_OFF = args.g_off
     R_IN = args.r_in
@@ -209,7 +209,7 @@ if __name__ == "__main__":
 
     system.print_prog()
 
-    time_points = np.linspace(*TIME_RANGE, 100)
+    time_points = np.linspace(*TIME_RANGE, 1000)
     system.execute(
         cdg=scmm,
         time_eval=time_points,
@@ -247,10 +247,10 @@ if __name__ == "__main__":
         plt.figure()
         plt.plot(
             time_points,
-            (csar.get_trace(n=0) - 0.5) / (alignged_run - 0.5),
+            csar.get_trace(n=0) - alignged_run,
         )
-        plt.title("ark sim / spectre sim (both traces are subtracted 0.5 first)")
-        plt.savefig("ark_mc_compare_ratio.png")
+        plt.title("diff. of ark sim  - spectre sim")
+        plt.savefig("ark_mc_compare_diff.png")
         plt.show()
         plt.close()
 

@@ -143,10 +143,12 @@ if __name__ == "__main__":
         default=False,
     )
 
+    N_BITS = 4
+
     args = parser.parse_args()
-    C_RATIO = args.c_ratio
+    C_RATIO = args.c_ratio * (2**N_BITS - 1)
     C1 = args.c1
-    C2 = 15 * C1 * C_RATIO
+    C2 = C1 * C_RATIO
     G_ON = args.g_on
     G_OFF = args.g_off
     R_IN = args.r_in
@@ -205,7 +207,7 @@ if __name__ == "__main__":
     system.compile(cdg=scmm)
     scmm.initialize_all_states(val=0.0)
     cweight.init_vals = [0]
-    csar.init_vals = [V_BIAS]
+    csar.init_vals = [V_BIAS + 0.002]
 
     system.print_prog()
 
@@ -241,16 +243,77 @@ if __name__ == "__main__":
         plt.show()
         plt.close()
 
-        alignged_run = align_data(
-            mc_time_points[0], np.average(mc_runs, axis=0), time_points
+        readout_point = [i / FREQ for i in range(1, vec_len + 1)]
+        alignged_spectre_sim = align_data(
+            mc_time_points[0], np.average(mc_runs, axis=0), readout_point
         )
-        plt.figure()
-        plt.plot(
-            time_points,
-            csar.get_trace(n=0) - alignged_run,
-        )
-        plt.title("diff. of ark sim  - spectre sim")
-        plt.savefig("ark_mc_compare_diff.png")
+        aligned_ark_sim = align_data(time_points, csar.get_trace(n=0), readout_point)
+        fig, ax = plt.subplots(ncols=3, nrows=3, figsize=(15, 15))
+
+        sim_diff = alignged_spectre_sim - aligned_ark_sim
+        ax[0, 0].plot(readout_point, sim_diff, marker="o")
+        ax[0, 0].set_xlabel("Time (s)")
+        ax[0, 0].set_ylabel("Voltage (V)")
+        ax[0, 0].set_title("Voltage difference. (spectre - ark)")
+
+        ax[0, 1].plot(readout_point, sim_diff / aligned_ark_sim * 100, marker="o")
+        ax[0, 1].set_xlabel("Time (s)")
+        ax[0, 1].set_ylabel("Precentage (%)")
+        ax[0, 1].set_title("Percentage difference. (spectre - ark) / ark")
+
+        # Hide ax[0, 2].
+        ax[0, 2].axis("off")
+
+        ax[1, 0].scatter(in_val, sim_diff)
+        ax[1, 0].axhline(0, color="black", lw=1)
+        ax[1, 0].axvline(0, color="black", lw=1)
+        ax[1, 0].axvline(V_BIAS, color="red", lw=1, linestyle="--", label="V_BIAS")
+        ax[1, 0].set_xlabel("Volt (V)")
+        ax[1, 0].set_ylabel("Volt (V)")
+        ax[1, 0].set_title("Volt Diff vs Input Volt")
+        ax[1, 0].legend()
+
+        ax[1, 1].scatter(weight, sim_diff)
+        ax[1, 1].axhline(0, color="black", lw=1)
+        ax[1, 1].axvline(0, color="black", lw=1)
+        ax[1, 1].set_xlabel("Weight (F)")
+        ax[1, 1].set_ylabel("Volt (V))")
+        ax[1, 1].set_title("Volt Diff vs Weight")
+
+        ax[1, 2].scatter(aligned_ark_sim, sim_diff)
+        ax[1, 2].axvline(V_BIAS, color="red", lw=1, linestyle="--", label="V_BIAS")
+        ax[1, 2].set_xlabel("Volt (V)")
+        ax[1, 2].set_ylabel("Volt(V)")
+        ax[1, 2].set_title("Volt Diff vs Ark Simulation")
+        ax[1, 2].legend()
+
+        per_cycle_diff = sim_diff
+        per_cycle_diff[1:] -= per_cycle_diff[:-1]
+        ax[2, 0].scatter(in_val, per_cycle_diff)
+        ax[2, 0].axhline(0, color="black", lw=1)
+        ax[2, 0].axvline(0, color="black", lw=1)
+        ax[2, 0].axvline(V_BIAS, color="red", lw=1, linestyle="--", label="V_BIAS")
+        ax[2, 0].set_xlabel("Volt (V)")
+        ax[2, 0].set_ylabel("Volt (V)")
+        ax[2, 0].set_title("In-Cycle Diff vs Input")
+        ax[2, 0].legend()
+
+        ax[2, 1].scatter(weight, per_cycle_diff)
+        ax[2, 1].axhline(0, color="black", lw=1)
+        ax[2, 1].axvline(0, color="black", lw=1)
+        ax[2, 1].set_xlabel("Weight (F)")
+        ax[2, 1].set_ylabel("Volt (V))")
+        ax[2, 1].set_title("In-Cycle Diff vs Weight")
+
+        ax[2, 2].scatter(aligned_ark_sim, per_cycle_diff)
+        ax[2, 2].axvline(V_BIAS, color="red", lw=1, linestyle="--", label="V_BIAS")
+        ax[2, 2].set_xlabel("Volt (V)")
+        ax[2, 2].set_ylabel("Volt(V)")
+        ax[2, 2].set_title("In-Cycle Diff vs Ark Simulation")
+        ax[2, 2].legend()
+
+        plt.tight_layout()
+        plt.savefig("ark_mc_compare_diff.png", dpi=300)
         plt.show()
         plt.close()
 
@@ -258,8 +321,7 @@ if __name__ == "__main__":
         plt.figure()
         readout_point = [i / FREQ for i in range(1, vec_len + 1)]
         in_val = (in_val - V_BIAS) * -1
-        # in_val = (in_val) * -1
-        # ideal_cumsum = np.cumsum(in_val * weight / C1) / C_RATIO
+        ideal_cumsum = np.cumsum(in_val * weight / C1) / C_RATIO
 
         k = C2 / (C2 + np.abs(weight))
         mu = weight / C2
@@ -269,10 +331,9 @@ if __name__ == "__main__":
         scmm_analytic = np.array(
             [np.sum(a_arr[i] * in_val[: i + 1]) for i in range(len(a_arr))]
         )
-        # scmm_analytic += V_BIAS * np.array([np.prod(k[: i + 1]) for i in range(len(k))])
 
         scmm_cumsum = csar.get_trace(n=0) - V_BIAS
-        # plt.plot(readout_point, ideal_cumsum, label="Ideal MM", marker="^")
+        plt.plot(readout_point, ideal_cumsum, label="Ideal MM", marker="^")
         plt.plot(readout_point, scmm_analytic, label="SCMM Analytical", marker="o")
         plt.plot(time_points, scmm_cumsum, label="V_C2")
         plt.legend()

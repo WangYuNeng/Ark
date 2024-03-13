@@ -65,7 +65,8 @@ CapWeight = NodeType(
             "cbase": AttrDef(
                 attr_type=float, attr_range=Range(min=0)
             ),  # Base capacitance when the weight is 0
-            # Model the weight caps separately for mismatch analysis
+            # Model the weight caps separately for mismatch analysis, fixed to 4 bits
+            # TODO: Add Ark support for list/array type
             "c0": AttrDef(attr_type=float, attr_range=Range(min=0)),  # LSB cap
             "c1": AttrDef(attr_type=float, attr_range=Range(min=0)),
             "c2": AttrDef(attr_type=float, attr_range=Range(min=0)),

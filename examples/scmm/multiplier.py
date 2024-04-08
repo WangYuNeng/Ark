@@ -5,7 +5,7 @@ from types import FunctionType
 
 import matplotlib.pyplot as plt
 import numpy as np
-from spec import clk, scmm_spec, sequential_array, sequential_cap
+from spec import clk, ds_scmm_spec, scmm_spec, sequential_array, sequential_cap
 
 from ark.ark import Ark
 from ark.cdg.cdg import CDG
@@ -119,6 +119,29 @@ def weight_bit_to_val(weight_val: list[list[int]]) -> list[float]:
     return weight_val_bits.T, weight_val_float
 
 
+def sim(system: Ark, scmm: CDG, time_points: np.ndarray):
+    system.compile(cdg=scmm)
+    system.print_prog()
+    system.execute(
+        cdg=scmm,
+        time_eval=time_points,
+        max_step=1 / FREQ / 100,
+    )
+
+
+def sim_ds(system: Ark, scmm: CDG, time_points: np.ndarray, args, fargs):
+    compiler = system.compiler
+    ode_fn, _, _, _, _ = compiler.compile_odeterm(cdg=scmm, cdg_spec=ds_scmm_spec)
+    compiler.print_odeterm()
+    trace = [[V_BIAS, V_BIAS]]
+    for t in time_points:
+        trace.append(ode_fn(t, trace[-1], args, fargs))
+
+    trace = np.array(trace)
+    plt.plot(time_points, trace[:-1, 0], label="V_C2")
+    plt.show()
+
+
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Run SCMM example.")
@@ -181,7 +204,7 @@ if __name__ == "__main__":
         vin = weight_to_sequential(in_val, 1 / FREQ)
         c1 = weight_to_sequential(weight, 1 / FREQ)
 
-    system = Ark(cdg_spec=scmm_spec)
+    system = Ark(cdg_spec=ds_scmm_spec)
 
     Inp = scmm_spec.node_type("InpV")
     CapWeight = scmm_spec.node_type("CapWeight")
@@ -204,19 +227,33 @@ if __name__ == "__main__":
     scmm.connect(sw1, inp, cweight)
     scmm.connect(sw2, cweight, csar)
 
-    system.compile(cdg=scmm)
     scmm.initialize_all_states(val=0.0)
     cweight.init_vals = [0]
-    csar.init_vals = [V_BIAS + 0.002]
-
-    system.print_prog()
-
+    csar.init_vals = [V_BIAS]
     time_points = np.linspace(*TIME_RANGE, 1000)
-    system.execute(
-        cdg=scmm,
-        time_eval=time_points,
-        max_step=1 / FREQ / 100,
-    )
+
+    ds_system = Ark(cdg_spec=ds_scmm_spec)
+    # CapSAR_0_c, CapWeight_0_Vm, CapWeight_0_cbase, CapWeight_0_c0, CapWeight_0_c1, CapWeight_0_c2, CapWeight_0_c3, InpV_0_r, Sw_0_Gon, Sw_0_Goff, Sw_1_Gon, Sw_1_Goff = args
+    # CapWeight_0_c, InpV_0_vin, Sw_0_ctrl, Sw_1_ctrl = fargs
+    args = [
+        C2,
+        V_BIAS,
+        C1 / 100,
+        C1,
+        C1 * 2,
+        C1 * 4,
+        C1 * 8,
+        R_IN,
+        G_ON,
+        G_OFF,
+        G_ON,
+        G_OFF,
+    ]
+    fargs = [c1_fn, vin, phi1, phi2]
+    readout_point = [i / FREQ / 2 for i in range(1, 2 * vec_len + 1)]
+    sim_ds(ds_system, scmm, readout_point, args, fargs)
+    input()
+    # sim(system, scmm, time_points)
 
     fig, ax = plt.subplots(nrows=5)
     ax[0].plot(time_points, [vin(t) for t in time_points], label="Input")

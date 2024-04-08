@@ -160,6 +160,49 @@ def sequential_cap(time, *cap_vals, bit_arr):
     return cap_val
 
 
+# Discrete state-space model
+# x_k+1 = A * x_k + B * u_k
+# A hack now, use the ddt to represent the next state
+
+# Reuse the cdg types
+
+# Production rules
+ds_inp_cweight_conn = ProdRule(
+    Sw,
+    Inp,
+    CapWeight,
+    DST,
+    EDGE.ctrl(TIME)
+    * (SRC.vin(TIME) - DST.Vm)
+    * DST.c(TIME, DST.cbase, DST.c0, DST.c1, DST.c2, DST.c3),
+)  # Q1 = C1 * (Vin - Vm)
+ds_cweight_sar_conn = ProdRule(
+    Sw,
+    CapWeight,
+    CapSAR,
+    SRC,
+    EDGE.ctrl(TIME)
+    * (VAR(SRC) - VAR(DST) - SRC.Vm * DST.c)
+    * SRC.c(TIME, SRC.cbase, SRC.c0, SRC.c1, SRC.c2, SRC.c3)
+    / (SRC.c(TIME, SRC.cbase, SRC.c0, SRC.c1, SRC.c2, SRC.c3) + DST.c),
+)  # Q1 = C1 / (C1 + C2) * (Q1 - Q2 - C2 * Vm)
+
+ds_sar_cweight_conn = ProdRule(
+    Sw,
+    CapWeight,
+    CapSAR,
+    DST,
+    EDGE.ctrl(TIME)
+    * (-VAR(SRC) + VAR(DST) - SRC.Vm)
+    * DST.c
+    / (SRC.c(TIME, SRC.cbase, SRC.c0, SRC.c1, SRC.c2, SRC.c3) + DST.c),
+)  # Q2 = C2 / (C1 + C2) * (-Q1 + Q2 - C2 * Vm)
+ds_prod_rules = [ds_inp_cweight_conn, ds_cweight_sar_conn, ds_sar_cweight_conn]
+ds_scmm_spec = CDGSpec(
+    cdg_types=cdg_types, production_rules=ds_prod_rules, validation_rules=None
+)
+
+
 def constant(t, val):
     return val
 

@@ -164,7 +164,7 @@ def sequential_cap(time, *cap_vals, bit_arr):
 # x_k+1 = A * x_k + B * u_k
 # A hack now, use the ddt to represent the next state
 
-# Reuse the cdg types
+# Reuse the cdg types but the state variables represent charge (Q) instead
 
 # Production rules
 ds_inp_cweight_conn = ProdRule(
@@ -193,9 +193,14 @@ ds_sar_cweight_conn = ProdRule(
     CapSAR,
     DST,
     EDGE.ctrl(TIME)
-    * (-VAR(SRC) + VAR(DST) - SRC.Vm)
+    * (
+        -VAR(SRC)
+        + VAR(DST)
+        + SRC.c(TIME, SRC.cbase, SRC.c0, SRC.c1, SRC.c2, SRC.c3) * SRC.Vm
+    )
     * DST.c
-    / (SRC.c(TIME, SRC.cbase, SRC.c0, SRC.c1, SRC.c2, SRC.c3) + DST.c),
+    / (SRC.c(TIME, SRC.cbase, SRC.c0, SRC.c1, SRC.c2, SRC.c3) + DST.c)
+    + (-EDGE.ctrl(TIME) + 1) * VAR(DST),
 )  # Q2 = C2 / (C1 + C2) * (-Q1 + Q2 - C2 * Vm)
 ds_prod_rules = [ds_inp_cweight_conn, ds_cweight_sar_conn, ds_sar_cweight_conn]
 ds_scmm_spec = CDGSpec(

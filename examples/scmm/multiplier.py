@@ -1,5 +1,6 @@
 import argparse
 import re
+import time
 from functools import partial
 from types import FunctionType
 
@@ -133,13 +134,13 @@ def sim_ds(system: Ark, scmm: CDG, time_points: np.ndarray, args, fargs):
     compiler = system.compiler
     ode_fn, _, _, _, _ = compiler.compile_odeterm(cdg=scmm, cdg_spec=ds_scmm_spec)
     compiler.print_odeterm()
-    trace = [[V_BIAS, V_BIAS]]
+    trace = [[C2 * V_BIAS, 0]]
     for t in time_points:
         trace.append(ode_fn(t, trace[-1], args, fargs))
 
     trace = np.array(trace)
-    plt.plot(time_points, trace[:-1, 0], label="V_C2")
-    plt.show()
+    plt.plot(time_points, trace[:-1, 0] / C2, label="V_C2_discrete_sim")
+    # plt.show()
 
 
 if __name__ == "__main__":
@@ -235,7 +236,7 @@ if __name__ == "__main__":
     ds_system = Ark(cdg_spec=ds_scmm_spec)
     # CapSAR_0_c, CapWeight_0_Vm, CapWeight_0_cbase, CapWeight_0_c0, CapWeight_0_c1, CapWeight_0_c2, CapWeight_0_c3, InpV_0_r, Sw_0_Gon, Sw_0_Goff, Sw_1_Gon, Sw_1_Goff = args
     # CapWeight_0_c, InpV_0_vin, Sw_0_ctrl, Sw_1_ctrl = fargs
-    args = [
+    ds_args = [
         C2,
         V_BIAS,
         C1 / 100,
@@ -249,11 +250,18 @@ if __name__ == "__main__":
         G_ON,
         G_OFF,
     ]
-    fargs = [c1_fn, vin, phi1, phi2]
-    readout_point = [i / FREQ / 2 for i in range(1, 2 * vec_len + 1)]
-    sim_ds(ds_system, scmm, readout_point, args, fargs)
-    input()
-    # sim(system, scmm, time_points)
+    ds_fargs = [c1_fn, vin, phi1, phi2]
+    readout_point = [i / FREQ / 2 - 0.1 / FREQ for i in range(1, 2 * vec_len + 1)]
+
+    t = time.time()
+    sim_ds(ds_system, scmm, readout_point, ds_args, ds_fargs)
+    print("Discrete simulation time: ", time.time() - t)
+
+    system = Ark(cdg_spec=scmm_spec)
+    t = time.time()
+    sim(system, scmm, time_points)
+    print("Continuous simulation time: ", time.time() - t)
+    plt.plot(time_points, csar.get_trace(n=0), label="V_C2 (Ark, deterministic)")
 
     fig, ax = plt.subplots(nrows=5)
     ax[0].plot(time_points, [vin(t) for t in time_points], label="Input")

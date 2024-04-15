@@ -139,8 +139,7 @@ def sim_ds(system: Ark, scmm: CDG, time_points: np.ndarray, args, fargs):
         trace.append(ode_fn(t, trace[-1], args, fargs))
 
     trace = np.array(trace)
-    plt.plot(time_points, trace[:-1, 0] / C2, label="V_C2_discrete_sim")
-    # plt.show()
+    return trace
 
 
 if __name__ == "__main__":
@@ -154,6 +153,11 @@ if __name__ == "__main__":
     parser.add_argument("--g_off", type=float, help="Value of G_OFF.", default=0.0)
     parser.add_argument("--r_in", type=float, help="Value of R_IN.", default=0.0)
     parser.add_argument("--v_bias", type=float, help="Value of V_BIAS.", default=0.0)
+    parser.add_argument(
+        "--sim_discrete",
+        action="store_true",
+        help="Simulate with the discrete state space model too.",
+    )
     parser.add_argument(
         "--from_scs", type=str, help="Initialize weight with scs file.", default=None
     )
@@ -233,35 +237,39 @@ if __name__ == "__main__":
     csar.init_vals = [V_BIAS]
     time_points = np.linspace(*TIME_RANGE, 1000)
 
-    ds_system = Ark(cdg_spec=ds_scmm_spec)
-    # CapSAR_0_c, CapWeight_0_Vm, CapWeight_0_cbase, CapWeight_0_c0, CapWeight_0_c1, CapWeight_0_c2, CapWeight_0_c3, InpV_0_r, Sw_0_Gon, Sw_0_Goff, Sw_1_Gon, Sw_1_Goff = args
-    # CapWeight_0_c, InpV_0_vin, Sw_0_ctrl, Sw_1_ctrl = fargs
-    ds_args = [
-        C2,
-        V_BIAS,
-        C1 / 100,
-        C1,
-        C1 * 2,
-        C1 * 4,
-        C1 * 8,
-        R_IN,
-        G_ON,
-        G_OFF,
-        G_ON,
-        G_OFF,
-    ]
-    ds_fargs = [c1_fn, vin, phi1, phi2]
-    readout_point = [i / FREQ / 2 - 0.1 / FREQ for i in range(1, 2 * vec_len + 1)]
+    if args.sim_discrete:
 
-    t = time.time()
-    sim_ds(ds_system, scmm, readout_point, ds_args, ds_fargs)
-    print("Discrete simulation time: ", time.time() - t)
+        ds_system = Ark(cdg_spec=ds_scmm_spec)
+        # CapSAR_0_c, CapWeight_0_Vm, CapWeight_0_cbase, CapWeight_0_c0, CapWeight_0_c1, CapWeight_0_c2, CapWeight_0_c3, InpV_0_r, Sw_0_Gon, Sw_0_Goff, Sw_1_Gon, Sw_1_Goff = args
+        # CapWeight_0_c, InpV_0_vin, Sw_0_ctrl, Sw_1_ctrl = fargs
+        ds_args = [
+            C2,
+            V_BIAS,
+            C1 / 100,
+            C1,
+            C1 * 2,
+            C1 * 4,
+            C1 * 8,
+            R_IN,
+            G_ON,
+            G_OFF,
+            G_ON,
+            G_OFF,
+        ]
+        ds_fargs = [c1_fn, vin, phi1, phi2]
+        readout_point = [i / FREQ / 2 - 0.1 / FREQ for i in range(1, 2 * vec_len + 1)]
+
+        t = time.time()
+        trace = sim_ds(ds_system, scmm, readout_point, ds_args, ds_fargs)
+        print("Discrete simulation time: ", time.time() - t)
+        plt.plot(readout_point, trace[:-1, 0] / C2, label="V_C2 (Ark, discrete)")
 
     system = Ark(cdg_spec=scmm_spec)
     t = time.time()
     sim(system, scmm, time_points)
     print("Continuous simulation time: ", time.time() - t)
-    plt.plot(time_points, csar.get_trace(n=0), label="V_C2 (Ark, deterministic)")
+    plt.plot(time_points, csar.get_trace(n=0), label="V_C2 (Ark, continuous)")
+    plt.legend()
 
     fig, ax = plt.subplots(nrows=5)
     ax[0].plot(time_points, [vin(t) for t in time_points], label="Input")

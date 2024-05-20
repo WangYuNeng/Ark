@@ -1,6 +1,7 @@
 """
 Attribute class for CDGType.
 """
+
 from functools import partial
 from types import FunctionType
 from typing import NewType, Optional, Union
@@ -82,6 +83,22 @@ class AttrDef:
             return self.valid_range.min
         if self.valid_range.is_upper_bound():
             return self.valid_range.max
+
+    @property
+    def mean(self) -> float:
+        """Return the mean of the valid range of this attribute."""
+        if self.valid_range is None:
+            raise ValueError("Cannot get mean of an attribute without valid range")
+        return self.valid_range.mean()
+
+    @property
+    def full_scale(self) -> float:
+        """Return the full scale of the valid range of this attribute."""
+        if self.valid_range is None:
+            raise ValueError(
+                "Cannot get full scale of an attribute without valid range"
+            )
+        return self.valid_range.full_scale()
 
 
 class AttrDefMismatch(AttrDef):

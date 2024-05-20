@@ -1,6 +1,7 @@
 """
 Meta classes for CDG types.
 """
+
 import inspect
 from abc import abstractmethod
 from typing import Any, Mapping, Optional

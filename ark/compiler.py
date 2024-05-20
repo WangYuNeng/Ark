@@ -11,12 +11,12 @@ import jax.numpy as jnp
 import numpy as np
 import scipy
 import sympy
+import sympy.codegen
 from scipy import integrate
-from tqdm import tqdm
 
 from ark.cdg.cdg import CDG, CDGEdge, CDGNode
 from ark.reduction import Reduction
-from ark.rewrite import BaseRewriteGen, RewriteGen
+from ark.rewrite import BaseRewriteGen, SympyRewriteGen
 from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule, ProdRuleId
 from ark.specification.rule_keyword import SRC, TIME, Target, kw_name
@@ -94,7 +94,7 @@ def set_ctx(expr: ast.expr, ctx: ast.expr_context) -> ast.expr:
 
 
 def concat_expr(
-    exprs: list[ast.expr] | list[sympy.Expr], operator: ast.operator | type
+    exprs: list[ast.expr] | list[sympy.Expr], operator: ast.operator | sympy.Expr
 ) -> ast.operator | sympy.Expr:
     """concatenate expressions with the given operator"""
     if isinstance(operator, ast.operator):
@@ -203,8 +203,7 @@ class ArkCompiler:
     )
     PROG_NAME = "dynamics"
 
-    def __init__(self, rewrite: BaseRewriteGen = RewriteGen()) -> None:
-        self._rewrite = rewrite
+    def __init__(self) -> None:
         self._node_to_state_var = {}
         self._ode_fn_io_names = []
         self._switch_mapping = {}
@@ -273,7 +272,6 @@ class ArkCompiler:
             points to the index of the attribute.
         """
 
-        self._rewrite.set_attr_rn_fn(rn_attr)
         self._verbose = verbose
 
         (
@@ -341,7 +339,6 @@ class ArkCompiler:
             points to the index of the attribute.
         """
 
-        self._rewrite.set_attr_rn_fn(rn_attr)
         self._verbose = verbose
 
         stmts = []
@@ -437,20 +434,19 @@ class ArkCompiler:
             fn_attr_mapping,
         )
 
-    def compile_sympy(
-        self,
-        cdg: CDG,
-        cdg_spec: CDGSpec,
-        help_fn: list[FunctionType],
-    ) -> list[sympy.Expr]:
-        """Compile a CDG to sympy expressions
+    def compile_sympy_diffeqs(
+        self, cdg: CDG, cdg_spec: CDGSpec
+    ) -> list[sympy.Equality]:
+        """Compile the cdg to the ode function into a list of sympy equations
+        describing the dynamical system.
 
         Args:
             cdg (CDG): The input CDG
             cdg_spec (CDGSpec): Specification
-            help_fn (list[FunctionType]): List of non-built-in functions
+
+        Returns:
+            equations (list[sympy.Expr]): list of sympy equations
         """
-        raise NotImplementedError
 
         node: CDGNode
         src: CDGNode
@@ -460,19 +456,32 @@ class ArkCompiler:
         reduction: Reduction
 
         rule_dict = cdg_spec.prod_rule_dict()
-        if cdg.ds_order != 1:
-            raise NotImplementedError("only support first order dynamical system now")
+        rewrite = SympyRewriteGen()
+        rewrite.set_attr_rn_fn(rn_attr)
 
-        stmts = []
+        equations = []
 
         # Generate the ddt_var = f(var) statements
         for order in range(cdg.ds_order + 1):
-            nodes = tqdm(
-                cdg.nodes_in_order(order), desc=f"Compiling order {order} nodes"
-            )
+            nodes = cdg.nodes_in_order(order)
 
+            # 0th order: var = f(vars)
+            # 1th order: ddt_var = f(vars)
+            # 2th order: ddt_var = ddt_var_cur, ddt_ddt_var = f(vars)
+            # ...
             for node in nodes:
+                for sub_order in range(1, order):
+                    vname = n_state(ddt(node.name, order=sub_order))
+                    cur_vname = ddt(node.name, order=sub_order)
+                    equations.append(
+                        sympy.codegen.Assignment(
+                            lhs=mk_var(vname, to_sympy=True),
+                            rhs=mk_var(cur_vname, to_sympy=True),
+                        )
+                    )
                 vname = ddt(node.name, order=order)
+                if order != 0:
+                    vname = n_state(vname)
                 reduction = node.reduction
                 rhs = []
                 for edge in node.edges:
@@ -485,21 +494,23 @@ class ArkCompiler:
                         tgt=node.which_tgt(edge),
                     )
                     if gen_rule is not None:
-                        self._rewrite.mapping = gen_rule.get_rewrite_mapping(edge=edge)
+                        rewrite.mapping = gen_rule.get_rewrite_mapping(edge=edge)
                         rhs_expr = apply_gen_rule(
-                            rule=gen_rule, transformer=self._rewrite, to_sympy=True
+                            rule=gen_rule, transformer=rewrite, to_sympy=True
                         )
                         if edge.switchable:
-                            raise NotImplementedError
+                            rhs_expr = reduction.sympy_switch(
+                                rhs_expr, mk_var(switch_attr(edge.name), to_sympy=True)
+                            )
                         rhs.append(rhs_expr)
                 if rhs:
-                    stmts.append(
-                        (
-                            mk_var(vname, to_sympy=True),
-                            concat_expr(rhs, reduction.sympy_op),
+                    equations.append(
+                        sympy.codegen.Assignment(
+                            lhs=mk_var(vname, to_sympy=True),
+                            rhs=sympy.simplify(concat_expr(rhs, reduction.sympy_op)),
                         )
                     )
-        return stmts
+        return equations
 
     def _compile_user_def_fn(self, funcs: list[FunctionType]) -> list[ast.FunctionDef]:
         """Compile user defined functions to ast.FunctionDef"""
@@ -620,15 +631,6 @@ class ArkCompiler:
 
         """
 
-        node: CDGNode
-        src: CDGNode
-        dst: CDGNode
-        edge: CDGEdge
-        gen_rule: ProdRule
-        reduction: Reduction
-
-        rule_dict = cdg_spec.prod_rule_dict()
-
         stmts = []
         input_vec = self.ODE_INPUT_VAR
         ode_fn_name = self.ODE_FN_NAME
@@ -642,64 +644,12 @@ class ArkCompiler:
         )
 
         # Generate the ddt_var = f(var) statements
-        for order in range(cdg.ds_order + 1):
-            if self._verbose:
-                nodes = tqdm(
-                    cdg.nodes_in_order(order), desc=f"Compiling order {order} nodes"
-                )
-            else:
-                nodes = cdg.nodes_in_order(order)
+        equations = self.compile_sympy_diffeqs(cdg, cdg_spec)
 
-            # 0th order: var = f(vars)
-            # 1th order: ddt_var = f(vars)
-            # 2th order: ddt_var = ddt_var_cur, ddt_ddt_var = f(vars)
-            # ...
-            for node in nodes:
-                for sub_order in range(1, order):
-                    vname = n_state(ddt(node.name, order=sub_order))
-                    cur_vname = ddt(node.name, order=sub_order)
-                    stmts.append(
-                        ast.Assign(
-                            targets=[set_ctx(mk_var(vname), ast.Store)],
-                            value=set_ctx(mk_var(cur_vname), ast.Load),
-                        )
-                    )
-                vname = ddt(node.name, order=order)
-                if order != 0:
-                    vname = n_state(vname)
-                reduction = node.reduction
-                rhs = []
-                for edge in node.edges:
-                    src, dst = edge.src, edge.dst
-                    gen_rule = match_prod_rule(
-                        rule_dict=rule_dict,
-                        edge=edge,
-                        src=src,
-                        dst=dst,
-                        tgt=node.which_tgt(edge),
-                    )
-                    if gen_rule is not None:
-                        self._rewrite.name_mapping = gen_rule.get_rewrite_mapping(
-                            edge=edge
-                        )
-                        rhs_expr = apply_gen_rule(
-                            rule=gen_rule, transformer=self._rewrite
-                        )
-                        if edge.switchable:
-                            body = ast.BinOp(
-                                left=rhs_expr.body,
-                                op=reduction.ast_switch,
-                                right=set_ctx(mk_var(switch_attr(edge.name)), ast.Load),
-                            )
-                            rhs_expr = ast.Expression(body=body)
-                        rhs.append(rhs_expr)
-                if rhs:
-                    stmts.append(
-                        ast.Assign(
-                            targets=[set_ctx(mk_var(vname), ast.Store)],
-                            value=concat_expr(rhs, reduction.ast_op),
-                        )
-                    )
+        # Convert sympy equations to ast statements
+        for eq in equations:
+            eq_str = sympy.pycode(eq)
+            stmts.append(ast.parse(eq_str).body[0])
 
         # Return statement of the ode function
         if not return_jax:

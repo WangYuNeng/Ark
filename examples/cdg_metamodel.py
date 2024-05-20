@@ -1,23 +1,9 @@
-from types import FunctionType
-import matplotlib.pyplot as plt
-from ark.compiler import ArkCompiler
-from ark.rewrite import RewriteGen
-from ark.solver import SMTSolver
-from ark.validator import ArkValidator
-from ark.specification.attribute_def import AttrDef, AttrDefMismatch
-from ark.specification.range import Range
-from ark.specification.specification import CDGSpec
-from ark.cdg.cdg import CDG, CDGNode
-from ark.specification.cdg_types import NodeType, EdgeType
-from ark.specification.production_rule import ProdRule
-from ark.specification.rule_keyword import SRC, DST, SELF, EDGE, VAR, TIME
-from ark.specification.validation_rule import ValRule, ValPattern
-from ark.reduction import SUM
-import sys
-
 # visualization scripts
-import ark.visualize.latex_gen as latexlib
 import ark.visualize.graphviz_gen as graphvizlib
+from ark.cdg.cdg import CDG
+from ark.reduction import SUM
+from ark.specification.cdg_types import EdgeType, NodeType
+from ark.specification.specification import CDGSpec
 
 
 def subscr(name, idx):

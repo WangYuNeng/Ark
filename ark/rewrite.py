@@ -1,6 +1,7 @@
 """
 Ast rewrite classes to generate expression from production rules
 """
+
 import ast
 from abc import ABC, abstractmethod
 from typing import Callable
@@ -9,9 +10,17 @@ import sympy
 
 
 class BaseRewriteGen(ABC):
+
+    def __init__(self) -> None:
+        self._attr_rn_fn = None
+
     @abstractmethod
     def visit(self, expr):
         raise NotImplementedError
+
+    def set_attr_rn_fn(self, val: Callable[[str, str], str]) -> None:
+        """set attribute renaming function"""
+        self._attr_rn_fn = val
 
 
 class RewriteGen(ast.NodeTransformer, BaseRewriteGen):
@@ -45,10 +54,6 @@ class RewriteGen(ast.NodeTransformer, BaseRewriteGen):
     @attr_mapping.setter
     def attr_mapping(self, val: dict[str, ast.expr]) -> None:
         self._attr_mapping = val
-
-    def set_attr_rn_fn(self, val: Callable[[str, str], str]) -> None:
-        """set attribute renaming function"""
-        self._attr_rn_fn = val
 
     def visit_Name(self, node: ast.Name):
         """rewrite the name in the ast with name_mapping"""
@@ -89,11 +94,11 @@ class SympyRewriteGen(BaseRewriteGen):
                 sympy_mapping.add((sym, sympy.Symbol(self.mapping[sym_name])))
             else:  # not a name then it is an attribute
                 [ele_name, attr_name] = sym_name.split(".")
-                new_sym_name = f"{self.mapping[ele_name]}_{attr_name}"
+                new_sym_name = self._attr_rn_fn(self.mapping[ele_name], attr_name)
                 sympy_mapping.add((sym, sympy.Symbol(new_sym_name)))
         for fn in functions:
             fn_name = fn.name
             [ele_name, attr_name] = fn_name.split(".")
-            new_fn_name = f"{self.mapping[ele_name]}_{attr_name}"
+            new_fn_name = self._attr_rn_fn(self.mapping[ele_name], attr_name)
             sympy_mapping.add((sympy.Function(fn_name), sympy.Function(new_fn_name)))
         return expr.subs(list(sympy_mapping))

@@ -3,12 +3,6 @@ import equinox as eqx
 import jax
 
 
-def ode_fn(t: jax.typing.DTypeLike, y: jax.Array, args: jax.Array) -> jax.Array:
-    """The dynamical system equations of the analog circuit."""
-
-    raise NotImplementedError
-
-
 class BaseAnalogCkt(eqx.Module):
     """Base class for differentiable analog circuit simulation.
 
@@ -19,6 +13,8 @@ class BaseAnalogCkt(eqx.Module):
         dt0: The time step.
         y0: The initial values of the state variables.
         saveat: The time points to save the simulation results.
+        is_stochastic: Whether the simulation is stochastic (consider noise).
+        solver: The ODE solver to use.
     """
 
     trainable: jax.Array
@@ -27,18 +23,29 @@ class BaseAnalogCkt(eqx.Module):
     dt0: jax.typing.DTypeLike
     y0: jax.Array  # Need option to set this to fixed or trainable
     saveat: list[jax.typing.DTypeLike]
+    is_stochastic: bool
+    solver: diffrax.AbstractSolver
 
-    def __init__(self, init_vals, is_stochastic: bool) -> None:
-        self.trainable = init_vals
+    def __init__(
+        self,
+        init_trainable: jax.Array,
+        is_stochastic: bool,
+        solver: diffrax.AbstractSolver,
+        **args
+    ) -> None:
+        self.trainable = init_trainable
         self.is_stochastic = is_stochastic
+        self.solver = solver
         self.configure_simulation()
+        for key, value in args:
+            if key in self.__dict__:  # Check if the attribute exists
+                setattr(self, key, value)
 
     def __call__(
         self,
         switch: jax.Array,
         mismatch_seed: jax.typing.DTypeLike,
         noise_seed: jax.typing.DTypeLike,
-        solver: diffrax.AbstractSolver = diffrax.Tsit5(),
     ):
         """The differentiable forward pass of the circuit simulation.
 
@@ -57,8 +64,8 @@ class BaseAnalogCkt(eqx.Module):
 
         if not self.is_stochastic:
             solution = diffrax.diffeqsolve(
-                terms=diffrax.ODETerm(ode_fn),
-                solver=solver,
+                terms=diffrax.ODETerm(self.ode_fn),
+                solver=self.solver,
                 t0=self.t0,
                 t1=self.t1,
                 dt0=self.dt0,
@@ -100,5 +107,12 @@ class BaseAnalogCkt(eqx.Module):
 
     def combine_args(self, params: jax.Array, switch: jax.Array) -> jax.Array:
         """Combine trainable parameters with switch values"""
+
+        raise NotImplementedError
+
+    def ode_fn(
+        self, t: jax.typing.DTypeLike, y: jax.Array, args: jax.Array
+    ) -> jax.Array:
+        """The ODE function to be solved."""
 
         raise NotImplementedError

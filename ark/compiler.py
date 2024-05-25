@@ -334,9 +334,11 @@ class ArkCompiler:
             is node_mapping[name] + n.
             switch_mapping (dict[str, int]): map the name of CDGEdge to the corresponding
             index in the switch variables.
-            attr_mapping (dict[str, dict[str, int]]): map the name of CDGElement to the
-            corresponding index in the attribute variables. The attr_mapping[name][attr]
-            points to the index of the attribute.
+            num_attr_mapping (dict[str, dict[str, int]]): map the name of CDGElement to the
+            corresponding index in the numerical attribute variables.
+            The num_attr_mapping[name][attr] points to the index of the attribute.
+            fn_attr_mapping (dict[str, dict[str, int]]): map the name of CDGElement to the
+            corresponding index in the function attribute variables.
         """
 
         self._verbose = verbose

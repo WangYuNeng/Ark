@@ -1,8 +1,9 @@
 import jax.numpy as jnp
 
-from ark.cdg.cdg import CDG
+from ark.cdg.cdg import CDG, CDGElement
 from ark.compiler import ArkCompiler
 from ark.optimization.base_module import BaseAnalogCkt
+from ark.specification.attribute_def import Trainable
 from ark.specification.specification import CDGSpec
 
 ark_compiler = ArkCompiler()
@@ -55,3 +56,35 @@ class OptCompiler:
         )
 
         return opt_module
+
+    def _initialize_args(
+        self,
+        cdg: CDG,
+        switch_map: dict[str, int],
+        num_attr_map: dict[str, dict[str, int]],
+    ):
+        """Initialize the args for the ode term.
+
+        Initiliaze non-training arguments with values in the cdg.
+        Indentify the trainable argument indices.
+        """
+
+        args_len = len(switch_map) + sum(len(x) for x in num_attr_map.values())
+        args = [None for _ in range(args_len)]
+        trainable_idx = []
+        mismatch_idx = []
+
+        for sw, val in cdg.switch_to_val.items():
+            assert sw in switch_map
+            if isinstance(val, Trainable):
+                trainable_idx.append(switch_map[sw])
+        ele: CDGElement
+        for ele in cdg.nodes + cdg:
+            assert ele.name in num_attr_map
+            attr_to_idx = num_attr_map[ele.name]
+            for attr, val in ele.attrs.items():
+                assert attr in attr_to_idx
+                if isinstance(val, Trainable):
+                    trainable_idx.append(num_attr_map[attr])
+                else:
+                    args[attr_to_idx[attr]] = val

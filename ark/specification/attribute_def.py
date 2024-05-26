@@ -6,9 +6,11 @@ from typing import Callable, NewType, Optional, Union
 
 import numpy as np
 
-from ark.specification.attribute_type import AttrType, FunctionAttr
+from ark.specification.attribute_type import AttrType, FunctionAttr, Trainable
 
-AttrImpl = NewType("AttrImpl", Union[int, float, Callable])  # why pylint error?
+AttrImpl = NewType(
+    "AttrImpl", Union[int, float, Callable, Trainable]
+)  # why pylint error?
 
 
 class AttrDef:
@@ -78,4 +80,5 @@ class AttrDefMismatch(AttrDef):
         if self.rstd:
             return np.random.normal(mean, np.abs(mean * self.rstd))
         else:
+            return np.random.normal(mean, self.std)
             return np.random.normal(mean, self.std)

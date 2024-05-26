@@ -6,7 +6,12 @@ from ark.cdg.cdg import CDG
 from ark.optimization.opt_compiler import OptCompiler
 from ark.reduction import PRODUCT
 from ark.specification.attribute_def import AttrDef, AttrDefMismatch
-from ark.specification.attribute_type import AnalogAttr, DigitalAttr, FunctionAttr
+from ark.specification.attribute_type import (
+    AnalogAttr,
+    DigitalAttr,
+    FunctionAttr,
+    Trainable,
+)
 from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule
 from ark.specification.rule_keyword import DST, EDGE, SRC, VAR
@@ -71,10 +76,10 @@ compiler = ArkCompiler()
 graph = CDG()
 node1 = Osc(mass=1000.0)
 node2 = Osc(mass=2000.0)
-cpl = Coupling(k=6)
+cpl = Coupling(k=Trainable())
 
 graph.connect(cpl, node1, node2)
-print(graph.element_to_attr_sample())
+# print(graph.element_to_attr_sample())
 
 exprs = compiler.compile_sympy_diffeqs(cdg=graph, cdg_spec=co_spec)
 a = pretty(exprs, use_unicode=False)
@@ -83,6 +88,11 @@ print(a)
 TestClass = OptCompiler().compile("test", graph, co_spec)
 test = TestClass(init_trainable=[1, 2, 10], is_stochastic=False, solver=Tsit5())
 a = test([], 0, 0)
+import matplotlib.pyplot as plt
+
+plt.plot(a)
+plt.show()
+plt.show()
 import matplotlib.pyplot as plt
 
 plt.plot(a)

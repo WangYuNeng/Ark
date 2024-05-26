@@ -1,7 +1,20 @@
+"""
+Dataype definitions for attributes in the specification.
+"""
+
 from abc import ABC, abstractmethod
 from typing import Callable
 
 from ark.specification.range import Range
+
+
+class Trainable:
+
+    def __init__(self) -> None:
+        pass
+
+    def __str__(self) -> str:
+        return "Trainable"
 
 
 class AttrType(ABC):
@@ -35,6 +48,9 @@ class AnalogAttr(AttrType):
         return str(val)
 
     def check_valid(self, val) -> bool:
+        if isinstance(val, Trainable):
+            assert self.has_range, "Trainable attribute must have a valid range"
+            return True
         if not isinstance(val, (float, int)):
             return False
         if self.has_range:
@@ -65,6 +81,8 @@ class DigitalAttr(AttrType):
         return str(val)
 
     def check_valid(self, val) -> bool:
+        if isinstance(val, Trainable):
+            return True
         if val not in self.val_choices:
             return False
         return True
@@ -98,4 +116,5 @@ class FunctionAttr(AttrType):
         def empty_func(*args):
             raise RuntimeError("Default function not implemented")
 
+        return empty_func
         return empty_func

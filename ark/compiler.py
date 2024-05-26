@@ -5,7 +5,7 @@ import copy
 import inspect
 from functools import partial
 from itertools import product
-from types import FunctionType
+from typing import Callable
 
 import jax.numpy as jnp
 import numpy as np
@@ -67,11 +67,11 @@ def mk_list_assign(targets: list[ast.Name], value: ast.expr) -> ast.Assign:
     )
 
 
-def parse_expr(val: "int | float | FunctionType | str") -> ast.expr:
+def parse_expr(val: "int | float | Callable | str") -> ast.expr:
     """parse value to expression"""
     if isinstance(val, int) or isinstance(val, float):
         val_str = str(val)
-    elif isinstance(val, FunctionType):
+    elif isinstance(val, Callable):
         val_str = val.__name__
     elif isinstance(val, str):
         val_str = val
@@ -260,7 +260,7 @@ class ArkCompiler:
             1 -- print the compilation progress.
 
         Returns:
-            prog (FunctionType): The compiled function.
+            prog (Callable): The compiled function.
             node_mapping (dict[str, int]): map the name of CDGNode to the corresponding
             index in the state variables. The node_mapping[name] points to the index
             of the 0th order term and the n-th order deravitves (if applicable) index
@@ -307,13 +307,19 @@ class ArkCompiler:
             attr_mapping,
         )
 
-    def compile_odeterm(self, cdg: CDG, cdg_spec: CDGSpec, verbose: int = 0):
+    def compile_odeterm(self, cdg: CDG, cdg_spec: CDGSpec, verbose: int = 0) -> tuple[
+        Callable,
+        dict[str, int],
+        dict[str, int],
+        dict[str, dict[str, int]],
+        dict[str, dict[str, int]],
+    ]:
         """Compile the cdg to an executable function representing the derivative term.
 
         The function will in the form of `__ode_fn(time, __variables, args, fargs)`
         where `args` is the list of arguments mapped to
         the float/int attribute values and switch values, and `fargs` is the list of
-        function arguments mapped to the FunctionType attribute values.
+        function arguments mapped to the Callable attribute values.
 
         The separation of the two arguments is for compatibility to Diffrax
         1. The function arguments can't be jitted. Need to be treat as static value
@@ -327,7 +333,7 @@ class ArkCompiler:
             1 -- print the compilation progress.
 
         Returns:
-            prog (FunctionType): The compiled function.
+            prog (Callable): The compiled function.
             node_mapping (dict[str, int]): map the name of CDGNode to the corresponding
             index in the state variables. The node_mapping[name] points to the index
             of the 0th order term and the n-th order deravitves (if applicable) index
@@ -514,7 +520,7 @@ class ArkCompiler:
                     )
         return equations
 
-    def _compile_user_def_fn(self, funcs: list[FunctionType]) -> list[ast.FunctionDef]:
+    def _compile_user_def_fn(self, funcs: list[Callable]) -> list[ast.FunctionDef]:
         """Compile user defined functions to ast.FunctionDef"""
         return [ast.parse(inspect.getsource(fn)).body[0] for fn in funcs]
 
@@ -598,7 +604,7 @@ class ArkCompiler:
             attr_mapping[ele.name] = {}
             for attr_name, attr in ele.attrs.items():
                 if separate_fn_attr:
-                    if isinstance(attr, FunctionType) or isinstance(attr, partial):
+                    if isinstance(attr, Callable) or isinstance(attr, partial):
                         attr_mapping[ele.name][attr_name] = False
                     else:
                         attr_mapping[ele.name][attr_name] = True

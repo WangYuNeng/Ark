@@ -116,54 +116,56 @@ class Conv3x3(eqx.Module):
 
         # Can't use lax fori_loop here because of the dynamic indexing of the array
         # This is a workaround but will incur compilation overhead for large input
-        for w in range(n_conv_w):
-            for h in range(n_conv_h):
-                x_slice = x[
-                    FILTER_W * w : FILTER_W * (w + 1),
-                    FILTER_H * h : FILTER_H * (h + 1),
-                ].flatten()
-                x_slice_repeated = jnp.repeat(x_slice, 2)
-                vin = partial(arr_fn, arr=x_slice_repeated)
+        # for w in range(n_conv_w):
+        #     for h in range(n_conv_h):
+        #         x_slice = x[
+        #             FILTER_W * w : FILTER_W * (w + 1),
+        #             FILTER_H * h : FILTER_H * (h + 1),
+        #         ].flatten()
+        #         x_slice_repeated = jnp.repeat(x_slice, 2)
+        #         vin = partial(arr_fn, arr=x_slice_repeated)
 
-                fargs = [cap_fn_attr, vin, PHI1, PHI2]
+        #         fargs = [cap_fn_attr, vin, PHI1, PHI2]
 
-                charge_trace = jnp.zeros((n_iter + 1, 2))
-                for i in range(1, n_iter + 1):
-                    charge_trace = charge_trace.at[i].set(
-                        self.ode_fn(i - 1, charge_trace[i - 1], args, fargs)
-                    )
+        #         charge_trace = jnp.zeros((n_iter + 1, 2))
+        #         for i in range(1, n_iter + 1):
+        #             charge_trace = charge_trace.at[i].set(
+        #                 self.ode_fn(i - 1, charge_trace[i - 1], args, fargs)
+        #             )
 
-                readout = charge_trace[-1, 0]
-                # V = Q / C and scale the voltage to match the original range
-                voltage = readout / c2 * self.c_ratio
-                conv_out = conv_out.at[w, h].set(-voltage)
+        #         readout = charge_trace[-1, 0]
+        #         # V = Q / C and scale the voltage to match the original range
+        #         voltage = readout / c2 * self.c_ratio
+        #         conv_out = conv_out.at[w, h].set(-voltage)
 
-        # def conv_body_fn(idx: int, val: jax.Array):
-        #     """Perform convolution with scmm"""
+        def conv_body_fn(idx: int, val: jax.Array):
+            """Perform convolution with scmm"""
 
-        #     w = idx // n_conv_w
-        #     h = idx % n_conv_h
-        #     x_slice = x[3 * w : 3 * (w + 1), 3 * h : 3 * (h + 1)].flatten()
-        #     x_slice_repeated = jnp.repeat(x_slice, 2)
-        #     vin = partial(arr_fn, arr=x_slice_repeated)
+            w = idx // n_conv_w
+            h = idx % n_conv_h
+            x_slice = jax.lax.dynamic_slice(
+                x, (FILTER_W * w, FILTER_H * h), (FILTER_W, FILTER_H)
+            ).flatten()
+            x_slice_repeated = jnp.repeat(x_slice, 2)
+            vin = partial(arr_fn, arr=x_slice_repeated)
 
-        #     fargs = [cap_fn_attr, vin, PHI1, PHI2]
+            fargs = [cap_fn_attr, vin, PHI1, PHI2]
 
-        #     charge_trace = jnp.zeros((n_iter + 1, 2))
-        #     for i in range(1, n_iter + 1):
-        #         charge_trace = charge_trace.at[i].set(
-        #             self.ode_fn(i - 1, charge_trace[i - 1], args, fargs)
-        #         )
+            charge_trace = jnp.zeros((n_iter + 1, 2))
+            for i in range(1, n_iter + 1):
+                charge_trace = charge_trace.at[i].set(
+                    self.ode_fn(i - 1, charge_trace[i - 1], args, fargs)
+                )
 
-        #     readout = charge_trace[-1, 0]
-        #     # V = Q / C and scale the voltage to match the original range
-        #     voltage = readout / c2 * self.c_ratio
-        #     val = val.at[w, h].set(-voltage)
-        #     return val
+            readout = charge_trace[-1, 0]
+            # V = Q / C and scale the voltage to match the original range
+            voltage = readout / c2 * self.c_ratio
+            val = val.at[w, h].set(-voltage)
+            return val
 
-        # conv_out = jax.lax.fori_loop(
-        #     lower=0, upper=n_conv_w * n_conv_h, body_fun=conv_body_fn, init_val=conv_out
-        # )
+        conv_out = jax.lax.fori_loop(
+            lower=0, upper=n_conv_w * n_conv_h, body_fun=conv_body_fn, init_val=conv_out
+        )
         return conv_out.flatten()
 
 

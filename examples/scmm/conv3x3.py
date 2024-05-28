@@ -5,18 +5,17 @@ from typing import Callable, Generator
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
 import numpy as np
 import optax
 from jax import config
 from jaxtyping import PyTree
 from spec import ds_scmm_spec
-from train import PHI1, PHI2, arr_fn, cap_fn, dummy_fn, mse_loss
+from train import arr_fn, cap_fn, dummy_fn, mse_loss
 
 from ark.ark import Ark
 from ark.cdg.cdg import CDG
 
-IMAGE_W, IMAGE_H = 6, 6
+IMAGE_W, IMAGE_H = 3, 3
 TEST_CONV_FILTER = jnp.array([[1, 1, 1], [1, 1, 1], [1, 1, 1]])
 
 
@@ -25,8 +24,8 @@ config.update("jax_enable_x64", True)
 
 LEARNING_RATE = 0.1
 
-FILTER = np.array([1, 3, 1])
-FILTER_LEN = len(FILTER)
+FILTER_LEN = len(TEST_CONV_FILTER.flatten())
+FILTER_W, FILTER_H = TEST_CONV_FILTER.shape
 N_BITS = 4
 
 C_RATIO = 100 * (2**N_BITS - 1)
@@ -37,6 +36,9 @@ INIT_C1 = INIT_C1_SCALED * C_BASE
 # Dummy floating point value
 DUMF = 0.0
 
+PHI1 = partial(arr_fn, arr=jnp.array([1, 0] * FILTER_LEN))
+PHI2 = partial(arr_fn, arr=jnp.array([0, 1] * FILTER_LEN))
+
 
 def prepare_data(n_samples):
     """Generate random 'x' vectors and corresponding 'y' values.
@@ -44,13 +46,18 @@ def prepare_data(n_samples):
     y = conv3x3(x, TEST_CONV_FILTER)
     """
     while True:
+        n_conv_w, n_conv_h = IMAGE_W // FILTER_W, IMAGE_H // FILTER_H
         x = np.random.rand(n_samples, IMAGE_W, IMAGE_H)
-        y = np.zeros((n_samples, IMAGE_W // 3, IMAGE_H // 3))
+        y = np.zeros((n_samples, n_conv_w, n_conv_h))
         for i in range(n_samples):
-            for w in range(IMAGE_W // 3):
-                for h in range(IMAGE_H // 3):
+            for w in range(n_conv_w):
+                for h in range(n_conv_h):
                     y[i, w, h] = np.sum(
-                        x[i, 3 * w : 3 * (w + 1), 3 * h : 3 * (h + 1)]
+                        x[
+                            i,
+                            FILTER_W * w : FILTER_W * (w + 1),
+                            FILTER_H * h : FILTER_H * (h + 1),
+                        ]
                         * TEST_CONV_FILTER
                     )
         y = y.reshape(n_samples, -1)
@@ -83,8 +90,8 @@ class Conv3x3(eqx.Module):
 
     def __call__(self, x: jax.Array):
         width, height = x.shape
-        n_conv_w = width // 3
-        n_conv_h = height // 3
+        n_conv_w = width // FILTER_W
+        n_conv_h = height // FILTER_H
         conv_out = jnp.zeros((n_conv_w, n_conv_h))
 
         bit_arr_repeat = jnp.repeat(self.weight, 2, axis=0)
@@ -105,13 +112,16 @@ class Conv3x3(eqx.Module):
             DUMF,
             DUMF,
         ]
-        n_iter = 2 * 9
+        n_iter = 2 * FILTER_LEN
 
         # Can't use lax fori_loop here because of the dynamic indexing of the array
         # This is a workaround but will incur compilation overhead for large input
         for w in range(n_conv_w):
             for h in range(n_conv_h):
-                x_slice = x[3 * w : 3 * (w + 1), 3 * h : 3 * (h + 1)].flatten()
+                x_slice = x[
+                    FILTER_W * w : FILTER_W * (w + 1),
+                    FILTER_H * h : FILTER_H * (h + 1),
+                ].flatten()
                 x_slice_repeated = jnp.repeat(x_slice, 2)
                 vin = partial(arr_fn, arr=x_slice_repeated)
 
@@ -178,7 +188,8 @@ def train(
 
         model, opt_state, train_loss = make_step(model, opt_state, x, y)
         print(f"{step=}, loss={train_loss.item()}")
-        print(f"filter_weight_bit=\n{model.weight}")
+        print(f"true_weight=\n{TEST_CONV_FILTER}")
+        print(f"trained_weight=\n{model.weight[:, 0].reshape(FILTER_W, FILTER_H)}")
     return model
 
 
@@ -206,7 +217,6 @@ if __name__ == "__main__":
     compiler = system.compiler
     ode_fn, _, _, _, _ = compiler.compile_odeterm(cdg=scmm, cdg_spec=ds_scmm_spec)
     init_weight = np.random.random(size=(3, 3))
-    init_weight = TEST_CONV_FILTER
     scmm_model = Conv3x3(
         weight=jnp.array(init_weight, dtype=jnp.float64),
         ode_fn=ode_fn,

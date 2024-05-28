@@ -76,7 +76,7 @@ compiler = ArkCompiler()
 graph = CDG()
 node1 = Osc(mass=1000.0)
 node2 = Osc(mass=2000.0)
-cpl = Coupling(k=Trainable())
+cpl = Coupling(k=Trainable(0))
 
 graph.connect(cpl, node1, node2)
 # print(graph.element_to_attr_sample())
@@ -85,9 +85,13 @@ exprs = compiler.compile_sympy_diffeqs(cdg=graph, cdg_spec=co_spec)
 a = pretty(exprs, use_unicode=False)
 print(a)
 
-TestClass = OptCompiler().compile("test", graph, co_spec)
+TestClass = OptCompiler().compile("test", graph, co_spec, trainable_len=1)
 test = TestClass(init_trainable=[1, 2, 10], is_stochastic=False, solver=Tsit5())
-a = test([], 0, 0)
+a = test(
+    [],
+    0,
+    0,
+)
 import matplotlib.pyplot as plt
 
 plt.plot(a)

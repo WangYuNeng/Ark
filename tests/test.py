@@ -1,5 +1,5 @@
 import jax.numpy as jnp
-from diffrax.solver import Tsit5
+from diffrax.solver import Euler, Tsit5
 from sympy import *
 
 from ark.ark import ArkCompiler
@@ -62,10 +62,20 @@ co_spec.add_cdg_types(cdg_types)
 #### Production rules start ####
 # F = ma = -kx -> a = x'' = -kx/m
 r_cp_src = ProdRule(
-    Coupling, Osc, Osc, SRC, -EDGE.k * (VAR(SRC) / SRC.mass - VAR(DST) / SRC.mass)
+    Coupling,
+    Osc,
+    Osc,
+    SRC,
+    -EDGE.k * (VAR(SRC) / SRC.mass - VAR(DST) / SRC.mass),
+    noise_exp=0.1,
 )
 r_cp_dst = ProdRule(
-    Coupling, Osc, Osc, DST, -EDGE.k * (VAR(DST) / SRC.mass - VAR(SRC) / SRC.mass)
+    Coupling,
+    Osc,
+    Osc,
+    DST,
+    -EDGE.k * (VAR(DST) / SRC.mass - VAR(SRC) / SRC.mass),
+    noise_exp=VAR(SRC),
 )
 r_fn = ProdRule(test_w_fn, Osc, Osc, DST, VAR(DST) + EDGE.fn(VAR(SRC)))
 production_rules = [r_cp_src, r_cp_dst, r_fn]
@@ -98,13 +108,27 @@ print(a)
 
 TestClass = OptCompiler().compile("test", graph, co_spec, trainable_len=1)
 test = TestClass(init_trainable=jnp.array([1]), is_stochastic=False, solver=Tsit5())
-a = test(
-    [],
-    0,
-    0,
-)
 import matplotlib.pyplot as plt
 
-plt.plot(a)
+for i in range(10):
+    a = test(
+        [],
+        i,
+        0,
+    )
+
+    plt.plot(a)
+plt.show()
+
+test = TestClass(init_trainable=jnp.array([1]), is_stochastic=True, solver=Euler())
+for i in range(10):
+    a = test(
+        [],
+        0,
+        i,
+    )
+    import matplotlib.pyplot as plt
+
+    plt.plot(a)
 plt.show()
 plt.show()

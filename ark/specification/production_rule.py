@@ -1,6 +1,7 @@
 """
 Ark production Rule
 """
+
 import ast
 from dataclasses import dataclass
 
@@ -50,6 +51,7 @@ class ProdRule:
         dst_nt: NodeType,
         gen_tgt: Target,
         fn_exp: Expression,
+        noise_exp: Expression = None,
     ) -> None:
         self._et = et
         self._src_nt = src_nt
@@ -57,6 +59,7 @@ class ProdRule:
         self._gen_tgt = gen_tgt
         self._id = ProdRuleId(et, src_nt, dst_nt, gen_tgt)
         self._fn_exp = fn_exp
+        self._noise_exp = noise_exp
 
     @staticmethod
     def get_identifier(
@@ -81,10 +84,19 @@ class ProdRule:
     @property
     def fn_sympy(self) -> sympy.Expr:
         """Returns the sympy expression of the production function"""
-        if type(self._fn_exp) is int:
+        if isinstance(self._fn_exp, (int, float)):
             return sympy.Float(self._fn_exp)
         else:
             return self._fn_exp.sympy
+
+    @property
+    def noise_sympy(self) -> sympy.Expr:
+        """Returns the sympy expression of the noise function"""
+        if self._noise_exp is None:
+            return sympy.Float(0)
+        elif isinstance(self._noise_exp, (int, float)):
+            return sympy.Float(self._noise_exp)
+        return self._noise_exp.sympy
 
     def get_rewrite_mapping(self, edge: CDGEdge):
         """

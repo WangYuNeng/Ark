@@ -160,7 +160,7 @@ class OptCompiler:
             type: the compiled module.
         """
 
-        ode_term, node_mapping, switch_map, num_attr_map, fn_attr_map = (
+        (ode_term, noise_term), node_mapping, switch_map, num_attr_map, fn_attr_map = (
             ark_compiler.compile_odeterm(cdg, cdg_spec)
         )
 
@@ -297,6 +297,7 @@ class OptCompiler:
         )
 
         ode_fn = lambda self, t, y, args: ode_term(t, y, args, fn_args)
+        noise_fn = lambda self, t, y, args: noise_term(t, y, args, fn_args)
         configure_simulation = base_configure_simulation
 
         opt_module = type(
@@ -304,6 +305,7 @@ class OptCompiler:
             (BaseAnalogCkt,),
             {
                 "ode_fn": ode_fn,
+                "noise_fn": noise_fn,
                 "make_args": namespace["make_args"],
                 "configure_simulation": configure_simulation,
             },

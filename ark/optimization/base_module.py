@@ -70,7 +70,26 @@ class BaseAnalogCkt(eqx.Module):
             )
             return solution.ys
         else:
-            raise NotImplementedError
+            ode_term = diffrax.ODETerm(self.ode_fn)
+            brownian = diffrax.VirtualBrownianTree(
+                self.t0,
+                self.t1,
+                tol=self.dt0 / 2,
+                shape=self.y0.shape,
+                key=jax.random.PRNGKey(noise_seed),
+            )
+            brownian_term = diffrax.ControlTerm(self.noise_fn, brownian)
+            solution = diffrax.diffeqsolve(
+                terms=diffrax.MultiTerm(ode_term, brownian_term),
+                solver=self.solver,
+                t0=self.t0,
+                t1=self.t1,
+                dt0=self.dt0,
+                y0=self.y0,
+                saveat=diffrax.SaveAt(ts=self.saveat),
+                args=args,
+            )
+            return solution.ys
 
     def make_args(
         self,
@@ -118,5 +137,12 @@ class BaseAnalogCkt(eqx.Module):
         self, t: jax.typing.DTypeLike, y: jax.Array, args: jax.Array
     ) -> jax.Array:
         """The ODE function to be solved."""
+
+        raise NotImplementedError
+
+    def noise_fn(
+        self, t: jax.typing.DTypeLike, y: jax.Array, args: jax.Array
+    ) -> jax.Array:
+        """The noise function to be added to the ODE."""
 
         raise NotImplementedError

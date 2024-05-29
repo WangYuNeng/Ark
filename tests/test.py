@@ -1,3 +1,4 @@
+import jax.numpy as jnp
 from diffrax.solver import Tsit5
 from sympy import *
 
@@ -75,8 +76,8 @@ compiler = ArkCompiler()
 
 # Initialize 2 couplied oscillatorsxx
 graph = CDG()
-node1 = Osc(mass=1000.0)
-node2 = Osc(mass=2000.0)
+node1 = Osc(mass=1.0)
+node2 = Osc(mass=2.0)
 
 
 def test_fn(x):
@@ -96,7 +97,7 @@ print(a)
 
 
 TestClass = OptCompiler().compile("test", graph, co_spec, trainable_len=1)
-test = TestClass(init_trainable=[10000, 2, 10], is_stochastic=False, solver=Tsit5())
+test = TestClass(init_trainable=jnp.array([1]), is_stochastic=False, solver=Tsit5())
 a = test(
     [],
     0,
@@ -105,4 +106,5 @@ a = test(
 import matplotlib.pyplot as plt
 
 plt.plot(a)
+plt.show()
 plt.show()

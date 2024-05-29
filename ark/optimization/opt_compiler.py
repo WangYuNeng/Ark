@@ -129,6 +129,7 @@ class OptCompiler:
     SWITCH = "switch"
     MISMATCH_SEED = "mismatch_seed"
     NOISE_SEED = "noise_seed"
+    CLIPPED_MIN, CLIPPED_MAX = -1, 1
 
     def __init__(self) -> None:
         pass
@@ -139,7 +140,25 @@ class OptCompiler:
         cdg: CDG,
         cdg_spec: CDGSpec,
         trainable_len: int,
+        do_normalization: bool = True,
+        do_clipping: bool = True,
     ) -> type:
+        """Compile the cdg to an equinox.Module.
+
+        Args:
+            prog_name (str): name of the program
+            cdg (CDG): the dynamical graph
+            cdg_spec (CDGSpec): the specification of the dynamical graph
+            trainable_len (int): length of the trainable array
+            do_normalization (bool, optional): whether to normalize the trainable
+            parameters or not. If true, the traianble weights are assumed to within
+            [-1, 1]. Defaults to True.
+            do_clipping (bool, optional): whether to clip the value within the range
+            specified in ``cdg_spec``. Defaults to True.
+
+        Returns:
+            type: the compiled module.
+        """
 
         ode_term, node_mapping, switch_map, num_attr_map, fn_attr_map = (
             ark_compiler.compile_odeterm(cdg, cdg_spec)
@@ -169,11 +188,21 @@ class OptCompiler:
         mm_arr_expr_gen = mk_var_generator("mm_arr")
 
         stmts = []
-        # assign self.trainable to trainable for readability
+        # Assign self.trainable to trainable for readability
+        # and clipping the trainable values
+        # trainable = jnp.clip(self.trainable, CLIPPED_MIN, CLIPPED_MAX)
+        clipped_trainable = mk_jnp_call(
+            args=[
+                ast.Attribute(value=self_expr_gen(), attr="trainable"),
+                self.CLIPPED_MIN,
+                self.CLIPPED_MAX,
+            ],
+            call_fn="clip",
+        )
         stmts.append(
             mk_assign(
                 trainable_expr_gen(),
-                ast.Attribute(value=self_expr_gen(), attr="trainable"),
+                clipped_trainable,
             )
         )
         # Initialize the jnp arrays

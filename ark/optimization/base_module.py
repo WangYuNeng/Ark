@@ -55,12 +55,7 @@ class BaseAnalogCkt(eqx.Module):
             noise_seed: The seed for the transient noise.
             solver: The ODE solver to use.
         """
-        rescaled_params = self.rescale_params(self.trainable)
-        mapped_params = self.map_params(rescaled_params)
-        clipped_params = self.clip_params(mapped_params)
-        # Perform mismatch after clipping. Could change order if needed.
-        mismatched_params = self.add_mismatch(clipped_params, mismatch_seed)
-        args = self.combine_args(mismatched_params, switch)
+        args = self.make_args(switch, mismatch_seed)
 
         if not self.is_stochastic:
             solution = diffrax.diffeqsolve(
@@ -76,6 +71,15 @@ class BaseAnalogCkt(eqx.Module):
             return solution.ys
         else:
             raise NotImplementedError
+
+    def make_args(
+        self,
+        switch: jax.Array,
+        mismatch_seed: jax.typing.DTypeLike,
+    ) -> jax.Array:
+        """Make the arguments for the ODE function."""
+
+        raise NotImplementedError
 
     def configure_simulation(self):
         """Set up the simulation timing information."""

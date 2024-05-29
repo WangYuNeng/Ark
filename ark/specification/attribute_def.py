@@ -46,8 +46,16 @@ class AttrDefMismatch(AttrDef):
     """Attribute definition for a CDGType where the value is sampled
     from a normal distribution to model the random mismatch in hardware.
 
+    if rstd is given, the value is sampled from a normal distribution with
+    mean as the nominal value and standard deviation as the relative standard
+    deviation times the nominal value.
+
+    if std is given, the value is sampled from a normal distribution with
+    mean as the nominal value and standard deviation as the given std.
+
     Args:
         rstd: relative standard deviation of the random value
+        std: standard deviation of the random value
 
     The check() method only check whether the nominal value is in range
     and does not check the random value.
@@ -55,7 +63,7 @@ class AttrDefMismatch(AttrDef):
 
     def __init__(
         self,
-        attr_type: AttrDef,
+        attr_type: AttrType,
         rstd: Optional[float] = None,
         std: Optional[float] = None,
     ):
@@ -80,5 +88,4 @@ class AttrDefMismatch(AttrDef):
         if self.rstd:
             return np.random.normal(mean, np.abs(mean * self.rstd))
         else:
-            return np.random.normal(mean, self.std)
             return np.random.normal(mean, self.std)

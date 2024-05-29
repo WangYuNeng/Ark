@@ -66,7 +66,8 @@ r_cp_src = ProdRule(
 r_cp_dst = ProdRule(
     Coupling, Osc, Osc, DST, -EDGE.k * (VAR(DST) / SRC.mass - VAR(SRC) / SRC.mass)
 )
-production_rules = [r_cp_src, r_cp_dst]
+r_fn = ProdRule(test_w_fn, Osc, Osc, DST, VAR(DST) + EDGE.fn(VAR(SRC)))
+production_rules = [r_cp_src, r_cp_dst, r_fn]
 co_spec.add_production_rules(production_rules)
 
 # Manipulate the dynamical system with the CDG and execute it with Ark
@@ -76,17 +77,26 @@ compiler = ArkCompiler()
 graph = CDG()
 node1 = Osc(mass=1000.0)
 node2 = Osc(mass=2000.0)
+
+
+def test_fn(x):
+    return x**2
+
+
+fn_edge = test_w_fn(fn=test_fn)
 cpl = Coupling(k=Trainable(0))
 
 graph.connect(cpl, node1, node2)
+# graph.connect(fn_edge, node1, node2)
 # print(graph.element_to_attr_sample())
 
 exprs = compiler.compile_sympy_diffeqs(cdg=graph, cdg_spec=co_spec)
 a = pretty(exprs, use_unicode=False)
 print(a)
 
+
 TestClass = OptCompiler().compile("test", graph, co_spec, trainable_len=1)
-test = TestClass(init_trainable=[1, 2, 10], is_stochastic=False, solver=Tsit5())
+test = TestClass(init_trainable=[10000, 2, 10], is_stochastic=False, solver=Tsit5())
 a = test(
     [],
     0,
@@ -95,10 +105,4 @@ a = test(
 import matplotlib.pyplot as plt
 
 plt.plot(a)
-plt.show()
-plt.show()
-import matplotlib.pyplot as plt
-
-plt.plot(a)
-plt.show()
 plt.show()

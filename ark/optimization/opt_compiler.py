@@ -1,15 +1,21 @@
 import ast
+from copy import copy
 from typing import Callable
 
+import jax
 import jax.numpy as jnp
 
 from ark.cdg.cdg import CDG, CDGElement
-from ark.compiler import ArkCompiler, mk_var, set_ctx
+from ark.compiler import ArkCompiler, mk_arg, set_ctx
 from ark.optimization.base_module import BaseAnalogCkt
 from ark.specification.attribute_def import AttrDefMismatch, Trainable
 from ark.specification.specification import CDGSpec
 
 ark_compiler = ArkCompiler()
+
+
+def mk_var_generator(name: str):
+    return lambda: ast.Name(id=name)
 
 
 def base_configure_simulation(self):
@@ -20,7 +26,7 @@ def base_configure_simulation(self):
     self.saveat = jnp.linspace(self.t0, self.t1, 11)
 
 
-def mk_assign(target: ast.Name, value: ast.Expr):
+def mk_assign(target: ast.expr, value: ast.expr):
     """target = value"""
     return ast.Assign(
         targets=[set_ctx(target, ast.Store)],
@@ -28,7 +34,7 @@ def mk_assign(target: ast.Name, value: ast.Expr):
     )
 
 
-def mk_call(fn: ast.Expr, args: list[ast.Expr]):
+def mk_call(fn: ast.expr, args: list[ast.expr]):
     """fn(*args)"""
     return ast.Call(
         func=fn,
@@ -37,13 +43,24 @@ def mk_call(fn: ast.Expr, args: list[ast.Expr]):
     )
 
 
-def set_list_val_expr(lst: list):
-    """set the list value to be expressions"""
+def mk_list(lst: list[ast.Name | ast.Constant]):
+    return ast.List(elts=lst)
+
+
+def mk_arr_access(lst: ast.Name, idx: ast.expr):
+    return ast.Subscript(
+        value=lst,
+        slice=idx,
+    )
+
+
+def mk_list_val_expr(lst: list):
+    """make the list value to be expressions"""
     lst_expr = []
     for val in lst:
-        if isinstance(val, (ast.Name, ast.Constant)):
+        if isinstance(val, ast.expr):
             lst_expr.append(val)
-        elif isinstance(val, (int, float)):
+        elif isinstance(val, (int, float)) or val is None:
             lst_expr.append(ast.Constant(value=val))
         else:
             raise ValueError(f"Unknown type {type(val)} to be converted in the list")
@@ -55,7 +72,7 @@ def mk_jnp_call(args: list, call_fn: str):
 
     return ast.Call(
         func=ast.Attribute(value=ast.Name(id="jnp"), attr=call_fn),
-        args=set_list_val_expr(args),
+        args=mk_list_val_expr(args),
         keywords=[],
     )
 
@@ -66,12 +83,12 @@ def mk_jax_random_call(args: list, call_fn: str):
         func=ast.Attribute(
             value=ast.Attribute(value=ast.Name(id="jax"), attr="random"), attr=call_fn
         ),
-        args=set_list_val_expr(args),
+        args=mk_list_val_expr(args),
         keywords=[],
     )
 
 
-def mk_jnp_arr_access(arr: ast.Name, idx: ast.Expr):
+def mk_jnp_arr_access(arr: ast.Name, idx: ast.expr):
     """arr.at[idx]"""
     return ast.Subscript(
         value=ast.Attribute(value=arr, attr="at"),
@@ -79,7 +96,7 @@ def mk_jnp_arr_access(arr: ast.Name, idx: ast.Expr):
     )
 
 
-def mk_jnp_assign(arr: ast.Name, idx: ast.Expr, val: ast.Name | ast.Constant):
+def mk_jnp_assign(arr: ast.Name, idx: ast.expr, val: ast.Name | ast.Constant):
     """
     arr = arr.at[idx].set(val)
     """
@@ -87,7 +104,7 @@ def mk_jnp_assign(arr: ast.Name, idx: ast.Expr, val: ast.Name | ast.Constant):
         target=arr,
         value=ast.Call(
             func=ast.Attribute(
-                value=mk_jnp_arr_access(arr, idx),
+                value=mk_jnp_arr_access(copy(arr), idx),
                 attr="set",
             ),
             args=[val],
@@ -108,6 +125,11 @@ def cnt_n_mismatch_attr(cdg: CDG) -> int:
 
 class OptCompiler:
 
+    SELF = "self"
+    SWITCH = "switch"
+    MISMATCH_SEED = "mismatch_seed"
+    NOISE_SEED = "noise_seed"
+
     def __init__(self) -> None:
         pass
 
@@ -123,45 +145,55 @@ class OptCompiler:
             ark_compiler.compile_odeterm(cdg, cdg_spec)
         )
 
+        self.mm_used_idx = 0
+        namespace = {"jax": jax, "jnp": jnp}
+
         # Usefule constants
         args_len = len(switch_map) + sum(len(x) for x in num_attr_map.values())
+        fargs_len = sum(len(x) for x in fn_attr_map.values())
         n_mismatch = cnt_n_mismatch_attr(cdg)
 
         # Input variables ast expr
-        self_expr = mk_var("self")
-        switch_expr = mk_var("switch")
-        mismatch_seed_expr = mk_var("mismatch_seed")
-        noise_seed_expr = mk_var("noise_seed")
+        self_expr_gen = mk_var_generator(self.SELF)
+        switch_expr_gen = mk_var_generator(self.SWITCH)
+        mismatch_seed_expr_gen = mk_var_generator(self.MISMATCH_SEED)
+        noise_seed_expr_gen = mk_var_generator(self.NOISE_SEED)
+
+        #  Function arguments
+        fn_args = [None for _ in range(fargs_len)]
 
         # Common variables ast expr
-        args_expr = mk_var("args")
-        fn_args_expr = mk_var("fn_args")
-        trainable_expr = mk_var("trainable")
-        mm_prng_key_expr = mk_var("mm_key")
-        mm_arr_expr = mk_var("mm_arr")
+        args_expr_gen = mk_var_generator("args")
+        trainable_expr_gen = mk_var_generator("trainable")
+        mm_prng_key_expr_gen = mk_var_generator("mm_key")
+        mm_arr_expr_gen = mk_var_generator("mm_arr")
 
         stmts = []
         # assign self.trainable to trainable for readability
         stmts.append(
-            mk_assign(trainable_expr, ast.Attribute(value=self_expr, attr="trainable"))
+            mk_assign(
+                trainable_expr_gen(),
+                ast.Attribute(value=self_expr_gen(), attr="trainable"),
+            )
         )
         # Initialize the jnp arrays
         init_arr = mk_jnp_call(args=[args_len], call_fn="zeros")
-        stmts.append(mk_assign(args_expr, init_arr))
+        stmts.append(mk_assign(args_expr_gen(), init_arr))
 
         # Initialize the mismatch array
         stmts.append(
             mk_assign(
-                mm_prng_key_expr,
-                mk_jax_random_call(args=[mismatch_seed_expr], call_fn="PRNGKey"),
+                mm_prng_key_expr_gen(),
+                mk_jax_random_call(args=[mismatch_seed_expr_gen()], call_fn="PRNGKey"),
             )
         )
         mismatch_arr = mk_jax_random_call(
-            args=[mm_prng_key_expr, n_mismatch], call_fn="normal"
+            args=[mm_prng_key_expr_gen(), mk_list(mk_list_val_expr([n_mismatch]))],
+            call_fn="normal",
         )
         stmts.append(
             mk_assign(
-                mm_arr_expr,
+                mm_arr_expr_gen(),
                 mismatch_arr,
             )
         )
@@ -174,43 +206,122 @@ class OptCompiler:
                 num_attr_to_idx = num_attr_map[ele.name]
             for attr, val in ele.attrs.items():
                 if isinstance(val, Callable):
+                    # Handle function attribute
                     assert attr in fn_attr_to_idx
-                    pass
-                assert attr in num_attr_to_idx
-                if isinstance(val, Trainable):
-                    pass
+                    fn_args[fn_attr_to_idx[attr]] = val
                 else:
+                    assert attr in num_attr_to_idx
+                    if isinstance(val, Trainable):
+                        # Handle trainable attribute
+                        val: Trainable
+                        trainable_id = val.idx
+                        val_expr = mk_arr_access(
+                            trainable_expr_gen(), ast.Constant(value=trainable_id)
+                        )
+                    else:
+                        # Handle fixed attribute
+                        val_expr = ast.Constant(value=val)
+
+                    # If the attribute is mismatched, apply the mismatch
+                    if isinstance(ele.attr_def[attr], AttrDefMismatch):
+                        val_expr = self._mk_mismatch_expr(
+                            orig_expr=val_expr,
+                            mm_arr_expr=mm_arr_expr_gen(),
+                            attr_def=ele.attr_def[attr],
+                        )
+
                     stmts.append(
                         mk_jnp_assign(
-                            arr=args_expr,
+                            arr=args_expr_gen(),
                             idx=ast.Constant(value=num_attr_to_idx[attr]),
-                            val=ast.Constant(value=val),
+                            val=val_expr,
                         )
                     )
 
-        for stmt in stmts:
-            print(ast.unparse(ast.fix_missing_locations(stmt)))
+        # Return the args
+        stmts.append(set_ctx(ast.Return(value=args_expr_gen()), ast.Load))
+        # Compile the statements to make_args(self, switch, mismatch_seed) function
+        make_args_fn = ast.FunctionDef(
+            name="make_args",
+            args=ast.arguments(
+                posonlyargs=[],
+                args=[
+                    mk_arg(self.SELF),
+                    mk_arg(self.SWITCH),
+                    mk_arg(self.MISMATCH_SEED),
+                ],
+                vararg=None,
+                kwonlyargs=[],
+                kw_defaults=[],
+                kwarg=None,
+                defaults=[],
+            ),
+            body=stmts,
+            decorator_list=[],
+        )
+        module = ast.Module([make_args_fn], type_ignores=[])
+        module = ast.fix_missing_locations(module)
+        print(ast.unparse(module))
+        exec(
+            compile(source=module, filename="tmp.py", mode="exec"),
+            namespace,
+        )
 
-        ode_fn = lambda self, t, y, args: ode_term(t, y, args, None)
+        ode_fn = lambda self, t, y, args: ode_term(t, y, args, fn_args)
         configure_simulation = base_configure_simulation
-        rescale_params = lambda self, x: x
-        map_params = lambda self, x: x
-        clip_params = lambda self, x: x
-        add_mismatch = lambda self, x, y: x
-        combine_args = lambda self, x, y: x + y
 
         opt_module = type(
             prog_name,
             (BaseAnalogCkt,),
             {
                 "ode_fn": ode_fn,
+                "make_args": namespace["make_args"],
                 "configure_simulation": configure_simulation,
-                "rescale_params": rescale_params,
-                "map_params": map_params,
-                "clip_params": clip_params,
-                "add_mismatch": add_mismatch,
-                "combine_args": combine_args,
             },
         )
 
         return opt_module
+
+    def _mk_mismatch_expr(
+        self, orig_expr: ast.expr, mm_arr_expr: ast.Name, attr_def: AttrDefMismatch
+    ):
+        """
+        Return the expression after adding the mismatch
+        """
+        if attr_def.std:
+            # orig_expr + std*mm_arr_expr[self.mm_used_idx])
+            std_expr = ast.Constant(value=attr_def.std)
+            mm_expr = ast.BinOp(
+                left=orig_expr,
+                op=ast.Add(),
+                right=ast.BinOp(
+                    left=std_expr,
+                    op=ast.Mult(),
+                    right=mk_arr_access(
+                        mm_arr_expr, ast.Constant(value=self.mm_used_idx)
+                    ),
+                ),
+            )
+        elif attr_def.rstd:
+            # orig_expr * (1 + std*mm_arr_expr[self.mm_used_idx])
+            rstd_expr = ast.Constant(value=attr_def.rstd)
+            mm_expr = ast.BinOp(
+                left=orig_expr,
+                op=ast.Mult(),
+                right=ast.BinOp(
+                    left=ast.Constant(value=1),
+                    op=ast.Add(),
+                    right=ast.BinOp(
+                        left=rstd_expr,
+                        op=ast.Mult(),
+                        right=mk_arr_access(
+                            mm_arr_expr, ast.Constant(value=self.mm_used_idx)
+                        ),
+                    ),
+                ),
+            )
+        else:
+            raise ValueError("Must specify either rstd or std")
+
+        self.mm_used_idx += 1
+        return mm_expr

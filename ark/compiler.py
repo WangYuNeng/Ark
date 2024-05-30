@@ -422,7 +422,7 @@ class ArkCompiler:
             cdg, cdg_spec, ode_fn_io_names, return_jax=True
         )
         _, noise_ode_stmts = self._compile_ode_fn(
-            cdg, cdg_spec, ode_fn_io_names, return_jax=True, is_noise_ode=True
+            cdg, cdg_spec, ode_fn_io_names, return_jax=True, noise_ode=True
         )
         for fn_name, ode_stmt in zip(
             [self.ODE_FN_NAME, self.NOISE_FN_NAME], [ode_stmts, noise_ode_stmts]
@@ -461,7 +461,7 @@ class ArkCompiler:
         )
 
     def compile_sympy_diffeqs(
-        self, cdg: CDG, cdg_spec: CDGSpec, is_noise_ode: bool = False
+        self, cdg: CDG, cdg_spec: CDGSpec, noise_ode: bool = False
     ) -> list[sympy.Equality]:
         """Compile the cdg to the ode function into a list of sympy equations
         describing the dynamical system.
@@ -469,7 +469,7 @@ class ArkCompiler:
         Args:
             cdg (CDG): The input CDG
             cdg_spec (CDGSpec): Specification
-            is_noise_ode (bool): whether the ode function is for noise term.
+            noise_ode (bool): whether the ode function is for noise term.
 
         Returns:
             equations (list[sympy.Expr]): list of sympy equations
@@ -499,13 +499,22 @@ class ArkCompiler:
             for node in nodes:
                 for sub_order in range(1, order):
                     vname = n_state(ddt(node.name, order=sub_order))
-                    cur_vname = ddt(node.name, order=sub_order)
-                    equations.append(
-                        sympy.codegen.Assignment(
-                            lhs=mk_var(vname, to_sympy=True),
-                            rhs=mk_var(cur_vname, to_sympy=True),
+                    if noise_ode:
+                        # For higher order noise terms, the derivative is 0
+                        equations.append(
+                            sympy.codegen.Assignment(
+                                lhs=mk_var(vname, to_sympy=True),
+                                rhs=sympy.Float(0),
+                            )
                         )
-                    )
+                    else:
+                        cur_vname = ddt(node.name, order=sub_order)
+                        equations.append(
+                            sympy.codegen.Assignment(
+                                lhs=mk_var(vname, to_sympy=True),
+                                rhs=mk_var(cur_vname, to_sympy=True),
+                            )
+                        )
                 vname = ddt(node.name, order=order)
                 if order != 0:
                     vname = n_state(vname)
@@ -526,7 +535,7 @@ class ArkCompiler:
                             rule=gen_rule,
                             transformer=rewrite,
                             to_sympy=True,
-                            from_noise=is_noise_ode,
+                            from_noise=noise_ode,
                         )
                         if edge.switchable:
                             rhs_expr = reduction.sympy_switch(
@@ -647,7 +656,7 @@ class ArkCompiler:
         cdg_spec: CDGSpec,
         io_names: list[str],
         return_jax: bool = False,
-        is_noise_ode: bool = False,
+        noise_ode: bool = False,
     ) -> tuple[ast.FunctionDef, list[ast.stmt]]:
         """Compile the cdg to the ode function for scipy.integrate.solve_ivp simulation
 
@@ -663,7 +672,7 @@ class ArkCompiler:
             cdg_spec (CDGSpec): Specification
             io_names (list[str]): names of the state variables `var1, var2, ...`
             return_jax (bool): whether the return value is a list or a jax array.
-            is_noise_ode (bool): whether the ode function is for noise term.
+            noise_ode (bool): whether the ode function is for noise term.
 
         """
 
@@ -680,7 +689,7 @@ class ArkCompiler:
         )
 
         # Generate the ddt_var = f(var) statements
-        equations = self.compile_sympy_diffeqs(cdg, cdg_spec, is_noise_ode)
+        equations = self.compile_sympy_diffeqs(cdg, cdg_spec, noise_ode)
 
         # Convert sympy equations to ast statements
         for eq in equations:

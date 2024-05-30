@@ -148,6 +148,7 @@ class CDGNode(CDGElement):
     reduction: Reduction
     _init_vals: list[float]
     _traces: list[np.ndarray]
+    order: int
 
     def __init__(self, cdg_type: "NodeType", name: str, **attrs) -> None:
         super().__init__(cdg_type, name, **attrs)

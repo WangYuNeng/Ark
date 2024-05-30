@@ -4,6 +4,7 @@ from sympy import *
 
 from ark.ark import ArkCompiler
 from ark.cdg.cdg import CDG
+from ark.optimization.base_module import TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
 from ark.reduction import PRODUCT
 from ark.specification.attribute_def import AttrDef, AttrDefMismatch
@@ -67,15 +68,15 @@ r_cp_src = ProdRule(
     Osc,
     SRC,
     -EDGE.k * (VAR(SRC) / SRC.mass - VAR(DST) / SRC.mass),
-    noise_exp=0.1,
+    noise_exp=VAR(SRC) / VAR(SRC) * 0.1 / DST.mass,
 )
 r_cp_dst = ProdRule(
     Coupling,
     Osc,
     Osc,
     DST,
-    -EDGE.k * (VAR(DST) / SRC.mass - VAR(SRC) / SRC.mass),
-    noise_exp=VAR(SRC),
+    -EDGE.k * (VAR(DST) / DST.mass - VAR(SRC) / DST.mass),
+    noise_exp=VAR(SRC) / VAR(SRC) * 0.1 / DST.mass,
 )
 r_fn = ProdRule(test_w_fn, Osc, Osc, DST, VAR(DST) + EDGE.fn(VAR(SRC)))
 production_rules = [r_cp_src, r_cp_dst, r_fn]
@@ -104,14 +105,21 @@ graph.connect(cpl, node1, node2)
 exprs = compiler.compile_sympy_diffeqs(cdg=graph, cdg_spec=co_spec)
 a = pretty(exprs, use_unicode=False)
 print(a)
+exprs = compiler.compile_sympy_diffeqs(cdg=graph, cdg_spec=co_spec, noise_ode=True)
+a = pretty(exprs, use_unicode=False)
+print(a)
 
+time_info = TimeInfo(t0=0, t1=1, dt0=0.01, saveat=jnp.linspace(0, 1, 100))
+y0 = jnp.array([1, 0, 2, 0])
 
-TestClass = OptCompiler().compile("test", graph, co_spec, trainable_len=1)
+TestClass = OptCompiler().compile("test", graph, co_spec)
 test = TestClass(init_trainable=jnp.array([1]), is_stochastic=False, solver=Tsit5())
 import matplotlib.pyplot as plt
 
 for i in range(10):
     a = test(
+        time_info,
+        y0,
         [],
         i,
         0,
@@ -123,6 +131,8 @@ plt.show()
 test = TestClass(init_trainable=jnp.array([1]), is_stochastic=True, solver=Euler())
 for i in range(10):
     a = test(
+        time_info,
+        y0,
         [],
         0,
         i,
@@ -130,5 +140,6 @@ for i in range(10):
     import matplotlib.pyplot as plt
 
     plt.plot(a)
+plt.show()
 plt.show()
 plt.show()

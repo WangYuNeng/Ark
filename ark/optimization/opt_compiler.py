@@ -298,6 +298,17 @@ class OptCompiler:
         init_arr = mk_jnp_call(args=[args_len], call_fn="zeros")
         stmts.append(mk_assign(args_expr_gen(), init_arr))
 
+        # Initialize the switch array (switch array is always the beginning of the args)
+        # args = args.at[:switch_args_len].set(switch)
+        switch_args_len = len(switch_map)
+        stmts.append(
+            mk_jnp_assign(
+                arr=args_expr_gen(),
+                idx=ast.Slice(upper=ast.Constant(value=switch_args_len)),
+                val=switch_expr_gen(),
+            )
+        )
+
         # Initialize the mismatch array
         stmts.append(
             mk_assign(

@@ -6,7 +6,7 @@ from ark.ark import ArkCompiler
 from ark.cdg.cdg import CDG
 from ark.optimization.base_module import TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
-from ark.reduction import PRODUCT
+from ark.reduction import SUM
 from ark.specification.attribute_def import AttrDef, AttrDefMismatch
 from ark.specification.attribute_type import AnalogAttr, FunctionAttr, Trainable
 from ark.specification.cdg_types import EdgeType, NodeType
@@ -25,7 +25,7 @@ Osc = NodeType(
     name="Osc",
     attrs={
         "order": 2,
-        "reduction": PRODUCT,
+        "reduction": SUM,
         "attr_def": {
             "mass": AttrDefMismatch(
                 attr_type=AnalogAttr(val_range=(0.0, 10.0)), rstd=0.1
@@ -89,7 +89,7 @@ def test_fn(x):
 
 
 fn_edge = test_w_fn(fn=test_fn)
-cpl = Coupling(k=Trainable(0))
+cpl = Coupling(k=Trainable(0), switchable=True)
 
 graph.connect(cpl, node1, node2)
 # graph.connect(fn_edge, node1, node2)
@@ -115,7 +115,7 @@ for i in range(10):
     a = test(
         time_info,
         y0,
-        [],
+        [1],
         i,
         0,
     )
@@ -128,7 +128,7 @@ for i in range(10):
     a = test(
         time_info,
         y0,
-        [],
+        [1],
         0,
         i,
     )

@@ -581,3 +581,8 @@ class CDG:
     def ds_order(self) -> int:
         """Order of the system of differential equations."""
         return len(self._order_to_nodes) - 1
+
+    @property
+    def elements(self) -> list[CDGElement]:
+        """Return all elements in the graph."""
+        return self.nodes + self.edges

@@ -1,6 +1,6 @@
 import ast
 from copy import copy
-from typing import Callable
+from typing import Callable, Iterable
 
 import jax
 import jax.numpy as jnp
@@ -9,6 +9,7 @@ from ark.cdg.cdg import CDG, CDGElement, CDGNode
 from ark.compiler import ArkCompiler, mk_arg, set_ctx
 from ark.optimization.base_module import BaseAnalogCkt
 from ark.specification.attribute_def import AttrDefMismatch, Trainable
+from ark.specification.attribute_type import AnalogAttr, DigitalAttr
 from ark.specification.specification import CDGSpec
 
 ark_compiler = ArkCompiler()
@@ -46,7 +47,7 @@ def mk_arr_access(lst: ast.Name, idx: ast.expr):
     )
 
 
-def mk_list_val_expr(lst: list):
+def mk_list_val_expr(lst: Iterable):
     """make the list value to be expressions"""
     lst_expr = []
     for val in lst:
@@ -108,7 +109,7 @@ def mk_jnp_assign(arr: ast.Name, idx: ast.expr, val: ast.Name | ast.Constant):
 def cnt_n_mismatch_attr(cdg: CDG) -> int:
     cnt = 0
     ele: CDGElement
-    for ele in cdg.nodes + cdg.edges:
+    for ele in cdg.elements:
         for val in ele.attr_def.values():
             if isinstance(val, AttrDefMismatch):
                 cnt += 1
@@ -166,13 +167,61 @@ def base_readout(y: jax.Array, idx: list[int]):
     return y[:, idx]
 
 
+def check_trainable_consisitency(cdg: CDG):
+    """Check if the trainable attributes in the CDG are consistent
+
+    1. their indices should be 0, 1, 2, ... without skipping
+    2. If trainable parameter is shared, their range and type should be identical.
+
+    Returns:
+        size of the trainable parameters
+    """
+
+    trainable_types: dict[int, tuple[CDGElement, str]] = {}
+    for ele in cdg.elements:
+        for attr, val in ele.attrs.items():
+            if isinstance(val, Trainable):
+                if val.idx not in trainable_types:
+                    trainable_types[val.idx] = (ele, attr)
+                else:
+                    cur_attr_type = ele.attr_def[attr].attr_type
+                    stored_ele, stored_attr = trainable_types[val.idx]
+                    stored_attr_type = stored_ele.attr_def[stored_attr].attr_type
+                    if isinstance(cur_attr_type, type(stored_attr_type)):
+                        raise ValueError(
+                            f"Shared trainable parameter {val.idx}  has inconsistent type "
+                            + f"in {ele.name}.{attr} and {stored_ele.name}.{stored_attr}"
+                        )
+                    if isinstance(cur_attr_type, AnalogAttr):
+                        if cur_attr_type.val_range != stored_attr_type.val_range:
+                            raise ValueError(
+                                f"Shared trainable parameter {val.idx}  has inconsistent range "
+                                + f"in {ele.name}.{attr} and {stored_ele.name}.{stored_attr}"
+                            )
+                    elif isinstance(cur_attr_type, DigitalAttr):
+                        if cur_attr_type.val_choices != stored_attr_type.val_choices:
+                            raise ValueError(
+                                f"Shared trainable parameter {val.idx}  has inconsistent choices "
+                                + f"in {ele.name}.{attr} and {stored_ele.name}.{stored_attr}"
+                            )
+                    else:
+                        raise ValueError(
+                            f"Unsupport attribute type {type(cur_attr_type)} for trainable parameter"
+                        )
+    max_id = max(trainable_types.keys())
+    for i in range(max_id + 1):
+        if i not in trainable_types:
+            raise ValueError(f"Trainable parameter {i} is missing")
+    return max_id + 1
+
+
 class OptCompiler:
 
     SELF = "self"
     SWITCH = "switch"
     MISMATCH_SEED = "mismatch_seed"
     NOISE_SEED = "noise_seed"
-    CLIPPED_MIN, CLIPPED_MAX = -1, 1
+    NORMALIZE_MIN, NORMALIZE_MAX = -1, 1
 
     def __init__(self) -> None:
         pass
@@ -183,7 +232,7 @@ class OptCompiler:
         cdg: CDG,
         cdg_spec: CDGSpec,
         readout_nodes: list[CDGNode] = None,
-        do_normalization: bool = True,
+        normalize_weight: bool = True,
         do_clipping: bool = True,
     ) -> type:
         """Compile the cdg to an equinox.Module.
@@ -192,7 +241,7 @@ class OptCompiler:
             prog_name (str): name of the program
             cdg (CDG): the dynamical graph
             cdg_spec (CDGSpec): the specification of the dynamical graph
-            do_normalization (bool, optional): whether to normalize the trainable
+            normalize weight (bool, optional): whether to normalize the trainable
             parameters or not. If true, the traianble weights are assumed to within
             [-1, 1]. Defaults to True.
             do_clipping (bool, optional): whether to clip the value within the range
@@ -201,6 +250,9 @@ class OptCompiler:
         Returns:
             type: the compiled module.
         """
+
+        # Check the consistency of the trainable attributes
+        trainable_len = check_trainable_consisitency(cdg)
 
         (ode_term, noise_term), node_mapping, switch_map, num_attr_map, fn_attr_map = (
             ark_compiler.compile_odeterm(cdg, cdg_spec)
@@ -233,18 +285,13 @@ class OptCompiler:
         # Assign self.trainable to trainable for readability
         # and clipping the trainable values
         # trainable = jnp.clip(self.trainable, CLIPPED_MIN, CLIPPED_MAX)
-        clipped_trainable = mk_jnp_call(
-            args=[
-                ast.Attribute(value=self_expr_gen(), attr="trainable"),
-                self.CLIPPED_MIN,
-                self.CLIPPED_MAX,
-            ],
-            call_fn="clip",
+        trainable_expr_rhs = self._clip_and_denormalize_trainable(
+            cdg, trainable_len, self_expr_gen, normalize_weight, do_clipping
         )
         stmts.append(
             mk_assign(
                 trainable_expr_gen(),
-                clipped_trainable,
+                trainable_expr_rhs,
             )
         )
         # Initialize the jnp arrays
@@ -364,6 +411,105 @@ class OptCompiler:
         )
 
         return opt_module
+
+    def _clip_and_denormalize_trainable(
+        self,
+        cdg: CDG,
+        trainable_len: int,
+        self_expr_gen: Callable,
+        normalized: bool,
+        clip: bool,
+    ) -> ast.expr:
+        # The shared trainables are checked to have consistent range
+        # Can use the first trainable to get the range for clipping and normalize
+
+        def jnp_clip_expr(val: ast.expr, min_val, max_val):
+            return mk_jnp_call(
+                args=[
+                    val,
+                    min_val,
+                    max_val,
+                ],
+                call_fn="clip",
+            )
+
+        self_dot_trainable = ast.Attribute(value=self_expr_gen(), attr="trainable")
+
+        if not normalized and not clip:
+            return self_dot_trainable
+
+        min_arr = [None for _ in range(trainable_len)]
+        max_arr = [None for _ in range(trainable_len)]
+        for ele in cdg.elements:
+            for attr, val in ele.attrs.items():
+                if isinstance(val, Trainable):
+                    attr_type = ele.attr_def[attr].attr_type
+                    if isinstance(attr_type, AnalogAttr):
+                        min_val, max_val = (
+                            attr_type.val_range.min,
+                            attr_type.val_range.max,
+                        )
+                        min_arr[val.idx] = min_val
+                        max_arr[val.idx] = max_val
+
+        if normalized:
+            # Traianble weights are within [self.NORMALIZE_MIN, self.NORMALIZE_MAX]
+
+            trainable = self_dot_trainable
+            if clip:
+                trainable = jnp_clip_expr(
+                    self_dot_trainable,
+                    self.NORMALIZE_MIN,
+                    self.NORMALIZE_MAX,
+                )
+
+            norm_diff, half_norm_sum = (
+                self.NORMALIZE_MAX - self.NORMALIZE_MIN,
+                (self.NORMALIZE_MAX + self.NORMALIZE_MIN) / 2,
+            )
+            min_val, max_val = jnp.array(min_arr, dtype=jnp.float64), jnp.array(
+                max_arr, dtype=jnp.float64
+            )
+            range_diff, half_range_sum = max_val - min_val, (max_val + min_val) / 2
+
+            # Denormalize the trainable values to the original range
+            # Denormalization: [normalized_min, normalized_max] -> [min, max]
+            # val = (norm_val - (half_norm_sum)) * range_diff / norm_diff + (half_range_sum)
+            diff_range_over_norm = range_diff / norm_diff
+            diff_range_over_norm_jnp_arr = mk_jnp_call(
+                [mk_list(mk_list_val_expr(diff_range_over_norm.tolist()))],
+                call_fn="array",
+            )
+            half_range_sum_jnp_arr = mk_jnp_call(
+                [mk_list(mk_list_val_expr(half_range_sum.tolist()))],
+                call_fn="array",
+            )
+
+            trainable = ast.BinOp(
+                left=ast.BinOp(
+                    left=ast.BinOp(
+                        left=trainable,
+                        op=ast.Sub(),
+                        right=ast.Constant(value=half_norm_sum),
+                    ),
+                    op=ast.Mult(),
+                    right=diff_range_over_norm_jnp_arr,
+                ),
+                op=ast.Add(),
+                right=half_range_sum_jnp_arr,
+            )
+
+        else:  # Only clipping
+            min_arr = mk_jnp_call([mk_list(mk_list_val_expr(min_arr))], call_fn="array")
+            max_arr = mk_jnp_call([mk_list(mk_list_val_expr(max_arr))], call_fn="array")
+
+            trainable = jnp_clip_expr(
+                self_dot_trainable,
+                min_arr,
+                max_arr,
+            )
+
+        return trainable
 
     def _mk_mismatch_expr(
         self, orig_expr: ast.expr, mm_arr_expr: ast.Name, attr_def: AttrDefMismatch

@@ -123,4 +123,3 @@ class FunctionAttr(AttrType):
             raise RuntimeError("Default function not implemented")
 
         return empty_func
-        return empty_func

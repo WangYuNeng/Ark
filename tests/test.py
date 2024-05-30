@@ -8,12 +8,7 @@ from ark.optimization.base_module import TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
 from ark.reduction import PRODUCT
 from ark.specification.attribute_def import AttrDef, AttrDefMismatch
-from ark.specification.attribute_type import (
-    AnalogAttr,
-    DigitalAttr,
-    FunctionAttr,
-    Trainable,
-)
+from ark.specification.attribute_type import AnalogAttr, FunctionAttr, Trainable
 from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule
 from ark.specification.rule_keyword import DST, EDGE, SRC, VAR
@@ -33,7 +28,7 @@ Osc = NodeType(
         "reduction": PRODUCT,
         "attr_def": {
             "mass": AttrDefMismatch(
-                attr_type=AnalogAttr(val_range=(0.0, 10000.0)), rstd=0.1
+                attr_type=AnalogAttr(val_range=(0.0, 10.0)), rstd=0.1
             )
         },
     },
@@ -45,9 +40,7 @@ Coupling = EdgeType(
     name="Coupling",
     attrs={
         "attr_def": {
-            "k": AttrDefMismatch(
-                attr_type=DigitalAttr(val_choices=[2, 4, 6, 8]), rstd=0.2
-            )
+            "k": AttrDefMismatch(attr_type=AnalogAttr(val_range=(0.0, 10.0)), rstd=0.2)
         }
     },
 )
@@ -76,7 +69,7 @@ r_cp_dst = ProdRule(
     Osc,
     DST,
     -EDGE.k * (VAR(DST) / DST.mass - VAR(SRC) / DST.mass),
-    noise_exp=VAR(SRC) / VAR(SRC) * 0.1 / DST.mass,
+    noise_exp=VAR(SRC) / VAR(SRC) * 1 / DST.mass,
 )
 r_fn = ProdRule(test_w_fn, Osc, Osc, DST, VAR(DST) + EDGE.fn(VAR(SRC)))
 production_rules = [r_cp_src, r_cp_dst, r_fn]
@@ -87,8 +80,8 @@ compiler = ArkCompiler()
 
 # Initialize 2 couplied oscillatorsxx
 graph = CDG()
-node1 = Osc(mass=1.0)
-node2 = Osc(mass=2.0)
+node1 = Osc(mass=5.0)
+node2 = Osc(mass=Trainable(1))
 
 
 def test_fn(x):
@@ -112,8 +105,10 @@ print(a)
 time_info = TimeInfo(t0=0, t1=1, dt0=0.01, saveat=jnp.linspace(0, 1, 100))
 y0 = jnp.array([1, 0, 2, 0])
 
-TestClass = OptCompiler().compile("test", graph, co_spec)
-test = TestClass(init_trainable=jnp.array([1]), is_stochastic=False, solver=Tsit5())
+TestClass = OptCompiler().compile(
+    "test", graph, co_spec, normalize_weight=True, do_clipping=False
+)
+test = TestClass(init_trainable=jnp.array([0, 0]), is_stochastic=False, solver=Tsit5())
 import matplotlib.pyplot as plt
 
 for i in range(10):

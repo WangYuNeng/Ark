@@ -1,69 +1,158 @@
+import sys
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
 import numpy as np
 import optax
-from diffrax.solver import Euler, Tsit5
+from diffrax.solver import Tsit5
 from jaxtyping import Array, PyTree
-from spec import FREQ, OFFSET_STD, Coupling, Osc, T, obc_spec
+from spec import Coupling, Osc, T, obc_spec
 from sympy import *
 
-from ark.ark import ArkCompiler
 from ark.cdg.cdg import CDG
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
-from ark.reduction import SUM
-from ark.specification.attribute_def import AttrDef, AttrDefMismatch
+from ark.specification.attribute_def import AttrDef
 from ark.specification.attribute_type import AnalogAttr, FunctionAttr, Trainable
-from ark.specification.cdg_types import EdgeType, NodeType
+from ark.specification.cdg_types import NodeType
 from ark.specification.production_rule import ProdRule
-from ark.specification.rule_keyword import DST, EDGE, SRC, VAR
-from ark.specification.specification import CDGSpec
+from ark.specification.rule_keyword import DST, EDGE, SELF, SRC, VAR
 
 jax.config.update("jax_enable_x64", True)
 
+seed = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+np.random.seed(seed)
 
-def locking_fn(x):
+
+class TrainableMananger:
+
+    def __init__(self):
+        self.idx = -1
+
+    def __call__(self):
+        self.idx += 1
+        return Trainable(self.idx)
+
+
+def locking_fn(x, lock_strength: float):
     """Injection locking function from [2]
     Modify the leading coefficient to 1.2 has a better outcome
     """
-    return 1.2 * 795.8e6 * jnp.sin(2 * jnp.pi * x)
+    return lock_strength * 795.8e6 * jnp.sin(2 * jnp.pi * x)
 
 
-def coupling_fn(x):
+def coupling_fn(x, cpl_strength: float):
     """Coupling function from [2]"""
-    return 2 * 795.8e6 * jnp.sin(jnp.pi * x)
+    return cpl_strength * 795.8e6 * jnp.sin(jnp.pi * x)
 
+
+Osc_modified = NodeType(
+    "Osc_modified",
+    bases=Osc,
+    attrs={
+        "order": 1,
+        "attr_def": {
+            "lock_fn": AttrDef(attr_type=FunctionAttr(nargs=2)),
+            "osc_fn": AttrDef(attr_type=FunctionAttr(nargs=2)),
+            "lock_strength": AttrDef(attr_type=AnalogAttr((-10, 10))),
+            "cpl_strength": AttrDef(attr_type=AnalogAttr((-10, 10))),
+        },
+    },
+)
+
+modified_cp_src = ProdRule(
+    Coupling,
+    Osc_modified,
+    Osc_modified,
+    SRC,
+    -EDGE.k * SRC.osc_fn(VAR(SRC) - VAR(DST), SRC.cpl_strength),
+)
+
+modified_cp_dst = ProdRule(
+    Coupling,
+    Osc_modified,
+    Osc_modified,
+    DST,
+    -EDGE.k * DST.osc_fn(VAR(SRC) - VAR(DST), DST.cpl_strength),
+)
+
+modified_cp_self = ProdRule(
+    Coupling,
+    Osc_modified,
+    Osc_modified,
+    SELF,
+    -EDGE.k * SRC.lock_fn(VAR(SRC), SRC.lock_strength),
+)
+
+obc_spec.add_production_rules([modified_cp_src, modified_cp_dst, modified_cp_self])
 
 graph = CDG()
-nodes = [Osc(lock_fn=locking_fn, osc_fn=coupling_fn) for _ in range(3)]
-connections = [Coupling(k=Trainable(i)) for i in range(3)]
+trainable_mgr = TrainableMananger()
 
-graph.connect(connections[0], nodes[0], nodes[1])
-graph.connect(connections[1], nodes[1], nodes[2])
-graph.connect(connections[2], nodes[2], nodes[0])
+
+def mk_edge():
+    return Coupling(k=trainable_mgr())
+
+
+def mk_node():
+    node = Osc_modified(
+        lock_fn=locking_fn,
+        osc_fn=coupling_fn,
+        lock_strength=trainable_mgr(),
+        cpl_strength=trainable_mgr(),
+    )
+    node.set_init_val(0.5, 0)
+    self_edge = mk_edge()
+    graph.connect(self_edge, node, node)
+    return node
+
+
+N_LAYER = 2
+layer_node = [[] for _ in range(N_LAYER)]
+layer_edge = [[] for _ in range(N_LAYER)]
+# Create node for each layer
+for i in range(N_LAYER):
+    layer_node[i] = [mk_node() for _ in range(2)]
+
+# output_node = mk_node()
+
+# Fully connect the layers
+for i in range(N_LAYER - 1):
+    layer_edge[i] = [mk_edge() for _ in range(4)]
+    graph.connect(layer_edge[i][0], layer_node[i][0], layer_node[i + 1][0])
+    graph.connect(layer_edge[i][1], layer_node[i][0], layer_node[i + 1][1])
+    graph.connect(layer_edge[i][2], layer_node[i][1], layer_node[i + 1][0])
+    graph.connect(layer_edge[i][3], layer_node[i][1], layer_node[i + 1][1])
+
+# Connect the last layer to the output node
+# output_edge = [mk_edge() for _ in range(2)]
+# graph.connect(output_edge[0], layer_node[N_LAYER - 1][0], output_node)
+# graph.connect(output_edge[1], layer_node[N_LAYER - 1][1], output_node)
 
 xor_circuit_class = OptCompiler().compile(
     "xor",
     graph,
     obc_spec,
-    readout_nodes=[nodes[0], nodes[1], nodes[2]],
+    readout_nodes=layer_node[N_LAYER - 1],
     normalize_weight=False,
     do_clipping=False,
 )
 
-time_info = TimeInfo(t0=0, t1=T * 3, dt0=T / 10, saveat=jnp.linspace(0, T * 3, 100))
+N_CYCLES = 10
+
+time_info = TimeInfo(
+    t0=0, t1=T * N_CYCLES, dt0=T / 10, saveat=jnp.linspace(0, T * N_CYCLES, 100)
+)
 
 xor_circuit: BaseAnalogCkt = xor_circuit_class(
-    init_trainable=jnp.array(np.random.normal(size=3)),
+    init_trainable=jnp.array(np.random.normal(size=trainable_mgr.idx + 1)),
     is_stochastic=False,
     solver=Tsit5(),
 )
 
-LEARNING_RATE = 1e-2
+LEARNING_RATE = 1e-1
 optim = optax.adam(LEARNING_RATE)
-nodes[2].set_init_val(0.5, 0)
 
 
 def dataloader(batch_size: int):
@@ -72,15 +161,15 @@ def dataloader(batch_size: int):
         y_true = np.logical_xor(xs[:, 0], xs[:, 1])
         x_init_states = []
         for x in xs:
-            nodes[0].set_init_val(x[0], 0)
-            nodes[1].set_init_val(x[1], 0)
+            layer_node[0][0].set_init_val(x[0], 0)
+            layer_node[0][1].set_init_val(x[1], 0)
             x_init_states.append(xor_circuit.cdg_to_initial_states(graph))
         yield jnp.array(x_init_states), jnp.array(y_true)
 
 
 def loss(model: BaseAnalogCkt, x: Array, y_true: Array):
     y_raw = jax.vmap(model, in_axes=(None, 0, None, None, None))(time_info, x, [], 0, 0)
-    y_pred = y_raw[:, -1, 2]
+    y_pred = jnp.abs(y_raw[:, -1, 0] - y_raw[:, -1, 1])
     return jnp.mean((y_pred - y_true) ** 2)
 
 
@@ -97,13 +186,33 @@ def make_step(
     return model, opt_state, loss_value
 
 
-steps = 10
+steps = 5
 bz = 64
 model = xor_circuit
 
 opt_state = optim.init(eqx.filter(model, eqx.is_array))
 
 
+import matplotlib.pyplot as plt
+
+for x in [[0, 0], [0, 1], [1, 0], [1, 1]]:
+    layer_node[0][0].set_init_val(x[0], 0)
+    layer_node[0][1].set_init_val(x[1], 0)
+    x_init_states = jnp.array(xor_circuit.cdg_to_initial_states(graph))
+    y_pred = model(time_info, x_init_states, [], 0, 0)
+    plt.plot(time_info.saveat, y_pred[:, 0])
+    plt.plot(time_info.saveat, y_pred[:, 1])
+    plt.title(f"Input: {x}")
+    plt.show()
+
 for step, (x, y_true) in zip(range(steps), dataloader(bz)):
     model, opt_state, train_loss = make_step(model, opt_state, x, y_true)
     print(f"Step {step}, Loss: {train_loss}")
+
+    # Enumerate 00, 01, 10, 11 to check the output
+    for x in [[0, 0], [0, 1], [1, 0], [1, 1]]:
+        layer_node[0][0].set_init_val(x[0], 0)
+        layer_node[0][1].set_init_val(x[1], 0)
+        x_init_states = jnp.array(xor_circuit.cdg_to_initial_states(graph))
+        y_pred = model(time_info, x_init_states, [], 0, 0)
+        print(f"Input: {x}, Output: {y_pred[-1]}")

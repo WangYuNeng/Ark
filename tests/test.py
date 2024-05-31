@@ -4,7 +4,7 @@ from sympy import *
 
 from ark.ark import ArkCompiler
 from ark.cdg.cdg import CDG
-from ark.optimization.base_module import TimeInfo
+from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
 from ark.reduction import SUM
 from ark.specification.attribute_def import AttrDef, AttrDefMismatch
@@ -103,12 +103,19 @@ a = pretty(exprs, use_unicode=False)
 print(a)
 
 time_info = TimeInfo(t0=0, t1=1, dt0=0.01, saveat=jnp.linspace(0, 1, 100))
-y0 = jnp.array([1, 0, 2, 0])
+
 
 TestClass = OptCompiler().compile(
     "test", graph, co_spec, normalize_weight=True, do_clipping=False
 )
-test = TestClass(init_trainable=jnp.array([0, 0]), is_stochastic=False, solver=Tsit5())
+
+graph.initialize_all_states(0)
+node1.set_init_val(val=1, n=0)
+node2.set_init_val(val=2, n=0)
+test: BaseAnalogCkt = TestClass(
+    init_trainable=jnp.array([0, 0]), is_stochastic=False, solver=Tsit5()
+)
+y0 = jnp.array(test.cdg_to_initial_states(graph))
 import matplotlib.pyplot as plt
 
 for i in range(10):

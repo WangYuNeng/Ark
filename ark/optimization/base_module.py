@@ -105,11 +105,6 @@ class BaseAnalogCkt(eqx.Module):
 
         raise NotImplementedError
 
-    def combine_args(self, params: jax.Array, switch: jax.Array) -> jax.Array:
-        """Combine trainable parameters with switch values"""
-
-        raise NotImplementedError
-
     def ode_fn(
         self, t: jax.typing.DTypeLike, y: jax.Array, args: jax.Array
     ) -> jax.Array:
@@ -126,5 +121,15 @@ class BaseAnalogCkt(eqx.Module):
 
     def readout(self, y: jax.Array) -> jax.Array:
         """Readout the output of the circuit."""
+
+        raise NotImplementedError
+
+    def cdg_to_initial_states(self, cdg) -> list[jax.typing.DTypeLike]:
+        """Extract the initial states from a CDG."""
+
+        raise NotImplementedError
+
+    def cdg_to_switch_array(self, cdg) -> list[int]:
+        """Extract the switch values from a CDG."""
 
         raise NotImplementedError

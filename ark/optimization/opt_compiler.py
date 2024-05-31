@@ -1,5 +1,6 @@
 import ast
 from copy import copy
+from functools import partial
 from typing import Callable, Iterable
 
 import jax
@@ -137,7 +138,7 @@ def cdg_to_initial_states(cdg: CDG, node_mapping: dict[str, int]) -> list[float]
     node: CDGNode
     for node, states in node_to_init_state.items():
         for order, s in enumerate(states):
-            initial_states[node_mapping[node.name] + order] = s
+            initial_states[node_mapping[node] + order] = s
     return initial_states
 
 
@@ -327,7 +328,7 @@ class OptCompiler:
             )
         )
         ele: CDGElement
-        for ele in cdg.nodes + cdg.edges:
+        for ele in cdg.elements:
             assert ele.name in num_attr_map or ele.name in fn_attr_map
             if ele.name in fn_attr_map:
                 fn_attr_to_idx = fn_attr_map[ele.name]
@@ -342,11 +343,20 @@ class OptCompiler:
                     assert attr in num_attr_to_idx
                     if isinstance(val, Trainable):
                         # Handle trainable attribute
-                        val: Trainable
-                        trainable_id = val.idx
-                        val_expr = mk_arr_access(
-                            trainable_expr_gen(), ast.Constant(value=trainable_id)
-                        )
+                        attr_type = ele.attr_def[attr].attr_type
+                        if isinstance(attr_type, AnalogAttr):
+                            val: Trainable
+                            trainable_id = val.idx
+                            val_expr = mk_arr_access(
+                                trainable_expr_gen(), ast.Constant(value=trainable_id)
+                            )
+                        elif isinstance(attr_type, DigitalAttr):
+                            raise NotImplementedError
+
+                        else:
+                            raise ValueError(
+                                f"Unsupported trainable attribute type {type(attr_type)}"
+                            )
                     else:
                         # Handle fixed attribute
                         val_expr = ast.Constant(value=val)
@@ -410,6 +420,12 @@ class OptCompiler:
                 idx = [node_mapping[node.name] for node in readout_nodes]
         readout_fn = lambda self, y: base_readout(y, idx)
 
+        cdg_to_init_state_fn = lambda self, cdg: cdg_to_initial_states(
+            cdg, node_mapping
+        )
+
+        cdg_to_switch_array_fn = lambda self, cdg: cdg_to_switch_array(cdg, switch_map)
+
         opt_module = type(
             prog_name,
             (BaseAnalogCkt,),
@@ -418,6 +434,8 @@ class OptCompiler:
                 "noise_fn": noise_fn,
                 "make_args": namespace["make_args"],
                 "readout": readout_fn,
+                "cdg_to_initial_states": cdg_to_init_state_fn,
+                "cdg_to_switch_array": cdg_to_switch_array_fn,
             },
         )
 

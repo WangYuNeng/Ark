@@ -151,7 +151,7 @@ xor_circuit: BaseAnalogCkt = xor_circuit_class(
     solver=Tsit5(),
 )
 
-LEARNING_RATE = 1e-1
+LEARNING_RATE = 1e-2
 optim = optax.adam(LEARNING_RATE)
 
 
@@ -195,24 +195,56 @@ opt_state = optim.init(eqx.filter(model, eqx.is_array))
 
 import matplotlib.pyplot as plt
 
-for x in [[0, 0], [0, 1], [1, 0], [1, 1]]:
+xs = [[0, 0], [0, 1], [1, 0], [1, 1]]
+x_init_states = []
+for x in xs:
     layer_node[0][0].set_init_val(x[0], 0)
     layer_node[0][1].set_init_val(x[1], 0)
-    x_init_states = jnp.array(xor_circuit.cdg_to_initial_states(graph))
-    y_pred = model(time_info, x_init_states, [], 0, 0)
-    plt.plot(time_info.saveat, y_pred[:, 0])
-    plt.plot(time_info.saveat, y_pred[:, 1])
-    plt.title(f"Input: {x}")
-    plt.show()
+    x_init_states.append(xor_circuit.cdg_to_initial_states(graph))
+
+y_preds = jax.vmap(model, in_axes=(None, 0, None, None, None))(
+    time_info, jnp.array(x_init_states), [], 0, 0
+)
+
+fig, axs = plt.subplots(2, 2)
+for i, y_pred in enumerate(y_preds):
+    x = xs[i]
+    axs[i // 2, i % 2].plot(time_info.saveat, y_pred[:, 0], label="Osc0")
+    axs[i // 2, i % 2].plot(time_info.saveat, y_pred[:, 1], label="Osc1")
+    axs[i // 2, i % 2].set_title(f"Input: {x}, XOR: {int(jnp.logical_xor(x[0], x[1]))}")
+    axs[i // 2, i % 2].legend()
+plt.suptitle("Oscillator dynamics before optimization")
+plt.tight_layout()
+plt.savefig("xor_before_training.png")
+plt.show()
 
 for step, (x, y_true) in zip(range(steps), dataloader(bz)):
     model, opt_state, train_loss = make_step(model, opt_state, x, y_true)
     print(f"Step {step}, Loss: {train_loss}")
 
     # Enumerate 00, 01, 10, 11 to check the output
-    for x in [[0, 0], [0, 1], [1, 0], [1, 1]]:
-        layer_node[0][0].set_init_val(x[0], 0)
-        layer_node[0][1].set_init_val(x[1], 0)
-        x_init_states = jnp.array(xor_circuit.cdg_to_initial_states(graph))
-        y_pred = model(time_info, x_init_states, [], 0, 0)
-        print(f"Input: {x}, Output: {y_pred[-1]}")
+    y_preds = jax.vmap(model, in_axes=(None, 0, None, None, None))(
+        time_info, jnp.array(x_init_states), [], 0, 0
+    )
+    for x, y_pred in zip(xs, y_preds):
+        print(
+            f"Node Input: {x}, XOR: {int(jnp.logical_xor(x[0], x[1]))}, Optimized output: {jnp.abs(y_pred[-1,0]-y_pred[-1,1])}"
+        )
+fig, axs = plt.subplots(2, 2)
+
+N_CYCLES = 32
+
+time_info = TimeInfo(
+    t0=0, t1=T * N_CYCLES, dt0=T / 1000, saveat=jnp.linspace(0, T * N_CYCLES, 100)
+)
+
+for i, y_pred in enumerate(y_preds):
+    x = xs[i]
+    axs[i // 2, i % 2].plot(time_info.saveat, y_pred[:, 0], label="Osc0")
+    axs[i // 2, i % 2].plot(time_info.saveat, y_pred[:, 1], label="Osc1")
+    axs[i // 2, i % 2].set_title(f"Input: {x}, XOR: {int(jnp.logical_xor(x[0], x[1]))}")
+    axs[i // 2, i % 2].legend()
+plt.suptitle("Oscillator dynamics after optimization")
+plt.tight_layout()
+plt.savefig("xor_after_training.png")
+plt.show()

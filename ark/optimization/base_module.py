@@ -82,7 +82,7 @@ class BaseAnalogCkt(eqx.Module):
                 shape=initial_state.shape,
                 key=jax.random.PRNGKey(noise_seed),
             )
-            brownian_term = diffrax.ControlTerm(self.noise_fn, brownian)
+            brownian_term = diffrax.WeaklyDiagonalControlTerm(self.noise_fn, brownian)
             solution = diffrax.diffeqsolve(
                 terms=diffrax.MultiTerm(ode_term, brownian_term),
                 solver=self.solver,

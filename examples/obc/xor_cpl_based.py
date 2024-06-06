@@ -84,7 +84,7 @@ xor_circuit_class = OptCompiler().compile(
     do_clipping=False,
 )
 
-N_CYCLES = 1
+N_CYCLES = 5
 
 time_info = TimeInfo(
     t0=0, t1=T * N_CYCLES, dt0=T / 10, saveat=jnp.linspace(0, T * N_CYCLES, 100)
@@ -133,13 +133,13 @@ for seed in range(20):
     )
     opt_state = optim.init(eqx.filter(model, eqx.is_array))
 
-    # for step, (switch, x_init, y_true) in zip(range(steps), dataloader(bz)):
-    #     model, opt_state, train_loss = make_step(
-    #         model, opt_state, switch, x_init, y_true
-    #     )
-    #     # print(f"Step {step}, Loss: {train_loss}")
-    #     if train_loss < train_loss_best:
-    #         train_loss_best = train_loss
+    for step, (switch, x_init, y_true) in zip(range(steps), dataloader(bz)):
+        model, opt_state, train_loss = make_step(
+            model, opt_state, switch, x_init, y_true
+        )
+        print(f"\tStep {step}, Loss: {train_loss}")
+        if train_loss < train_loss_best:
+            train_loss_best = train_loss
 
     #     switch, x_init, y_true = sorted_data(bz)
     #     fig, ax = plt.subplots(2, 2, figsize=(16, 4))

@@ -7,7 +7,7 @@ import numpy as np
 import optax
 from diffrax.solver import Tsit5
 from jaxtyping import Array, PyTree
-from spec import Coupling, Osc, T, obc_spec
+from spec import Coupling, Osc, obc_spec
 from sympy import *
 
 from ark.cdg.cdg import CDG
@@ -20,7 +20,7 @@ from ark.specification.production_rule import ProdRule
 from ark.specification.rule_keyword import DST, EDGE, SELF, SRC, VAR
 
 jax.config.update("jax_enable_x64", True)
-
+T = 1
 seed = int(sys.argv[1]) if len(sys.argv) > 1 else 0
 np.random.seed(seed)
 
@@ -39,12 +39,12 @@ def locking_fn(x, lock_strength: float):
     """Injection locking function from [2]
     Modify the leading coefficient to 1.2 has a better outcome
     """
-    return lock_strength * 795.8e6 * jnp.sin(2 * jnp.pi * x)
+    return lock_strength * jnp.sin(2 * jnp.pi * x)
 
 
 def coupling_fn(x, cpl_strength: float):
     """Coupling function from [2]"""
-    return cpl_strength * 795.8e6 * jnp.sin(jnp.pi * x)
+    return cpl_strength * jnp.sin(jnp.pi * x)
 
 
 Osc_modified = NodeType(
@@ -67,6 +67,7 @@ modified_cp_src = ProdRule(
     Osc_modified,
     SRC,
     -EDGE.k * SRC.osc_fn(VAR(SRC) - VAR(DST), SRC.cpl_strength),
+    # noise_exp=EDGE.k,
 )
 
 modified_cp_dst = ProdRule(
@@ -74,7 +75,8 @@ modified_cp_dst = ProdRule(
     Osc_modified,
     Osc_modified,
     DST,
-    -EDGE.k * DST.osc_fn(VAR(SRC) - VAR(DST), DST.cpl_strength),
+    -EDGE.k * DST.osc_fn(VAR(DST) - VAR(SRC), DST.cpl_strength),
+    # noise_exp=EDGE.k,
 )
 
 modified_cp_self = ProdRule(
@@ -186,7 +188,7 @@ if __name__ == "__main__":
         model = eqx.apply_updates(model, updates)
         return model, opt_state, loss_value
 
-    steps = 5
+    steps = 10
     bz = 64
     model = xor_circuit
 

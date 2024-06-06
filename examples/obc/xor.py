@@ -67,7 +67,7 @@ modified_cp_src = ProdRule(
     Osc_modified,
     SRC,
     -EDGE.k * SRC.osc_fn(VAR(SRC) - VAR(DST), SRC.cpl_strength),
-    # noise_exp=EDGE.k,
+    noise_exp=2e-1,
 )
 
 modified_cp_dst = ProdRule(
@@ -76,7 +76,7 @@ modified_cp_dst = ProdRule(
     Osc_modified,
     DST,
     -EDGE.k * DST.osc_fn(VAR(DST) - VAR(SRC), DST.cpl_strength),
-    # noise_exp=EDGE.k,
+    noise_exp=2e-1,
 )
 
 modified_cp_self = ProdRule(
@@ -156,7 +156,7 @@ if __name__ == "__main__":
     )
 
     LEARNING_RATE = 1e-2
-    optim = optax.adam(LEARNING_RATE)
+    optim = optax.adamw(LEARNING_RATE)
 
     def dataloader(batch_size: int):
         while True:

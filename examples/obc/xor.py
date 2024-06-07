@@ -166,7 +166,7 @@ if __name__ == "__main__":
             for x in xs:
                 layer_node[0][0].set_init_val(x[0], 0)
                 layer_node[0][1].set_init_val(x[1], 0)
-                x_init_states.append(xor_circuit.cdg_to_initial_states(graph))
+                x_init_states.append(xor_circuit_class.cdg_to_initial_states(graph))
             yield jnp.array(x_init_states), jnp.array(y_true)
 
     def loss(model: BaseAnalogCkt, x: Array, y_true: Array):
@@ -201,7 +201,7 @@ if __name__ == "__main__":
     for x in xs:
         layer_node[0][0].set_init_val(x[0], 0)
         layer_node[0][1].set_init_val(x[1], 0)
-        x_init_states.append(xor_circuit.cdg_to_initial_states(graph))
+        x_init_states.append(xor_circuit_class.cdg_to_initial_states(graph))
 
     y_preds = jax.vmap(model, in_axes=(None, 0, None, None, None))(
         time_info, jnp.array(x_init_states), [], 0, 0

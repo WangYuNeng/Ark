@@ -1,6 +1,5 @@
 import ast
 from copy import copy
-from functools import partial
 from typing import Callable, Iterable
 
 import jax
@@ -420,11 +419,9 @@ class OptCompiler:
                 idx = [node_mapping[node.name] for node in readout_nodes]
         readout_fn = lambda self, y: base_readout(y, idx)
 
-        cdg_to_init_state_fn = lambda self, cdg: cdg_to_initial_states(
-            cdg, node_mapping
-        )
+        cdg_to_init_state_fn = lambda cdg: cdg_to_initial_states(cdg, node_mapping)
 
-        cdg_to_switch_array_fn = lambda self, cdg: cdg_to_switch_array(cdg, switch_map)
+        cdg_to_switch_array_fn = lambda cdg: cdg_to_switch_array(cdg, switch_map)
 
         opt_module = type(
             prog_name,

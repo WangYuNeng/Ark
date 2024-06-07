@@ -124,12 +124,14 @@ class BaseAnalogCkt(eqx.Module):
 
         raise NotImplementedError
 
-    def cdg_to_initial_states(self, cdg) -> list[jax.typing.DTypeLike]:
+    @staticmethod
+    def cdg_to_initial_states(cdg) -> list[jax.typing.DTypeLike]:
         """Extract the initial states from a CDG."""
 
         raise NotImplementedError
 
-    def cdg_to_switch_array(self, cdg) -> list[int]:
+    @staticmethod
+    def cdg_to_switch_array(cdg) -> list[int]:
         """Extract the switch values from a CDG."""
 
         raise NotImplementedError

@@ -115,7 +115,7 @@ node2.set_init_val(val=2, n=0)
 test: BaseAnalogCkt = TestClass(
     init_trainable=jnp.array([0, 0]), is_stochastic=False, solver=Tsit5()
 )
-y0 = jnp.array(test.cdg_to_initial_states(graph))
+y0 = jnp.array(TestClass.cdg_to_initial_states(graph))
 import matplotlib.pyplot as plt
 
 for i in range(10):

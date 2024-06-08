@@ -1,5 +1,3 @@
-import sys
-
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -21,8 +19,8 @@ from ark.specification.rule_keyword import DST, EDGE, SELF, SRC, VAR
 
 jax.config.update("jax_enable_x64", True)
 T = 1
-seed = int(sys.argv[1]) if len(sys.argv) > 1 else 0
-np.random.seed(seed)
+# seed = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+# np.random.seed(seed)
 
 
 class TrainableMananger:
@@ -67,7 +65,7 @@ modified_cp_src = ProdRule(
     Osc_modified,
     SRC,
     -EDGE.k * SRC.osc_fn(VAR(SRC) - VAR(DST), SRC.cpl_strength),
-    noise_exp=2e-1,
+    noise_exp=1e-1,
 )
 
 modified_cp_dst = ProdRule(
@@ -76,7 +74,7 @@ modified_cp_dst = ProdRule(
     Osc_modified,
     DST,
     -EDGE.k * DST.osc_fn(VAR(DST) - VAR(SRC), DST.cpl_strength),
-    noise_exp=2e-1,
+    noise_exp=1e-1,
 )
 
 modified_cp_self = ProdRule(

@@ -1,5 +1,6 @@
+from argparse import ArgumentParser
 from functools import partial
-from typing import Callable
+from typing import Callable, Generator
 
 import equinox as eqx
 import jax
@@ -7,6 +8,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
+import wandb
 from diffrax.solver import Heun
 from jaxtyping import PyTree
 from xor import (
@@ -24,6 +26,54 @@ from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
 
 jax.config.update("jax_enable_x64", True)
+parser = ArgumentParser()
+
+# Example command: python pattern_recog_digit.py --gauss_std 0.1 --trans_noise_std 0.1
+parser.add_argument("--seed", type=int, default=0)
+parser.add_argument("--task", type=str, default="one-to-one")
+parser.add_argument(
+    "--n_cycle",
+    type=int,
+    default=1,
+    help="Number of cycles to wait for the oscillators to read out",
+)
+
+parser.add_argument(
+    "--diff_fn",
+    type=str,
+    choices=["periodic_mse", "periodic_mean_max_se", "normalize_angular_diff"],
+    default="periodic_mean_max_se",
+    help="The function to evaluate the difference between the readout and the target",
+)
+parser.add_argument(
+    "--point_per_cycle", type=int, default=50, help="Number of time points per cycle"
+)
+parser.add_argument("--snp_prob", type=float, default=0.0, help="Salt-and-pepper noise")
+parser.add_argument("--gauss_std", type=float, default=0.0, help="Gaussian noise std")
+parser.add_argument(
+    "--trans_noise_std", type=float, default=0.0, help="Transition noise std"
+)
+parser.add_argument(
+    "--n_class", type=int, default=5, help="Number of classes to recognize"
+)
+parser.add_argument("--steps", type=int, default=32, help="Number of training steps")
+parser.add_argument("--bz", type=int, default=512, help="Batch size")
+parser.add_argument(
+    "--validation_split", type=float, default=0.5, help="Validation split ratio"
+)
+parser.add_argument("--lr", type=float, default=1e-1, help="Learning rate")
+parser.add_argument(
+    "--optimizer", type=str, default="adam", help="Type of the optimizer"
+)
+parser.add_argument(
+    "--plot_evolve",
+    type=int,
+    default=0,
+    help="Number of time points to plot the evolution",
+)
+parser.add_argument("--wandb", action="store_true", help="Log to wandb")
+
+args = parser.parse_args()
 
 
 # Create 5x3 arrays of the numbers 0-0
@@ -49,34 +99,54 @@ for i, pattern in NUMBERS.items():
 N_ROW, N_COL = 5, 3
 N_NODE = N_ROW * N_COL
 N_EDGE = (N_ROW - 1) * N_COL + (N_COL - 1) * N_ROW
-N_CLASS = 5
 
-N_CYCLES = 1
-N_TIME_POINT = 100
+N_CLASS = args.n_class
+N_CYCLES = args.n_cycle
+
+SEED = args.seed
+
+POINT_PER_CYCLE = args.point_per_cycle
+PLOT_EVOLVE = args.plot_evolve
+
+LEARNING_RATE = args.lr
+STEPS = args.steps
+BZ = args.bz
+VALIDATION_SPLIT = args.validation_split
+VALIDATION_BZ = int(BZ * VALIDATION_SPLIT)
+TRAIN_BZ = BZ - VALIDATION_BZ
+
+OPTIMIZER = args.optimizer
+optim = getattr(optax, OPTIMIZER)(LEARNING_RATE)
+
+SNP_PROB, GAUSS_STD = args.snp_prob, args.gauss_std
+TRANS_NOISE_STD = args.trans_noise_std
+
+USE_WANDB = args.wandb
+TASK = args.task
+DIFF_FN = args.diff_fn
+
+
+if PLOT_EVOLVE != 0:
+    saveat = jnp.linspace(0, T * N_CYCLES, PLOT_EVOLVE, endpoint=True)
+else:
+    saveat = [T * N_CYCLES]
 
 time_info = TimeInfo(
     t0=0,
     t1=T * N_CYCLES,
-    dt0=T / 50,
-    saveat=jnp.linspace(0, T * N_CYCLES, N_TIME_POINT, endpoint=True),
+    dt0=T / POINT_PER_CYCLE,
+    saveat=saveat,
 )
 
-N_PLOT_EVOLVE = 5
-PLOT_TIME = [int(N_TIME_POINT / (N_PLOT_EVOLVE - 1) * i) for i in range(N_PLOT_EVOLVE)]
+# Hard coded the noise std to the production rules of
+# Osc_modified - Cpl - Osc_modified
+obc_spec.production_rules()[3]._noise_exp = TRANS_NOISE_STD
+obc_spec.production_rules()[4]._noise_exp = TRANS_NOISE_STD
 
-
-LEARNING_RATE = 1e-1
-optim = optax.adam(LEARNING_RATE)
-
-STEPS = 32
-BZ = 256
-VALIDATION_BZ = 4096
 PLOT_BZ = 4
 
-TASK = "one-to-one"  # "rand-to-many"
-SNP_PROB, GAUSS_STD = 0.0, 0.2
-
-DIFF_FN = "periodic_mse"  # "normalize_angular_diff
+if USE_WANDB:
+    wandb_run = wandb.init(project="obc", config=vars(args), tags=["digit_recognition"])
 
 
 def pattern_to_edge_initialization(pattern: np.ndarray):
@@ -169,6 +239,7 @@ def dataloader2(
         yield x, noise_seed, y
 
 
+@eqx.filter_jit
 def raw_to_rel_phase(raw_phase_out: jax.Array):
     """Convert the raw phase to the relative phase"""
     n_repeat = N_NODE - 1
@@ -178,19 +249,29 @@ def raw_to_rel_phase(raw_phase_out: jax.Array):
     return rel_phase
 
 
+@eqx.filter_jit
 def normalize_angular_diff(y_end_readout: jax.Array, y: jax.Array):
     x = raw_to_rel_phase(y_end_readout)
     return jnp.sin(jnp.pi * ((x - y) / 2 % 1))
 
 
+@eqx.filter_jit
 def periodic_mse(y_end_readout: jax.Array, y: jax.Array):
     y_end_readout = y_end_readout % 2
     rel_y = jnp.abs(raw_to_rel_phase(y_end_readout))
     phase_diff = jnp.where(rel_y > 1, 2 - rel_y, rel_y)
+    return jnp.mean(jnp.square(phase_diff - y))
+
+
+@eqx.filter_jit
+def periodic_mean_max_se(y_end_readout: jax.Array, y: jax.Array):
+    y_end_readout = y_end_readout % 2
+    rel_y = jnp.abs(raw_to_rel_phase(y_end_readout))
+    phase_diff = jnp.where(rel_y > 1, 2 - rel_y, rel_y)
     return jnp.mean(jnp.max(jnp.square(phase_diff - y), axis=1))
-    # return jnp.mean(jnp.square(phase_diff - y))
 
 
+@eqx.filter_jit
 def min_rand_reconstruction_loss(
     model: BaseAnalogCkt, x: jax.Array, noise_seed: jax.Array, diff_fn: Callable
 ):
@@ -206,6 +287,7 @@ def min_rand_reconstruction_loss(
     return jnp.min(losses)
 
 
+@eqx.filter_jit
 def pattern_reconstruction_loss(
     model: BaseAnalogCkt,
     x: jax.Array,
@@ -226,10 +308,12 @@ def make_step(
     loss_fn: Callable,
     data: list[jax.Array],
 ):
-    loss_value, grads = eqx.filter_value_and_grad(loss_fn)(model, *data)
+    train_data, val_data = [d[:TRAIN_BZ] for d in data], [d[TRAIN_BZ:] for d in data]
+    train_loss, grads = eqx.filter_value_and_grad(loss_fn)(model, *train_data)
     updates, opt_state = optim.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
-    return model, opt_state, loss_value
+    val_loss = loss_fn(model, *val_data)
+    return model, opt_state, train_loss, val_loss
 
 
 def plot_evolution(
@@ -237,14 +321,16 @@ def plot_evolution(
     loss_fn: Callable,
     data: list[jax.Array],
     title: str = None,
-    plot_time: list[int] = PLOT_TIME,
 ):
     """Plot the evolution of the oscillator phase"""
+    if PLOT_EVOLVE == 0:
+        return
 
     x_init, noise_seed = data[0], data[1]
     y_raw = jax.vmap(model, in_axes=(None, 0, None, None, 0))(
         time_info, x_init, [], 0, noise_seed
     )
+    plot_time = [i for i in range(len(saveat))]
 
     for i in range(y_raw.shape[0]):
         # phase is periodic over 2
@@ -263,6 +349,39 @@ def plot_evolution(
         plt.suptitle(title + f", Loss: {loss:.4f}")
         plt.tight_layout()
         plt.show()
+
+
+def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: str = ""):
+    opt_state = optim.init(eqx.filter(model, eqx.is_array))
+    val_loss_best = 1e9
+
+    for step, data in zip(range(STEPS), dl(BZ)):
+
+        if step == 0:  # Set up the baseline loss
+            train_data = [d[:TRAIN_BZ] for d in data]
+            val_data = [d[TRAIN_BZ:] for d in data]
+            train_loss = loss_fn(model, *train_data)
+            val_loss = loss_fn(model, *val_data)
+
+        else:
+            model, opt_state, train_loss, val_loss = make_step(
+                model, opt_state, loss_fn, data
+            )
+
+        print(f"Step {step}, Train loss: {train_loss}, Val loss: {val_loss}")
+        if val_loss < val_loss_best:
+            val_loss_best = val_loss
+            best_weight = model.trainable.copy()
+
+        if USE_WANDB:
+            wandb.log(
+                data={
+                    f"{log_prefix}_train_loss": train_loss,
+                    f"{log_prefix}_val_loss": val_loss,
+                },
+            )
+
+    return val_loss_best, best_weight
 
 
 if __name__ == "__main__":
@@ -314,6 +433,8 @@ if __name__ == "__main__":
 
     if DIFF_FN == "periodic_mse":
         diff_fn = periodic_mse
+    elif DIFF_FN == "periodic_mean_max_se":
+        diff_fn = periodic_mean_max_se
     elif DIFF_FN == "normalize_angular_diff":
         diff_fn = normalize_angular_diff
 
@@ -330,129 +451,62 @@ if __name__ == "__main__":
     elif TASK == "rand-to-many":
         dl, loss_fn = dataloader, partial(min_rand_reconstruction_loss, diff_fn=diff_fn)
 
-    for seed in range(10):
-        np.random.seed(seed)
-        train_loss_best = 1e9
+    np.random.seed(SEED)
 
-        edge_init = pattern_to_edge_initialization(NUMBERS[0])
-        for i in range(1, N_CLASS):
-            edge_init += pattern_to_edge_initialization(NUMBERS[i])
+    edge_init = pattern_to_edge_initialization(NUMBERS[0])
+    for i in range(1, N_CLASS):
+        edge_init += pattern_to_edge_initialization(NUMBERS[i])
 
-        edge_init /= N_CLASS
+    edge_init /= N_CLASS
 
-        model: BaseAnalogCkt = rec_circuit_class(
-            init_trainable=jnp.array(edge_init),
-            # init_trainable=jnp.array(np.random.normal(size=trainable_mgr.idx + 1)),
-            is_stochastic=False,
-            solver=Heun(),
-        )
+    model: BaseAnalogCkt = rec_circuit_class(
+        init_trainable=jnp.array(edge_init),
+        # init_trainable=jnp.array(np.random.normal(size=trainable_mgr.idx + 1)),
+        is_stochastic=False,
+        solver=Heun(),
+    )
 
-        #
-        plot_data = next(dl(PLOT_BZ))
-        plot_evolution(
-            model=model,
-            loss_fn=loss_fn,
-            data=plot_data,
-            title="Before training",
-        )
+    plot_data = next(dl(PLOT_BZ))
+    plot_evolution(
+        model=model,
+        loss_fn=loss_fn,
+        data=plot_data,
+        title="Before training",
+    )
 
-        opt_state = optim.init(eqx.filter(model, eqx.is_array))
-        print(f"\n\nSeed {seed}")
-        # print(f"Weights: {model.trainable}")
+    best_loss, best_weight = train(model, loss_fn, dl, "tran_noiseless")
 
-        for step, data in zip(range(STEPS), dl(BZ)):
+    print(f"Best Loss: {best_loss}")
+    print(f"Best Weights: {best_weight}")
 
-            model, opt_state, train_loss = make_step(model, opt_state, loss_fn, data)
-            # if step == 0:
-            # print(f"Initial Loss: {train_loss}")
-            print(f"\tStep {step}, Loss: {train_loss}")
-            if train_loss < train_loss_best:
-                train_loss_best = train_loss
-                best_weight = model.trainable.copy()
+    plot_evolution(
+        model=model,
+        loss_fn=loss_fn,
+        data=plot_data,
+        title="After training",
+    )
 
-        # print(f"\tBest Loss: {train_loss_best}")
-        print(f"Best Weights: {best_weight}")
+    # Fine-tune the best model w/ noise
+    model: BaseAnalogCkt = rec_circuit_class(
+        init_trainable=best_weight,
+        is_stochastic=True,
+        solver=Heun(),
+    )
 
-        plot_evolution(
-            model=model,
-            loss_fn=loss_fn,
-            data=plot_data,
-            title="After training",
-        )
+    plot_evolution(
+        model=model,
+        loss_fn=loss_fn,
+        data=plot_data,
+        title="Noisy (before fine-tune)",
+    )
 
-        # Test the best model w/o noise
-        model: BaseAnalogCkt = rec_circuit_class(
-            init_trainable=best_weight,
-            is_stochastic=False,
-            solver=Heun(),
-        )
+    best_loss, best_weight = train(model, loss_fn, dl, "tran_noisy")
+    print(f"\tFine-tune Best Loss: {best_loss}")
+    print(f"Fine-tune Best Weights: {best_weight}")
 
-        for _, data in zip(range(1), dl(VALIDATION_BZ)):
-            val_loss = loss_fn(model, *data)
-            print(f"Validation Loss w/o noise: {val_loss}")
-
-        # Test the best model w/ noise
-        model: BaseAnalogCkt = rec_circuit_class(
-            init_trainable=best_weight,
-            is_stochastic=True,
-            solver=Heun(),
-        )
-
-        plot_evolution(
-            model=model,
-            loss_fn=loss_fn,
-            data=plot_data,
-            title="Noisy (before fine-tune)",
-        )
-
-        for _, data in zip(range(1), dl(VALIDATION_BZ)):
-            val_loss = loss_fn(model, *data)
-            print(f"Validation Loss w/ noise: {val_loss}")
-
-        # Double the weight for the noise
-        model: BaseAnalogCkt = rec_circuit_class(
-            init_trainable=best_weight * 2,
-            is_stochastic=True,
-            solver=Heun(),
-        )
-
-        for _, data in zip(range(1), dl(VALIDATION_BZ)):
-            val_loss = loss_fn(model, *data)
-            print(f"Validation Loss w/ noise (double weight): {val_loss}")
-
-        # Fine-tune the best model w/ noise
-        model: BaseAnalogCkt = rec_circuit_class(
-            init_trainable=best_weight,
-            is_stochastic=True,
-            solver=Heun(),
-        )
-        opt_state = optim.init(eqx.filter(model, eqx.is_array))
-        train_loss_best = 1e9
-
-        for step, data in zip(range(STEPS), dl(BZ)):
-            model, opt_state, train_loss = make_step(model, opt_state, loss_fn, data)
-            print(f"\tFine-tune Step {step}, Loss: {train_loss}")
-            if train_loss < train_loss_best:
-                train_loss_best = train_loss
-                best_weight = model.trainable.copy()
-
-        # print(f"\tFine-tune Best Loss: {train_loss_best}")
-        print(f"Fine-tune Best Weights: {best_weight}")
-
-        model: BaseAnalogCkt = rec_circuit_class(
-            init_trainable=best_weight,
-            is_stochastic=True,
-            solver=Heun(),
-        )
-
-        plot_evolution(
-            model=model,
-            loss_fn=loss_fn,
-            data=plot_data,
-            title="Noisy (after fine-tune)",
-        )
-
-        # Test the best model w/ noise
-        for _, data in zip(range(1), dl(VALIDATION_BZ)):
-            val_loss = loss_fn(model, *data)
-            print(f"Validation Loss w/ noise (fine-tune): {val_loss}")
+    plot_evolution(
+        model=model,
+        loss_fn=loss_fn,
+        data=plot_data,
+        title="Noisy (after fine-tune)",
+    )

@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import optax
 import wandb
-from diffrax.solver import Heun
+from diffrax import Heun
 from jaxtyping import PyTree
 from xor import (
     Coupling,
@@ -37,7 +37,13 @@ parser.add_argument(
     default=1,
     help="Number of cycles to wait for the oscillators to read out",
 )
-
+parser.add_argument(
+    "--weight_init",
+    type=str,
+    default="hebbian",
+    choices=["hebbian", "random"],
+    help="Method to initialize training weights.",
+)
 parser.add_argument(
     "--diff_fn",
     type=str,
@@ -105,6 +111,7 @@ N_CYCLES = args.n_cycle
 
 SEED = args.seed
 
+WEIGHT_INIT = args.weight_init
 POINT_PER_CYCLE = args.point_per_cycle
 PLOT_EVOLVE = args.plot_evolve
 
@@ -453,11 +460,14 @@ if __name__ == "__main__":
 
     np.random.seed(SEED)
 
-    edge_init = pattern_to_edge_initialization(NUMBERS[0])
-    for i in range(1, N_CLASS):
-        edge_init += pattern_to_edge_initialization(NUMBERS[i])
+    if WEIGHT_INIT == "hebbian":
+        edge_init = pattern_to_edge_initialization(NUMBERS[0])
+        for i in range(1, N_CLASS):
+            edge_init += pattern_to_edge_initialization(NUMBERS[i])
 
-    edge_init /= N_CLASS
+        edge_init /= N_CLASS
+    elif WEIGHT_INIT == "random":
+        edge_init = np.random.normal(size=trainable_mgr.idx + 1)
 
     model: BaseAnalogCkt = rec_circuit_class(
         init_trainable=jnp.array(edge_init),

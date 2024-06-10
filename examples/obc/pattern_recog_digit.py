@@ -77,6 +77,9 @@ parser.add_argument(
     default=0,
     help="Number of time points to plot the evolution",
 )
+parser.add_argument(
+    "--no_noiseless_train", action="store_true", help="Skip noiseless training"
+)
 parser.add_argument("--wandb", action="store_true", help="Log to wandb")
 
 args = parser.parse_args()
@@ -131,6 +134,8 @@ TRANS_NOISE_STD = args.trans_noise_std
 USE_WANDB = args.wandb
 TASK = args.task
 DIFF_FN = args.diff_fn
+
+NO_NOISELESS_TRAIN = args.no_noiseless_train
 
 
 if PLOT_EVOLVE != 0:
@@ -484,17 +489,20 @@ if __name__ == "__main__":
         title="Before training",
     )
 
-    best_loss, best_weight = train(model, loss_fn, dl, "tran_noiseless")
+    if not NO_NOISELESS_TRAIN:
+        best_loss, best_weight = train(model, loss_fn, dl, "tran_noiseless")
 
-    print(f"Best Loss: {best_loss}")
-    print(f"Best Weights: {best_weight}")
+        print(f"Best Loss: {best_loss}")
+        print(f"Best Weights: {best_weight}")
 
-    plot_evolution(
-        model=model,
-        loss_fn=loss_fn,
-        data=plot_data,
-        title="After training",
-    )
+        plot_evolution(
+            model=model,
+            loss_fn=loss_fn,
+            data=plot_data,
+            title="After training",
+        )
+    else:
+        best_weight = model.trainable
 
     # Fine-tune the best model w/ noise
     model: BaseAnalogCkt = rec_circuit_class(

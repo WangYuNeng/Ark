@@ -6,21 +6,7 @@ from abc import ABC, abstractmethod
 from typing import Callable
 
 from ark.specification.range import Range
-
-
-class Trainable:
-    """Trainable attribute.
-
-    Attributes:
-        idx: The index in the args array.
-        (A temporary solution to allow shared weight)
-    """
-
-    def __init__(self, idx: int) -> None:
-        self.idx = idx
-
-    def __str__(self) -> str:
-        return "Trainable"
+from ark.specification.trainable import Trainable
 
 
 class AttrType(ABC):

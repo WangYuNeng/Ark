@@ -28,7 +28,8 @@ class BaseAnalogCkt(eqx.Module):
         solver: The ODE solver to use.
     """
 
-    trainable: jax.Array
+    a_trainable: jax.Array
+    d_trainable: list[jax.Array]
     is_stochastic: bool
     solver: diffrax.AbstractSolver
 
@@ -36,11 +37,15 @@ class BaseAnalogCkt(eqx.Module):
 
     def __init__(
         self,
-        init_trainable: jax.Array,
+        init_trainable: tuple[jax.Array, list[jax.Array]] | jax.Array,
         is_stochastic: bool,
         solver: diffrax.AbstractSolver,
     ) -> None:
-        self.trainable = init_trainable
+        if isinstance(init_trainable, tuple):
+            self.a_trainable, self.d_trainable = init_trainable
+        elif isinstance(init_trainable, jax.Array):
+            self.a_trainable = init_trainable
+            self.d_trainable = []
         self.is_stochastic = is_stochastic
         self.solver = solver
 

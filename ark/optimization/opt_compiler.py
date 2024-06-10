@@ -36,6 +36,10 @@ def mk_call(fn: ast.expr, args: list[ast.expr]):
     )
 
 
+def mk_tuple(elts: list[ast.Name | ast.Constant]):
+    return ast.Tuple(elts=elts)
+
+
 def mk_list(lst: list[ast.Name | ast.Constant]):
     return ast.List(elts=lst)
 
@@ -221,6 +225,8 @@ class OptCompiler:
     SWITCH = "switch"
     MISMATCH_SEED = "mismatch_seed"
     NOISE_SEED = "noise_seed"
+    A_TRAINABLE = "a_trainable"
+    D_TRAINABLE = "d_trainable"
     NORMALIZE_MIN, NORMALIZE_MAX = -1, 1
 
     def __init__(self) -> None:
@@ -277,7 +283,7 @@ class OptCompiler:
 
         # Common variables ast expr
         args_expr_gen = mk_var_generator("args")
-        trainable_expr_gen = mk_var_generator("trainable")
+        a_trainable_expr_gen = mk_var_generator(self.A_TRAINABLE)
         mm_prng_key_expr_gen = mk_var_generator("mm_key")
         mm_arr_expr_gen = mk_var_generator("mm_arr")
 
@@ -285,13 +291,13 @@ class OptCompiler:
         # Assign self.trainable to trainable for readability
         # and clipping the trainable values
         # trainable = jnp.clip(self.trainable, CLIPPED_MIN, CLIPPED_MAX)
-        trainable_expr_rhs = self._clip_and_denormalize_trainable(
+        a_trainable_expr_rhs = self._clip_and_denormalize_trainable(
             cdg, trainable_len, self_expr_gen, normalize_weight, do_clipping
         )
         stmts.append(
             mk_assign(
-                trainable_expr_gen(),
-                trainable_expr_rhs,
+                a_trainable_expr_gen(),
+                a_trainable_expr_rhs,
             )
         )
         # Initialize the jnp arrays
@@ -347,7 +353,7 @@ class OptCompiler:
                             val: Trainable
                             trainable_id = val.idx
                             val_expr = mk_arr_access(
-                                trainable_expr_gen(), ast.Constant(value=trainable_id)
+                                a_trainable_expr_gen(), ast.Constant(value=trainable_id)
                             )
                         elif isinstance(attr_type, DigitalAttr):
                             raise NotImplementedError
@@ -459,7 +465,7 @@ class OptCompiler:
                 call_fn="clip",
             )
 
-        self_dot_trainable = ast.Attribute(value=self_expr_gen(), attr="trainable")
+        self_dot_trainable = ast.Attribute(value=self_expr_gen(), attr=self.A_TRAINABLE)
 
         if not normalized and not clip:
             return self_dot_trainable

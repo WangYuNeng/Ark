@@ -8,11 +8,12 @@ from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
 from ark.reduction import SUM
 from ark.specification.attribute_def import AttrDef, AttrDefMismatch
-from ark.specification.attribute_type import AnalogAttr, FunctionAttr, Trainable
+from ark.specification.attribute_type import AnalogAttr, FunctionAttr
 from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule
 from ark.specification.rule_keyword import DST, EDGE, SRC, VAR
 from ark.specification.specification import CDGSpec
+from ark.specification.trainable import TrainableMgr
 
 # Specification of coupled oscillator
 co_spec = CDGSpec("co")
@@ -77,11 +78,11 @@ co_spec.add_production_rules(production_rules)
 
 # Manipulate the dynamical system with the CDG and execute it with Ark
 compiler = ArkCompiler()
-
+trainable_mgr = TrainableMgr()
 # Initialize 2 couplied oscillatorsxx
 graph = CDG()
 node1 = Osc(mass=5.0)
-node2 = Osc(mass=Trainable(1))
+node2 = Osc(mass=trainable_mgr.new_analog())
 
 
 def test_fn(x):
@@ -89,7 +90,7 @@ def test_fn(x):
 
 
 fn_edge = test_w_fn(fn=test_fn)
-cpl = Coupling(k=Trainable(0), switchable=True)
+cpl = Coupling(k=trainable_mgr.new_analog(), switchable=True)
 
 graph.connect(cpl, node1, node2)
 # graph.connect(fn_edge, node1, node2)
@@ -112,8 +113,12 @@ TestClass = OptCompiler().compile(
 graph.initialize_all_states(0)
 node1.set_init_val(val=1, n=0)
 node2.set_init_val(val=2, n=0)
+trainable_mgr.analog[0].init_val = 0
+trainable_mgr.analog[1].init_val = 1
+init_trainable = jnp.array(trainable_mgr.get_initial_vals(datatype="analog"))
+
 test: BaseAnalogCkt = TestClass(
-    init_trainable=jnp.array([0, 0]), is_stochastic=False, solver=Tsit5()
+    init_trainable=init_trainable, is_stochastic=False, solver=Tsit5()
 )
 y0 = jnp.array(TestClass.cdg_to_initial_states(graph))
 import matplotlib.pyplot as plt
@@ -130,7 +135,7 @@ for i in range(10):
     plt.plot(a)
 plt.show()
 
-test = TestClass(init_trainable=jnp.array([1]), is_stochastic=True, solver=Euler())
+test = TestClass(init_trainable=init_trainable, is_stochastic=True, solver=Euler())
 for i in range(10):
     a = test(
         time_info,

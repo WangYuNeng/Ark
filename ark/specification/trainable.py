@@ -26,6 +26,12 @@ class Trainable:
         elif isinstance(self._init_val, list):
             return jnp.array(self._init_val)
 
+        elif isinstance(self._init_val, jnp.ndarray):
+            return self._init_val
+
+        else:
+            raise ValueError(f"Unknown type of init_val: {type(self._init_val)}")
+
     @init_val.setter
     def init_val(self, val):
         self._init_val = val
@@ -62,10 +68,10 @@ class TrainableMgr:
         param_list.append(trainable)
         return trainable
 
-    def get_initial_vals(self, datatype: str) -> list:
+    def get_initial_vals(self, datatype: str):
         """Get the initial values of all trainable parameters."""
         if datatype == "analog":
-            return [trainable.init_val for trainable in self.analog]
+            return jnp.array([trainable.init_val for trainable in self.analog])
         elif datatype == "digital":
             return [trainable.init_val for trainable in self.digital]
         else:

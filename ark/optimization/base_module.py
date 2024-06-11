@@ -32,6 +32,7 @@ class BaseAnalogCkt(eqx.Module):
     d_trainable: list[jax.Array]
     is_stochastic: bool
     solver: diffrax.AbstractSolver
+    hard_gumbel: bool
 
     # Future todo: Make time info and initial state trainable if needed
 
@@ -40,6 +41,7 @@ class BaseAnalogCkt(eqx.Module):
         init_trainable: tuple[jax.Array, list[jax.Array]] | jax.Array,
         is_stochastic: bool,
         solver: diffrax.AbstractSolver,
+        hard_gumbel: bool = False,
     ) -> None:
         if isinstance(init_trainable, tuple):
             self.a_trainable, self.d_trainable = init_trainable
@@ -48,6 +50,7 @@ class BaseAnalogCkt(eqx.Module):
             self.d_trainable = []
         self.is_stochastic = is_stochastic
         self.solver = solver
+        self.hard_gumbel = hard_gumbel
 
     def __call__(
         self,
@@ -56,7 +59,7 @@ class BaseAnalogCkt(eqx.Module):
         switch: jax.Array,
         mismatch_seed: jax.typing.DTypeLike,
         noise_seed: jax.typing.DTypeLike,
-        gumble_temp: jax.typing.DTypeLike = 1,
+        gumbel_temp: jax.typing.DTypeLike = 1,
     ):
         """The differentiable forward pass of the circuit simulation.
 
@@ -66,7 +69,7 @@ class BaseAnalogCkt(eqx.Module):
             noise_seed: The seed for the transient noise.
             solver: The ODE solver to use.
         """
-        args = self.make_args(switch, mismatch_seed, gumble_temp)
+        args = self.make_args(switch, mismatch_seed, gumbel_temp)
 
         if not self.is_stochastic:
             solution = diffrax.diffeqsolve(

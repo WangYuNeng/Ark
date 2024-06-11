@@ -1,9 +1,10 @@
 import jax.numpy as jnp
+from pattern_recog_parser import args
 from spec import Coupling, Osc, obc_spec
 
 from ark.specification.attribute_def import AttrDef
-from ark.specification.attribute_type import AnalogAttr, FunctionAttr
-from ark.specification.cdg_types import NodeType
+from ark.specification.attribute_type import AnalogAttr, DigitalAttr, FunctionAttr
+from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule
 from ark.specification.rule_keyword import DST, EDGE, SELF, SRC, VAR
 
@@ -32,6 +33,27 @@ Osc_modified = NodeType(
             "osc_fn": AttrDef(attr_type=FunctionAttr(nargs=2)),
             "lock_strength": AttrDef(attr_type=AnalogAttr((-10, 10))),
             "cpl_strength": AttrDef(attr_type=AnalogAttr((-10, 10))),
+        },
+    },
+)
+
+# Digital coupling with 3 bit resolution -2**(n_bit-1) to 2**(n_bit-1) -1
+# Rescale to between +/- 2
+if args.weight_bits is None:
+    N_BITS = 3
+else:
+    N_BITS = args.weight_bits
+N_CHOICES = 2**N_BITS
+Cpl_digital = EdgeType(
+    "Cpl_digital",
+    bases=Coupling,
+    attrs={
+        "attr_def": {
+            "k": AttrDef(
+                attr_type=DigitalAttr(
+                    val_choices=[-(2 ** (N_BITS - 1)) + i for i in range(N_CHOICES)]
+                )
+            ),
         },
     },
 )

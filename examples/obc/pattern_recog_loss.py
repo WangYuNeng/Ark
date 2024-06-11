@@ -39,12 +39,13 @@ def min_rand_reconstruction_loss(
     model: BaseAnalogCkt,
     x: jax.Array,
     noise_seed: jax.Array,
+    gumbel_temp: float,
     time_info: TimeInfo,
     diff_fn: Callable,
     N_CLASS: int,
 ):
-    y_raw = jax.vmap(model, in_axes=(None, 0, None, None, 0))(
-        time_info, x, [], 0, noise_seed
+    y_raw = jax.vmap(model, in_axes=(None, 0, None, None, 0, None))(
+        time_info, x, [], 0, noise_seed, gumbel_temp
     )
     y_end_readout = y_raw[:, -1, :]
     losses = []
@@ -60,10 +61,11 @@ def pattern_reconstruction_loss(
     x: jax.Array,
     noise_seed: jax.Array,
     y: jax.Array,
+    gumbel_temp: float,
     time_info: TimeInfo,
     diff_fn: Callable,
 ):
-    y_raw = jax.vmap(model, in_axes=(None, 0, None, None, 0))(
-        time_info, x, [], 0, noise_seed
+    y_raw = jax.vmap(model, in_axes=(None, 0, None, None, 0, None))(
+        time_info, x, [], 0, noise_seed, gumbel_temp
     )
     return diff_fn(y_raw[:, -1, :], y)

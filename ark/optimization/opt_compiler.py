@@ -172,13 +172,13 @@ def base_readout(y: jax.Array, idx: list[int]):
     return y[:, idx]
 
 
-def gumble_softmax(
-    probs: jax.Array, temperature: float, key: jax.random.PRNGKey, hard: bool = False
+def gumbel_softmax(
+    logits: jax.Array, temperature: float, key: jax.random.PRNGKey, hard: bool = False
 ):
     """Gumble softmax sampling
 
     Args:
-        probs (jax.Array): the probabilities vector
+        logits (jax.Array): unnormalized log probabilities
         temperature (float): the temperature
         key (jax.random.PRNGKey): the random key
         hard (bool, optional): whether to use hard sampling or not. Defaults to False.
@@ -189,11 +189,11 @@ def gumble_softmax(
         jax.Array: the sampled values
     """
 
-    g = jax.random.gumbel(key, probs.shape)
-    ret = jax.nn.softmax((jnp.log(probs) + g) / temperature)
+    g = jax.random.gumbel(key, logits.shape)
+    ret = jax.nn.softmax(logits + g / temperature)
     if hard:
-        hard_max = jnp.argmax(probs)
-        one_hot = jnp.zeros_like(probs)
+        hard_max = jnp.argmax(logits)
+        one_hot = jnp.zeros_like(logits)
         one_hot = one_hot.at[hard_max].set(1)
         ret = jax.lax.stop_gradient(one_hot) + ret - jax.lax.stop_gradient(ret)
     return ret
@@ -259,8 +259,8 @@ class OptCompiler:
     RAND_SEED = "rand_seed"
     A_TRAINABLE = "a_trainable"
     D_TRAINABLE = "d_trainable"
-    GUMBLE_TEMP = "gumble_temp"
-    GUMBLE_FN = "gumble_softmax"
+    GUMBEL_TEMP = "gumbel_temp"
+    GUMBEL_FN = "gumbel_softmax"
     NORMALIZE_MIN, NORMALIZE_MAX = -1, 1
 
     def __init__(self) -> None:
@@ -298,8 +298,8 @@ class OptCompiler:
         a_trainable_len = len(trainable_mgr.analog)
         d_trainable_len = len(trainable_mgr.digital)
 
-        gumbel_fn = lambda logits, temp, key: gumble_softmax(
-            logits, temp, key, hard=hard_gumbel
+        gumbel_fn = lambda probs, temp, key, hard: gumbel_softmax(
+            probs, temp, key, hard
         )
 
         (ode_term, noise_term), node_mapping, switch_map, num_attr_map, fn_attr_map = (
@@ -307,7 +307,7 @@ class OptCompiler:
         )
 
         self.mm_used_idx = 0
-        namespace = {"jax": jax, "jnp": jnp, self.GUMBLE_FN: gumbel_fn}
+        namespace = {"jax": jax, "jnp": jnp, self.GUMBEL_FN: gumbel_fn}
 
         # Usefule constants
         args_len = len(switch_map) + sum(len(x) for x in num_attr_map.values())
@@ -368,6 +368,7 @@ class OptCompiler:
         self_dot_d_trainable = ast.Attribute(
             value=self_expr_gen(), attr=self.D_TRAINABLE
         )
+        self_dot_hard_gumbel = ast.Attribute(value=self_expr_gen(), attr="hard_gumbel")
 
         # Unrole the rhs array
         # Collect the value choices for the digital trainable
@@ -383,13 +384,14 @@ class OptCompiler:
             mk_jnp_call(args=[mk_list(mk_list_val_expr(x))], call_fn="array")
             for x in d_trainable_choice
         ]
-        d_trainable_gumble_expr = [
+        d_trainable_gumbel_expr = [
             mk_call(
-                fn=ast.Name(id=self.GUMBLE_FN),
+                fn=ast.Name(id=self.GUMBEL_FN),
                 args=[
                     mk_arr_access(self_dot_d_trainable, ast.Constant(value=i)),
-                    ast.Name(id=self.GUMBLE_TEMP),
+                    ast.Name(id=self.GUMBEL_TEMP),
                     mk_arr_access(prng_key_arr_expr_gen(), ast.Constant(value=i)),
+                    self_dot_hard_gumbel,
                 ],
             )
             for i in range(d_trainable_len)
@@ -398,7 +400,7 @@ class OptCompiler:
             [
                 mk_jnp_call(args=[prob, choices], call_fn="dot")
                 for prob, choices in zip(
-                    d_trainable_gumble_expr, d_trainable_choice_jnp_expr
+                    d_trainable_gumbel_expr, d_trainable_choice_jnp_expr
                 )
             ]
         )
@@ -510,7 +512,7 @@ class OptCompiler:
                     mk_arg(self.SELF),
                     mk_arg(self.SWITCH),
                     mk_arg(self.RAND_SEED),
-                    mk_arg(self.GUMBLE_TEMP),
+                    mk_arg(self.GUMBEL_TEMP),
                 ],
                 vararg=None,
                 kwonlyargs=[],

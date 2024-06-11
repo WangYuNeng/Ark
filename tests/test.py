@@ -110,6 +110,7 @@ TestClass = OptCompiler().compile(
     trainable_mgr=trainable_mgr,
     normalize_weight=True,
     do_clipping=False,
+    hard_gumbel=True,
 )
 
 graph.initialize_all_states(0)
@@ -118,8 +119,8 @@ node2.set_init_val(val=2, n=0)
 trainable_mgr.analog[0].init_val = 0
 trainable_mgr.digital[0].init_val = [0.1, 0.2, 0.7]
 init_trainable = (
-    jnp.array(trainable_mgr.get_initial_vals(datatype="analog")),
-    jnp.array(trainable_mgr.get_initial_vals(datatype="digital")),
+    trainable_mgr.get_initial_vals(datatype="analog"),
+    trainable_mgr.get_initial_vals(datatype="digital"),
 )
 
 test: BaseAnalogCkt = TestClass(

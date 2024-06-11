@@ -56,6 +56,7 @@ class BaseAnalogCkt(eqx.Module):
         switch: jax.Array,
         mismatch_seed: jax.typing.DTypeLike,
         noise_seed: jax.typing.DTypeLike,
+        gumble_temp: jax.typing.DTypeLike = 1,
     ):
         """The differentiable forward pass of the circuit simulation.
 
@@ -65,7 +66,7 @@ class BaseAnalogCkt(eqx.Module):
             noise_seed: The seed for the transient noise.
             solver: The ODE solver to use.
         """
-        args = self.make_args(switch, mismatch_seed)
+        args = self.make_args(switch, mismatch_seed, gumble_temp)
 
         if not self.is_stochastic:
             solution = diffrax.diffeqsolve(

@@ -11,6 +11,7 @@ from ark.optimization.base_module import BaseAnalogCkt
 from ark.specification.attribute_def import AttrDefMismatch, Trainable
 from ark.specification.attribute_type import AnalogAttr, DigitalAttr
 from ark.specification.specification import CDGSpec
+from ark.specification.trainable import TrainableMgr
 
 ark_compiler = ArkCompiler()
 
@@ -171,6 +172,33 @@ def base_readout(y: jax.Array, idx: list[int]):
     return y[:, idx]
 
 
+def gumble_softmax(
+    probs: jax.Array, temperature: float, key: jax.random.PRNGKey, hard: bool = False
+):
+    """Gumble softmax sampling
+
+    Args:
+        probs (jax.Array): the probabilities vector
+        temperature (float): the temperature
+        key (jax.random.PRNGKey): the random key
+        hard (bool, optional): whether to use hard sampling or not. Defaults to False.
+        If hard, the forward pass is the argmax of the logits and the backward pass is the
+        straight-through estimator.
+
+    Returns:
+        jax.Array: the sampled values
+    """
+
+    g = jax.random.gumbel(key, probs.shape)
+    ret = jax.nn.softmax((jnp.log(probs) + g) / temperature)
+    if hard:
+        hard_max = jnp.argmax(probs)
+        one_hot = jnp.zeros_like(probs)
+        one_hot = one_hot.at[hard_max].set(1)
+        ret = jax.lax.stop_gradient(one_hot) + ret - jax.lax.stop_gradient(ret)
+    return ret
+
+
 def check_trainable_consisitency(cdg: CDG):
     """Check if the trainable attributes in the CDG are consistent
 
@@ -181,17 +209,26 @@ def check_trainable_consisitency(cdg: CDG):
         size of the trainable parameters
     """
 
-    trainable_types: dict[int, tuple[CDGElement, str]] = {}
+    a_trainable_types: dict[int, tuple[CDGElement, str]] = {}
+    d_trainable_types: dict[int, tuple[CDGElement, str]] = {}
     for ele in cdg.elements:
         for attr, val in ele.attrs.items():
+            cur_attr_type = ele.attr_def[attr].attr_type
+            if isinstance(cur_attr_type, AnalogAttr):
+                trainable_types = a_trainable_types
+            elif isinstance(cur_attr_type, DigitalAttr):
+                trainable_types = d_trainable_types
+            else:
+                raise ValueError(
+                    f"Unsupport attribute type {type(cur_attr_type)} for trainable parameter"
+                )
             if isinstance(val, Trainable):
                 if val.idx not in trainable_types:
                     trainable_types[val.idx] = (ele, attr)
                 else:
-                    cur_attr_type = ele.attr_def[attr].attr_type
                     stored_ele, stored_attr = trainable_types[val.idx]
                     stored_attr_type = stored_ele.attr_def[stored_attr].attr_type
-                    if isinstance(cur_attr_type, type(stored_attr_type)):
+                    if not isinstance(cur_attr_type, type(stored_attr_type)):
                         raise ValueError(
                             f"Shared trainable parameter {val.idx}  has inconsistent type "
                             + f"in {ele.name}.{attr} and {stored_ele.name}.{stored_attr}"
@@ -208,10 +245,6 @@ def check_trainable_consisitency(cdg: CDG):
                                 f"Shared trainable parameter {val.idx}  has inconsistent choices "
                                 + f"in {ele.name}.{attr} and {stored_ele.name}.{stored_attr}"
                             )
-                    else:
-                        raise ValueError(
-                            f"Unsupport attribute type {type(cur_attr_type)} for trainable parameter"
-                        )
     max_id = max(trainable_types.keys())
     for i in range(max_id + 1):
         if i not in trainable_types:
@@ -223,10 +256,11 @@ class OptCompiler:
 
     SELF = "self"
     SWITCH = "switch"
-    MISMATCH_SEED = "mismatch_seed"
-    NOISE_SEED = "noise_seed"
+    RAND_SEED = "rand_seed"
     A_TRAINABLE = "a_trainable"
     D_TRAINABLE = "d_trainable"
+    GUMBLE_TEMP = "gumble_temp"
+    GUMBLE_FN = "gumble_softmax"
     NORMALIZE_MIN, NORMALIZE_MAX = -1, 1
 
     def __init__(self) -> None:
@@ -237,9 +271,11 @@ class OptCompiler:
         prog_name: str,
         cdg: CDG,
         cdg_spec: CDGSpec,
+        trainable_mgr: TrainableMgr,
         readout_nodes: list[CDGNode] = None,
         normalize_weight: bool = True,
         do_clipping: bool = True,
+        hard_gumbel: bool = False,
     ) -> type:
         """Compile the cdg to an equinox.Module.
 
@@ -258,14 +294,20 @@ class OptCompiler:
         """
 
         # Check the consistency of the trainable attributes
-        trainable_len = check_trainable_consisitency(cdg)
+        check_trainable_consisitency(cdg)
+        a_trainable_len = len(trainable_mgr.analog)
+        d_trainable_len = len(trainable_mgr.digital)
+
+        gumbel_fn = lambda logits, temp, key: gumble_softmax(
+            logits, temp, key, hard=hard_gumbel
+        )
 
         (ode_term, noise_term), node_mapping, switch_map, num_attr_map, fn_attr_map = (
             ark_compiler.compile_odeterm(cdg, cdg_spec)
         )
 
         self.mm_used_idx = 0
-        namespace = {"jax": jax, "jnp": jnp}
+        namespace = {"jax": jax, "jnp": jnp, self.GUMBLE_FN: gumbel_fn}
 
         # Usefule constants
         args_len = len(switch_map) + sum(len(x) for x in num_attr_map.values())
@@ -275,8 +317,7 @@ class OptCompiler:
         # Input variables ast expr
         self_expr_gen = mk_var_generator(self.SELF)
         switch_expr_gen = mk_var_generator(self.SWITCH)
-        mismatch_seed_expr_gen = mk_var_generator(self.MISMATCH_SEED)
-        noise_seed_expr_gen = mk_var_generator(self.NOISE_SEED)
+        rand_seed_expr_gen = mk_var_generator(self.RAND_SEED)
 
         #  Function arguments
         fn_args = [None for _ in range(fargs_len)]
@@ -284,15 +325,35 @@ class OptCompiler:
         # Common variables ast expr
         args_expr_gen = mk_var_generator("args")
         a_trainable_expr_gen = mk_var_generator(self.A_TRAINABLE)
-        mm_prng_key_expr_gen = mk_var_generator("mm_key")
+        d_trainable_expr_gen = mk_var_generator(self.D_TRAINABLE)
+        prng_key_arr_expr_gen = mk_var_generator("keys")
         mm_arr_expr_gen = mk_var_generator("mm_arr")
 
         stmts = []
-        # Assign self.trainable to trainable for readability
+
+        # Split the key to d_trainable_len + 1 parts
+        # The first d_trainable_len parts are used for the digital trainable
+        # The last part is used for the mismatch array
+        stmts.append(
+            mk_assign(
+                prng_key_arr_expr_gen(),
+                mk_jax_random_call(
+                    args=[
+                        mk_jax_random_call(
+                            args=[rand_seed_expr_gen()], call_fn="PRNGKey"
+                        ),
+                        ast.Constant(value=d_trainable_len + 1),
+                    ],
+                    call_fn="split",
+                ),
+            )
+        )
+
+        # Assign self.a_trainable to trainable for readability
         # and clipping the trainable values
-        # trainable = jnp.clip(self.trainable, CLIPPED_MIN, CLIPPED_MAX)
+        # a_trainable = jnp.clip(self.trainable, CLIPPED_MIN, CLIPPED_MAX)
         a_trainable_expr_rhs = self._clip_and_denormalize_trainable(
-            cdg, trainable_len, self_expr_gen, normalize_weight, do_clipping
+            cdg, a_trainable_len, self_expr_gen, normalize_weight, do_clipping
         )
         stmts.append(
             mk_assign(
@@ -300,6 +361,58 @@ class OptCompiler:
                 a_trainable_expr_rhs,
             )
         )
+
+        # Use the Gumbel softmax to sample the digital trainable
+        # d_trainable = [gumbbel_fn(logits, GUMMBEL_TEMP, key) for logits,
+        # key in zip(self.d_trainable, keys[:-1]]
+        self_dot_d_trainable = ast.Attribute(
+            value=self_expr_gen(), attr=self.D_TRAINABLE
+        )
+
+        # Unrole the rhs array
+        # Collect the value choices for the digital trainable
+        d_trainable_choice = [None for _ in range(d_trainable_len)]
+        for ele in cdg.elements:
+            for attr, val in ele.attrs.items():
+                if isinstance(val, Trainable):
+                    attr_type = ele.attr_def[attr].attr_type
+                    if isinstance(attr_type, DigitalAttr):
+                        d_trainable_choice[val.idx] = attr_type.val_choices
+
+        d_trainable_choice_jnp_expr = [
+            mk_jnp_call(args=[mk_list(mk_list_val_expr(x))], call_fn="array")
+            for x in d_trainable_choice
+        ]
+        d_trainable_gumble_expr = [
+            mk_call(
+                fn=ast.Name(id=self.GUMBLE_FN),
+                args=[
+                    mk_arr_access(self_dot_d_trainable, ast.Constant(value=i)),
+                    ast.Name(id=self.GUMBLE_TEMP),
+                    mk_arr_access(prng_key_arr_expr_gen(), ast.Constant(value=i)),
+                ],
+            )
+            for i in range(d_trainable_len)
+        ]
+        d_trainable_expr_list = mk_list(
+            [
+                mk_jnp_call(args=[prob, choices], call_fn="dot")
+                for prob, choices in zip(
+                    d_trainable_gumble_expr, d_trainable_choice_jnp_expr
+                )
+            ]
+        )
+        d_trainable_jnp_arr = mk_jnp_call(
+            args=[d_trainable_expr_list],
+            call_fn="array",
+        )
+        stmts.append(
+            mk_assign(
+                d_trainable_expr_gen(),
+                d_trainable_jnp_arr,
+            )
+        )
+
         # Initialize the jnp arrays
         init_arr = mk_jnp_call(args=[args_len], call_fn="zeros")
         stmts.append(mk_assign(args_expr_gen(), init_arr))
@@ -316,14 +429,11 @@ class OptCompiler:
         )
 
         # Initialize the mismatch array
-        stmts.append(
-            mk_assign(
-                mm_prng_key_expr_gen(),
-                mk_jax_random_call(args=[mismatch_seed_expr_gen()], call_fn="PRNGKey"),
-            )
-        )
         mismatch_arr = mk_jax_random_call(
-            args=[mm_prng_key_expr_gen(), mk_list(mk_list_val_expr([n_mismatch]))],
+            args=[
+                mk_arr_access(prng_key_arr_expr_gen(), ast.Constant(-1)),
+                mk_list(mk_list_val_expr([n_mismatch])),
+            ],
             call_fn="normal",
         )
         stmts.append(
@@ -349,14 +459,20 @@ class OptCompiler:
                     if isinstance(val, Trainable):
                         # Handle trainable attribute
                         attr_type = ele.attr_def[attr].attr_type
+                        val: Trainable
+                        trainable_id = val.idx
                         if isinstance(attr_type, AnalogAttr):
-                            val: Trainable
-                            trainable_id = val.idx
                             val_expr = mk_arr_access(
                                 a_trainable_expr_gen(), ast.Constant(value=trainable_id)
                             )
                         elif isinstance(attr_type, DigitalAttr):
-                            raise NotImplementedError
+                            val_expr = mk_arr_access(
+                                d_trainable_expr_gen(), ast.Constant(value=trainable_id)
+                            )
+                            if isinstance(ele.attr_def[attr], AttrDefMismatch):
+                                print(
+                                    "Warning: Digital trainable with mismatch will have the same deviation for all choices"
+                                )
 
                         else:
                             raise ValueError(
@@ -385,7 +501,7 @@ class OptCompiler:
         # Return the args
         stmts.append(set_ctx(ast.Return(value=args_expr_gen()), ast.Load))
 
-        # Compile the statements to make_args(self, switch, mismatch_seed) function
+        # Compile the statements to make_args(self, switch, rand_seed) function
         make_args_fn = ast.FunctionDef(
             name="make_args",
             args=ast.arguments(
@@ -393,7 +509,8 @@ class OptCompiler:
                 args=[
                     mk_arg(self.SELF),
                     mk_arg(self.SWITCH),
-                    mk_arg(self.MISMATCH_SEED),
+                    mk_arg(self.RAND_SEED),
+                    mk_arg(self.GUMBLE_TEMP),
                 ],
                 vararg=None,
                 kwonlyargs=[],

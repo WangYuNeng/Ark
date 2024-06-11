@@ -8,7 +8,7 @@ from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
 from ark.reduction import SUM
 from ark.specification.attribute_def import AttrDef, AttrDefMismatch
-from ark.specification.attribute_type import AnalogAttr, FunctionAttr
+from ark.specification.attribute_type import AnalogAttr, DigitalAttr, FunctionAttr
 from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule
 from ark.specification.rule_keyword import DST, EDGE, SRC, VAR
@@ -39,11 +39,7 @@ Osc = NodeType(
 # k: coupling strength
 Coupling = EdgeType(
     name="Coupling",
-    attrs={
-        "attr_def": {
-            "k": AttrDefMismatch(attr_type=AnalogAttr(val_range=(0.0, 10.0)), rstd=0.2)
-        }
-    },
+    attrs={"attr_def": {"k": AttrDef(attr_type=DigitalAttr(val_choices=[4, 2, 100]))}},
 )
 test_w_fn = EdgeType(
     name="Cpl_w_fn",
@@ -81,8 +77,9 @@ compiler = ArkCompiler()
 trainable_mgr = TrainableMgr()
 # Initialize 2 couplied oscillatorsxx
 graph = CDG()
-node1 = Osc(mass=5.0)
+# node1 = Osc(mass=5.0)
 node2 = Osc(mass=trainable_mgr.new_analog())
+node1 = Osc(mass=trainable_mgr.analog[0])
 
 
 def test_fn(x):
@@ -90,7 +87,7 @@ def test_fn(x):
 
 
 fn_edge = test_w_fn(fn=test_fn)
-cpl = Coupling(k=trainable_mgr.new_analog(), switchable=True)
+cpl = Coupling(k=trainable_mgr.new_digital(), switchable=True)
 
 graph.connect(cpl, node1, node2)
 # graph.connect(fn_edge, node1, node2)
@@ -107,15 +104,23 @@ time_info = TimeInfo(t0=0, t1=1, dt0=0.01, saveat=jnp.linspace(0, 1, 100))
 
 
 TestClass = OptCompiler().compile(
-    "test", graph, co_spec, normalize_weight=True, do_clipping=False
+    "test",
+    graph,
+    co_spec,
+    trainable_mgr=trainable_mgr,
+    normalize_weight=True,
+    do_clipping=False,
 )
 
 graph.initialize_all_states(0)
 node1.set_init_val(val=1, n=0)
 node2.set_init_val(val=2, n=0)
 trainable_mgr.analog[0].init_val = 0
-trainable_mgr.analog[1].init_val = 1
-init_trainable = jnp.array(trainable_mgr.get_initial_vals(datatype="analog"))
+trainable_mgr.digital[0].init_val = [0.1, 0.2, 0.7]
+init_trainable = (
+    jnp.array(trainable_mgr.get_initial_vals(datatype="analog")),
+    jnp.array(trainable_mgr.get_initial_vals(datatype="digital")),
+)
 
 test: BaseAnalogCkt = TestClass(
     init_trainable=init_trainable, is_stochastic=False, solver=Tsit5()
@@ -124,29 +129,15 @@ y0 = jnp.array(TestClass.cdg_to_initial_states(graph))
 import matplotlib.pyplot as plt
 
 for i in range(10):
-    a = test(
-        time_info,
-        y0,
-        [1],
-        i,
-        0,
-    )
+    a = test(time_info, y0, [1], i, 0, 1)
 
     plt.plot(a)
 plt.show()
 
 test = TestClass(init_trainable=init_trainable, is_stochastic=True, solver=Euler())
 for i in range(10):
-    a = test(
-        time_info,
-        y0,
-        [1],
-        0,
-        i,
-    )
+    a = test(time_info, y0, [1], 0, i, 1)
     import matplotlib.pyplot as plt
 
     plt.plot(a)
-plt.show()
-plt.show()
 plt.show()

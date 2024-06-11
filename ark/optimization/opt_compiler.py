@@ -218,10 +218,6 @@ def check_trainable_consisitency(cdg: CDG):
                 trainable_types = a_trainable_types
             elif isinstance(cur_attr_type, DigitalAttr):
                 trainable_types = d_trainable_types
-            else:
-                raise ValueError(
-                    f"Unsupport attribute type {type(cur_attr_type)} for trainable parameter"
-                )
             if isinstance(val, Trainable):
                 if val.idx not in trainable_types:
                     trainable_types[val.idx] = (ele, attr)
@@ -245,6 +241,10 @@ def check_trainable_consisitency(cdg: CDG):
                                 f"Shared trainable parameter {val.idx}  has inconsistent choices "
                                 + f"in {ele.name}.{attr} and {stored_ele.name}.{stored_attr}"
                             )
+                    else:
+                        raise ValueError(
+                            f"Unsupport attribute type {type(cur_attr_type)} for trainable parameter"
+                        )
     max_id = max(trainable_types.keys())
     for i in range(max_id + 1):
         if i not in trainable_types:

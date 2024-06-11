@@ -11,19 +11,27 @@ import optax
 import wandb
 from diffrax import Heun
 from jaxtyping import PyTree
-from xor import (
+from pattern_recog_dataloader import NUMBERS, dataloader, dataloader2
+from pattern_recog_loss import (
+    min_rand_reconstruction_loss,
+    normalize_angular_diff,
+    pattern_reconstruction_loss,
+    periodic_mean_max_se,
+    periodic_mse,
+)
+from spec_optimization import (
     Coupling,
     Osc_modified,
     T,
-    TrainableMananger,
     coupling_fn,
     locking_fn,
     obc_spec,
 )
 
-from ark.cdg.cdg import CDG, CDGNode
+from ark.cdg.cdg import CDG
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
+from ark.specification.trainable import TrainableMgr
 
 jax.config.update("jax_enable_x64", True)
 parser = ArgumentParser()
@@ -84,26 +92,6 @@ parser.add_argument("--wandb", action="store_true", help="Log to wandb")
 
 args = parser.parse_args()
 
-
-# Create 5x3 arrays of the numbers 0-0
-NUMBERS = {
-    0: np.array([[1, 1, 1], [1, 0, 1], [1, 0, 1], [1, 0, 1], [1, 1, 1]]),
-    1: np.array([[0, 1, 0], [1, 1, 0], [0, 1, 0], [0, 1, 0], [1, 1, 1]]),
-    2: np.array([[1, 1, 1], [0, 0, 1], [1, 1, 1], [1, 0, 0], [1, 1, 1]]),
-    3: np.array([[1, 1, 1], [0, 0, 1], [1, 1, 1], [0, 0, 1], [1, 1, 1]]),
-    4: np.array([[1, 0, 1], [1, 0, 1], [1, 1, 1], [0, 0, 1], [0, 0, 1]]),
-    5: np.array([[1, 1, 1], [1, 0, 0], [1, 1, 1], [0, 0, 1], [1, 1, 1]]),
-    6: np.array([[1, 1, 1], [1, 0, 0], [1, 1, 1], [1, 0, 1], [1, 1, 1]]),
-    7: np.array([[1, 1, 1], [0, 0, 1], [0, 1, 0], [0, 1, 0], [1, 1, 1]]),
-    8: np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1], [1, 0, 1], [1, 1, 1]]),
-    9: np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1], [0, 0, 1], [1, 1, 1]]),
-}
-
-# Node pattern: relative to the first node
-NODE_PATTERNS = [None for _ in NUMBERS.keys()]
-for i, pattern in NUMBERS.items():
-    pattern_flat = pattern.flatten()
-    NODE_PATTERNS[i] = jnp.abs(jnp.array(pattern_flat[1:] - pattern_flat[0]))
 
 N_ROW, N_COL = 5, 3
 N_NODE = N_ROW * N_COL
@@ -183,136 +171,6 @@ def pattern_to_edge_initialization(pattern: np.ndarray):
     return np.array(edge_init)
 
 
-def dataloader(batch_size: int):
-    """Data loader for many-to-many reconstruction task
-
-    Goal: reconstruct any of the N_CLASS patterns from the random initial state
-    Note: So far only work for N_CLASS = 1
-    """
-    while True:
-        x_init_states = np.random.rand(batch_size, N_NODE)
-        noise_seed = np.random.randint(0, 2**32 - 1, size=batch_size)
-        yield jnp.array(x_init_states), jnp.array(noise_seed)
-
-
-def dataloader2(
-    batch_size: int,
-    graph: CDG,
-    osc_array: list[list[CDGNode]],
-    mapping_fn: Callable,
-    snp_prob: float,
-    gauss_std: float,
-):
-    """Data loader for one-to-one reconstruction task
-
-    Goal: reconstruct the original pattern from the noisy pattern
-
-    The training set is pairs of (noisy_numbers, tran_noise_seed, pattern).
-    the pattern is the corresponding oscillator phase that represents the number.
-
-    Args:
-        batch_size: The number of samples in a batch
-        graph: The CDG of the circuit
-        osc_array: The array of oscillators (N_ROW x N_COL)
-        mapping_fn: The mapping function from cdg nodes to the initial state array
-        snp_prob: The probability of salt-and-pepper noise
-        gauss_std: The standard deviation of the Gaussian noise
-    """
-
-    while True:
-        # Sample batch_size numbers from 0-N_CLASS
-        sampled_numbers = np.random.choice([i for i in range(N_CLASS)], size=batch_size)
-
-        # Generate the noisy numbers
-        x, y = [], []
-        for number in sampled_numbers:
-            node_init = NUMBERS[number].copy().astype(np.float64)
-            ideal_pattern = NODE_PATTERNS[number]
-
-            # Add salt-and-pepper noise
-            snp_mask = np.random.rand(*node_init.shape) < snp_prob
-            node_init[snp_mask] = 1 - node_init[snp_mask]
-
-            # Add Gaussian noise
-            node_init += np.random.normal(0, gauss_std, node_init.shape)
-
-            # Assign the initial state to the nodes
-            for row in range(N_ROW):
-                for col in range(N_COL):
-                    osc_array[row][col].set_init_val(node_init[row, col], 0)
-
-            x.append(mapping_fn(graph))
-            y.append(ideal_pattern)
-
-        x, y = jnp.array(x), jnp.array(y)
-
-        noise_seed = jnp.array(np.random.randint(0, 2**32 - 1, size=batch_size))
-        # print(f"loss: {periodic_mse(x, y):.4f}")
-        yield x, noise_seed, y
-
-
-@eqx.filter_jit
-def raw_to_rel_phase(raw_phase_out: jax.Array):
-    """Convert the raw phase to the relative phase"""
-    n_repeat = N_NODE - 1
-    rel_phase = raw_phase_out[:, 1:] - raw_phase_out[:, 0].repeat(n_repeat).reshape(
-        -1, n_repeat
-    )
-    return rel_phase
-
-
-@eqx.filter_jit
-def normalize_angular_diff(y_end_readout: jax.Array, y: jax.Array):
-    x = raw_to_rel_phase(y_end_readout)
-    return jnp.sin(jnp.pi * ((x - y) / 2 % 1))
-
-
-@eqx.filter_jit
-def periodic_mse(y_end_readout: jax.Array, y: jax.Array):
-    y_end_readout = y_end_readout % 2
-    rel_y = jnp.abs(raw_to_rel_phase(y_end_readout))
-    phase_diff = jnp.where(rel_y > 1, 2 - rel_y, rel_y)
-    return jnp.mean(jnp.square(phase_diff - y))
-
-
-@eqx.filter_jit
-def periodic_mean_max_se(y_end_readout: jax.Array, y: jax.Array):
-    y_end_readout = y_end_readout % 2
-    rel_y = jnp.abs(raw_to_rel_phase(y_end_readout))
-    phase_diff = jnp.where(rel_y > 1, 2 - rel_y, rel_y)
-    return jnp.mean(jnp.max(jnp.square(phase_diff - y), axis=1))
-
-
-@eqx.filter_jit
-def min_rand_reconstruction_loss(
-    model: BaseAnalogCkt, x: jax.Array, noise_seed: jax.Array, diff_fn: Callable
-):
-    y_raw = jax.vmap(model, in_axes=(None, 0, None, None, 0))(
-        time_info, x, [], 0, noise_seed
-    )
-    y_end_readout = y_raw[:, -1, :]
-    losses = []
-    for i in range(N_CLASS):
-        losses.append(jnp.mean(diff_fn(y_end_readout, NODE_PATTERNS[i])))
-    losses = jnp.array(losses)
-    # Return the minimum average loss
-    return jnp.min(losses)
-
-
-@eqx.filter_jit
-def pattern_reconstruction_loss(
-    model: BaseAnalogCkt,
-    x: jax.Array,
-    noise_seed: jax.Array,
-    y: jax.Array,
-    diff_fn: Callable,
-):
-    y_raw = jax.vmap(model, in_axes=(None, 0, None, None, 0))(
-        time_info, x, [], 0, noise_seed
-    )
-    return diff_fn(y_raw[:, -1, :], y)
-
-
 @eqx.filter_jit
 def make_step(
     model: BaseAnalogCkt,
@@ -383,7 +241,7 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: st
         print(f"Step {step}, Train loss: {train_loss}, Val loss: {val_loss}")
         if val_loss < val_loss_best:
             val_loss_best = val_loss
-            best_weight = model.trainable.copy()
+            best_weight = model.a_trainable.copy()
 
         if USE_WANDB:
             wandb.log(
@@ -398,7 +256,7 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: st
 
 if __name__ == "__main__":
 
-    trainable_mgr = TrainableMananger()
+    trainable_mgr = TrainableMgr()
 
     graph = CDG()
     nodes = [[None for _ in range(N_COL)] for _ in range(N_ROW)]
@@ -421,13 +279,13 @@ if __name__ == "__main__":
     # Connect neighboring nodes
     for row in range(N_ROW):
         for col in range(N_COL - 1):
-            edge = Coupling(k=trainable_mgr.new_var())
+            edge = Coupling(k=trainable_mgr.new_analog())
             graph.connect(edge, nodes[row][col], nodes[row][col + 1])
             row_edges[row][col] = edge
 
     for row in range(N_ROW - 1):
         for col in range(N_COL):
-            edge = Coupling(k=trainable_mgr.new_var())
+            edge = Coupling(k=trainable_mgr.new_analog())
             graph.connect(edge, nodes[row][col], nodes[row + 1][col])
             col_edges[row][col] = edge
 
@@ -438,6 +296,7 @@ if __name__ == "__main__":
         "rec",
         graph,
         obc_spec,
+        trainable_mgr=trainable_mgr,
         readout_nodes=nodes_flat,
         normalize_weight=False,
         do_clipping=False,
@@ -453,15 +312,24 @@ if __name__ == "__main__":
     if TASK == "one-to-one":
         dl = partial(
             dataloader2,
+            n_class=N_CLASS,
             graph=graph,
             osc_array=nodes,
             mapping_fn=rec_circuit_class.cdg_to_initial_states,
             snp_prob=SNP_PROB,
             gauss_std=GAUSS_STD,
         )
-        loss_fn = partial(pattern_reconstruction_loss, diff_fn=diff_fn)
+        loss_fn = partial(
+            pattern_reconstruction_loss, time_info=time_info, diff_fn=diff_fn
+        )
     elif TASK == "rand-to-many":
-        dl, loss_fn = dataloader, partial(min_rand_reconstruction_loss, diff_fn=diff_fn)
+        dl = partial(dataloader, n_node=N_NODE)
+        loss_fn = partial(
+            min_rand_reconstruction_loss,
+            time_info=time_info,
+            diff_fn=diff_fn,
+            N_CLASS=N_CLASS,
+        )
 
     np.random.seed(SEED)
 
@@ -472,7 +340,7 @@ if __name__ == "__main__":
 
         edge_init /= N_CLASS
     elif WEIGHT_INIT == "random":
-        edge_init = np.random.normal(size=trainable_mgr.idx + 1)
+        edge_init = np.random.normal(size=len(trainable_mgr.analog))
 
     model: BaseAnalogCkt = rec_circuit_class(
         init_trainable=jnp.array(edge_init),
@@ -502,7 +370,7 @@ if __name__ == "__main__":
             title="After training",
         )
     else:
-        best_weight = model.trainable
+        best_weight = model.a_trainable
 
     # Fine-tune the best model w/ noise
     model: BaseAnalogCkt = rec_circuit_class(

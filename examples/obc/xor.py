@@ -5,102 +5,40 @@ import numpy as np
 import optax
 from diffrax.solver import Tsit5
 from jaxtyping import Array, PyTree
-from spec import Coupling, Osc, obc_spec
+from spec_optimization import (
+    Coupling,
+    Osc_modified,
+    T,
+    coupling_fn,
+    locking_fn,
+    obc_spec,
+)
 from sympy import *
 
 from ark.cdg.cdg import CDG
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
-from ark.specification.attribute_def import AttrDef
-from ark.specification.attribute_type import AnalogAttr, FunctionAttr, Trainable
-from ark.specification.cdg_types import NodeType
-from ark.specification.production_rule import ProdRule
-from ark.specification.rule_keyword import DST, EDGE, SELF, SRC, VAR
+from ark.specification.trainable import TrainableMgr
 
 jax.config.update("jax_enable_x64", True)
-T = 1
 # seed = int(sys.argv[1]) if len(sys.argv) > 1 else 0
 # np.random.seed(seed)
 
 
-class TrainableMananger:
-
-    def __init__(self):
-        self.idx = -1
-
-    def new_var(self):
-        self.idx += 1
-        return Trainable(self.idx)
-
-
-def locking_fn(x, lock_strength: float):
-    """Injection locking function from [2]
-    Modify the leading coefficient to 1.2 has a better outcome
-    """
-    return lock_strength * jnp.sin(2 * jnp.pi * x)
-
-
-def coupling_fn(x, cpl_strength: float):
-    """Coupling function from [2]"""
-    return cpl_strength * jnp.sin(jnp.pi * x)
-
-
-Osc_modified = NodeType(
-    "Osc_modified",
-    bases=Osc,
-    attrs={
-        "order": 1,
-        "attr_def": {
-            "lock_fn": AttrDef(attr_type=FunctionAttr(nargs=2)),
-            "osc_fn": AttrDef(attr_type=FunctionAttr(nargs=2)),
-            "lock_strength": AttrDef(attr_type=AnalogAttr((-10, 10))),
-            "cpl_strength": AttrDef(attr_type=AnalogAttr((-10, 10))),
-        },
-    },
-)
-
-modified_cp_src = ProdRule(
-    Coupling,
-    Osc_modified,
-    Osc_modified,
-    SRC,
-    -EDGE.k * SRC.osc_fn(VAR(SRC) - VAR(DST), SRC.cpl_strength),
-    noise_exp=1e-1,
-)
-
-modified_cp_dst = ProdRule(
-    Coupling,
-    Osc_modified,
-    Osc_modified,
-    DST,
-    -EDGE.k * DST.osc_fn(VAR(DST) - VAR(SRC), DST.cpl_strength),
-    noise_exp=1e-1,
-)
-
-modified_cp_self = ProdRule(
-    Coupling,
-    Osc_modified,
-    Osc_modified,
-    SELF,
-    -EDGE.k * SRC.lock_fn(VAR(SRC), SRC.lock_strength),
-)
-
-obc_spec.add_production_rules([modified_cp_src, modified_cp_dst, modified_cp_self])
-
 graph = CDG()
-trainable_mgr = TrainableMananger()
+trainable_mgr = TrainableMgr()
 
 
 def mk_edge():
-    return Coupling(k=trainable_mgr.new_var())
+    return Coupling(k=trainable_mgr.new_analog())
 
 
 def mk_node():
     node = Osc_modified(
         lock_fn=locking_fn,
         osc_fn=coupling_fn,
-        lock_strength=trainable_mgr.new_var(),
-        cpl_strength=trainable_mgr.new_var(),
+        lock_strength=trainable_mgr.new_analog(),
+        cpl_strength=trainable_mgr.new_analog(),
     )
     node.set_init_val(0.5, 0)
     self_edge = mk_edge()
@@ -136,6 +74,7 @@ if __name__ == "__main__":
         "xor",
         graph,
         obc_spec,
+        trainable_mgr,
         readout_nodes=layer_node[N_LAYER - 1],
         normalize_weight=False,
         do_clipping=False,
@@ -148,7 +87,7 @@ if __name__ == "__main__":
     )
 
     xor_circuit: BaseAnalogCkt = xor_circuit_class(
-        init_trainable=jnp.array(np.random.normal(size=trainable_mgr.idx + 1)),
+        init_trainable=jnp.array(np.random.normal(size=len(trainable_mgr.analog))),
         is_stochastic=False,
         solver=Tsit5(),
     )

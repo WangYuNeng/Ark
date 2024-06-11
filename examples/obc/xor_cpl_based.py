@@ -5,11 +5,10 @@ import numpy as np
 import optax
 from diffrax import Tsit5
 from jaxtyping import PyTree
-from xor import (
+from spec_optimization import (
     Coupling,
     Osc_modified,
     T,
-    TrainableMananger,
     coupling_fn,
     locking_fn,
     obc_spec,
@@ -18,8 +17,10 @@ from xor import (
 from ark.cdg.cdg import CDG
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
+from ark.specification.trainable import TrainableMgr
 
-trainable_mgr = TrainableMananger()
+trainable_mgr = TrainableMgr()
+
 
 graph = CDG()
 
@@ -47,15 +48,15 @@ for i in range(2):
 for i in range(N_INTERNAL_NODE):
     node_id = N_IN_NODE + i
     for in_id in range(N_IN_NODE):
-        edge = Coupling(k=trainable_mgr.new_var())
+        edge = Coupling(k=trainable_mgr.new_analog())
         graph.connect(edge, nodes[in_id], nodes[node_id])
 
     for out_id in range(N_OUT_NODE):
-        edge = Coupling(k=trainable_mgr.new_var())
+        edge = Coupling(k=trainable_mgr.new_analog())
         graph.connect(edge, nodes[node_id], nodes[N_IN_NODE + N_INTERNAL_NODE + out_id])
 
     for other_internal_id in range(N_IN_NODE, node_id):
-        edge = Coupling(k=trainable_mgr.new_var())
+        edge = Coupling(k=trainable_mgr.new_analog())
         graph.connect(edge, nodes[other_internal_id], nodes[node_id])
 
 
@@ -79,6 +80,7 @@ xor_circuit_class = OptCompiler().compile(
     "xor",
     graph,
     obc_spec,
+    trainable_mgr,
     readout_nodes=[nodes[-2], nodes[-1]],
     normalize_weight=False,
     do_clipping=False,
@@ -127,7 +129,7 @@ for seed in range(20):
     np.random.seed(seed)
     train_loss_best = 1e9
     model: BaseAnalogCkt = xor_circuit_class(
-        init_trainable=jnp.array(np.random.normal(size=trainable_mgr.idx + 1)),
+        init_trainable=jnp.array(np.random.normal(size=len(trainable_mgr.analog))),
         is_stochastic=False,
         solver=Tsit5(),
     )

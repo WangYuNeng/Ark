@@ -81,6 +81,7 @@ parser.add_argument(
     default=0,
     help="Number of time points to plot the evolution",
 )
+parser.add_argument("--num_plot", type=int, default=4, help="Number of samples to plot")
 parser.add_argument(
     "--no_noiseless_train", action="store_true", help="Skip noiseless training"
 )

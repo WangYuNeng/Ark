@@ -51,6 +51,7 @@ WEIGHT_BITS = args.weight_bits
 
 POINT_PER_CYCLE = args.point_per_cycle
 PLOT_EVOLVE = args.plot_evolve
+PLOT_BZ = args.num_plot
 
 LEARNING_RATE = args.lr
 STEPS = args.steps
@@ -92,7 +93,6 @@ time_info = TimeInfo(
 obc_spec.production_rules()[3]._noise_exp = TRANS_NOISE_STD
 obc_spec.production_rules()[4]._noise_exp = TRANS_NOISE_STD
 
-PLOT_BZ = 4
 TOT_LOCK_DEFAULT = 1.2
 
 if USE_WANDB:
@@ -180,6 +180,7 @@ def make_step(
     )
     updates, opt_state = optim.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
+    # When validating, always use hard gumbel to force the param to be physical
     val_loss = loss_fn(model, *val_data, gumbel_temp, hard_gumbel=True)
     return model, opt_state, train_loss, val_loss
 

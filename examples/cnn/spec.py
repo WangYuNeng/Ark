@@ -3,11 +3,10 @@ Cellular Nonlinear Network (CNN) example.
 ref: https://onlinelibrary.wiley.com/doi/abs/10.1002/cta.564
 """
 
-from types import FunctionType
-
-import numpy as np
+import jax.numpy as jnp
 
 from ark.specification.attribute_def import AttrDef, AttrDefMismatch
+from ark.specification.attribute_type import AnalogAttr, FunctionAttr
 from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule
 from ark.specification.range import Range
@@ -21,16 +20,17 @@ mm_cnn_spec = CDGSpec("mm-cnn", inherit=cnn_spec)
 
 def saturation(sig):
     """Saturate the value at 1"""
-    return 0.5 * (abs(sig + 1) - abs(sig - 1))
+    return 0.5 * (jnp.abs(sig + 1) - jnp.abs(sig - 1))
 
 
 def saturation_diffpair(sig):
     """Saturation function for diffpair implementation"""
     sat_sig = saturation(sig)
-    return sat_sig / 0.707107 * np.sqrt(1 - np.square(sat_sig / 2 / 0.707107))
+    return sat_sig / 0.707107 * jnp.sqrt(1 - jnp.square(sat_sig / 2 / 0.707107))
 
 
 lc_range, gr_range = Range(min=0.1e-9, max=10e-9), Range(min=0)
+param_range = (-10, 10)
 positive = Range(min=0)
 #### Type definitions start ####
 # Cells in CNN, z is the bias
@@ -39,7 +39,7 @@ IdealV = NodeType(
     attrs={
         "order": 1,
         "attr_def": {
-            "z": AttrDef(attr_type=float),
+            "z": AttrDef(attr_type=AnalogAttr(param_range)),
         },
     },
 )
@@ -49,14 +49,16 @@ Out = NodeType(
     attrs={
         "order": 0,
         "attr_def": {
-            "act": AttrDef(attr_type=FunctionType, nargs=1),
+            "act": AttrDef(attr_type=FunctionAttr(nargs=1)),
         },
     },
 )
 # Input, should be stateless, setting to 1 just for convenience of setting its value
 Inp = NodeType(name="Inp", attrs={"order": 1})
 MapE = EdgeType(name="MapE")
-FlowE = EdgeType(name="FlowE", attrs={"attr_def": {"g": AttrDef(attr_type=float)}})
+FlowE = EdgeType(
+    name="FlowE", attrs={"attr_def": {"g": AttrDef(attr_type=AnalogAttr(param_range))}}
+)
 
 # Mismatched implementation
 Vm = NodeType(
@@ -64,7 +66,7 @@ Vm = NodeType(
     bases=IdealV,
     attrs={
         "attr_def": {
-            "mm": AttrDefMismatch(attr_type=float, rstd=0.1, attr_range=Range(exact=1)),
+            "mm": AttrDefMismatch(attr_type=AnalogAttr((1, 1)), rstd=0.1),
         },
     },
 )
@@ -73,9 +75,7 @@ fEm_1p = EdgeType(
     bases=FlowE,
     attrs={
         "attr_def": {
-            "g": AttrDefMismatch(
-                attr_type=float, rstd=0.01, attr_range=Range(min=-10, max=10)
-            ),
+            "g": AttrDefMismatch(attr_type=AnalogAttr(param_range), rstd=0.01),
         },
     },
 )
@@ -84,9 +84,7 @@ fEm_10p = EdgeType(
     bases=FlowE,
     attrs={
         "attr_def": {
-            "g": AttrDefMismatch(
-                attr_type=float, rstd=0.1, attr_range=Range(min=-10, max=10)
-            ),
+            "g": AttrDefMismatch(attr_type=AnalogAttr(param_range), rstd=0.1),
         },
     },
 )

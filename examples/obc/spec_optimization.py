@@ -38,22 +38,19 @@ Osc_modified = NodeType(
 )
 
 # Digital coupling with 3 bit resolution -2**(n_bit-1) to 2**(n_bit-1) -1
-# Rescale to between +/- 2
+# Rescale to between +/- 1
 if args.weight_bits is None:
     N_BITS = 3
 else:
     N_BITS = args.weight_bits
 N_CHOICES = 2**N_BITS
+val_choices = [(-(2 ** (N_BITS - 1)) + i) * 2 / N_CHOICES for i in range(N_CHOICES)]
 Cpl_digital = EdgeType(
     "Cpl_digital",
     bases=Coupling,
     attrs={
         "attr_def": {
-            "k": AttrDef(
-                attr_type=DigitalAttr(
-                    val_choices=[-(2 ** (N_BITS - 1)) + i for i in range(N_CHOICES)]
-                )
-            ),
+            "k": AttrDef(attr_type=DigitalAttr(val_choices=val_choices)),
         },
     },
 )

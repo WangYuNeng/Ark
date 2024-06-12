@@ -91,6 +91,7 @@ obc_spec.production_rules()[3]._noise_exp = TRANS_NOISE_STD
 obc_spec.production_rules()[4]._noise_exp = TRANS_NOISE_STD
 
 PLOT_BZ = 4
+TOT_LOCK_DEFAULT = 1.2
 
 if USE_WANDB:
     wandb_run = wandb.init(project="obc", config=vars(args), tags=["digit_recognition"])
@@ -142,11 +143,10 @@ def edge_init_to_trainable_init(
 
         # normalize the weight choices to between -1 and 1
         normalize_factor = 2 ** (WEIGHT_BITS - 1)
-        weight_choices = np.array(weight_choices) / normalize_factor
+        weight_choices = np.array(weight_choices)
 
         # If digital setup, the only analog trainable is the lock strength
-        trainable_mgr.analog[0].init_val = 1.2 / normalize_factor
-
+        trainable_mgr.analog[0].init_val = TOT_LOCK_DEFAULT
         row_init_quantized = one_hot_digitize(row_init, weight_choices)
         col_init_quantized = one_hot_digitize(col_init, weight_choices)
 
@@ -303,7 +303,7 @@ if __name__ == "__main__":
     col_edges = [[None for _ in range(N_COL)] for _ in range(N_ROW - 1)]
 
     if not WEIGHT_BITS:
-        lock_val = 1.2
+        lock_val = TOT_LOCK_DEFAULT
         cpl_type = Coupling
     else:
         lock_val = trainable_mgr.new_analog()

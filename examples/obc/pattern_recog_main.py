@@ -144,7 +144,6 @@ def edge_init_to_trainable_init(
         weight_choices: list = Cpl_digital.attr_def["k"].attr_type.val_choices
 
         # normalize the weight choices to between -1 and 1
-        normalize_factor = 2 ** (WEIGHT_BITS - 1)
         weight_choices = np.array(weight_choices)
 
         # If digital setup, the only analog trainable is the lock strength
@@ -166,7 +165,7 @@ def edge_init_to_trainable_init(
     return (a_trainable, d_trainable)
 
 
-# @eqx.filter_jit
+@eqx.filter_jit
 def make_step(
     model: BaseAnalogCkt,
     opt_state: PyTree,
@@ -193,9 +192,9 @@ def plot_evolution(
     gumbel_temp: float,
     hard_gumbel: bool = True,
 ):
-    x_init, noise_seed = data[0], data[1]
-    y_raw = jax.vmap(model, in_axes=(None, 0, None, None, 0, None, None))(
-        time_info, x_init, [], 0, noise_seed, gumbel_temp, hard_gumbel
+    x_init, args_seed, noise_seed = data[0], data[1], data[2]
+    y_raw = jax.vmap(model, in_axes=(None, 0, None, 0, 0, None, None))(
+        time_info, x_init, [], args_seed, noise_seed, gumbel_temp, hard_gumbel
     )
     plot_time = [i for i in range(len(saveat))]
 

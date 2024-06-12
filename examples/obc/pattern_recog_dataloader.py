@@ -35,7 +35,8 @@ def dataloader(batch_size: int, n_node: int):
     while True:
         x_init_states = np.random.rand(batch_size, n_node)
         noise_seed = np.random.randint(0, 2**32 - 1, size=batch_size)
-        yield jnp.array(x_init_states), jnp.array(noise_seed)
+        args_seed = np.random.randint(0, 2**32 - 1, size=batch_size)
+        yield jnp.array(x_init_states), jnp.array(args_seed), jnp.array(noise_seed)
 
 
 def dataloader2(
@@ -91,6 +92,7 @@ def dataloader2(
 
         x, y = jnp.array(x), jnp.array(y)
 
+        args_seed = jnp.array(np.random.randint(0, 2**32 - 1, size=batch_size))
         noise_seed = jnp.array(np.random.randint(0, 2**32 - 1, size=batch_size))
         # print(f"loss: {periodic_mse(x, y):.4f}")
-        yield x, noise_seed, y
+        yield x, args_seed, noise_seed, y

@@ -54,7 +54,7 @@ class BaseAnalogCkt(eqx.Module):
         time_info: TimeInfo,
         initial_state: jax.Array,
         switch: jax.Array,
-        mismatch_seed: jax.typing.DTypeLike,
+        args_seed: jax.typing.DTypeLike,
         noise_seed: jax.typing.DTypeLike,
         gumbel_temp: jax.typing.DTypeLike = 1,
         hard_gumbel: bool = False,
@@ -63,11 +63,14 @@ class BaseAnalogCkt(eqx.Module):
 
         Args:
             switch: The switch values for the circuit if any.
-            mismatch_seed: The seed for the static random mismatch.
+            args_seed: The seed for the static randomness when intialization the arguments.
+                incluing the guassian for mismatch and gumbel distribution for gumbel softmax.
             noise_seed: The seed for the transient noise.
-            solver: The ODE solver to use.
+            gumbel_temp: The temperature for the gumbel softmax.
+            hard_gumbel: Whether to use the hard gumbel softmax and straight-through estimator
+                or the soft gumbel softmax. Default is False.
         """
-        args = self.make_args(switch, mismatch_seed, gumbel_temp, hard_gumbel)
+        args = self.make_args(switch, args_seed, gumbel_temp, hard_gumbel)
 
         if not self.is_stochastic:
             solution = diffrax.diffeqsolve(

@@ -38,6 +38,7 @@ def periodic_mean_max_se(y_end_readout: jax.Array, y: jax.Array):
 def min_rand_reconstruction_loss(
     model: BaseAnalogCkt,
     x: jax.Array,
+    args_seed: jax.Array,
     noise_seed: jax.Array,
     gumbel_temp: float,
     hard_gumbel: bool,
@@ -45,8 +46,8 @@ def min_rand_reconstruction_loss(
     diff_fn: Callable,
     N_CLASS: int,
 ):
-    y_raw = jax.vmap(model, in_axes=(None, 0, None, None, 0, None, None))(
-        time_info, x, [], 0, noise_seed, gumbel_temp, hard_gumbel
+    y_raw = jax.vmap(model, in_axes=(None, 0, None, 0, 0, None, None))(
+        time_info, x, [], args_seed, noise_seed, gumbel_temp, hard_gumbel
     )
     y_end_readout = y_raw[:, -1, :]
     losses = []
@@ -60,6 +61,7 @@ def min_rand_reconstruction_loss(
 def pattern_reconstruction_loss(
     model: BaseAnalogCkt,
     x: jax.Array,
+    args_seed: jax.Array,
     noise_seed: jax.Array,
     y: jax.Array,
     gumbel_temp: float,
@@ -67,7 +69,7 @@ def pattern_reconstruction_loss(
     time_info: TimeInfo,
     diff_fn: Callable,
 ):
-    y_raw = jax.vmap(model, in_axes=(None, 0, None, None, 0, None, None))(
-        time_info, x, [], 0, noise_seed, gumbel_temp, hard_gumbel
+    y_raw = jax.vmap(model, in_axes=(None, 0, None, 0, 0, None, None))(
+        time_info, x, [], args_seed, noise_seed, gumbel_temp, hard_gumbel
     )
     return diff_fn(y_raw[:, -1, :], y)

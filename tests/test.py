@@ -110,7 +110,6 @@ TestClass = OptCompiler().compile(
     trainable_mgr=trainable_mgr,
     normalize_weight=True,
     do_clipping=False,
-    hard_gumbel=True,
 )
 
 graph.initialize_all_states(0)
@@ -130,7 +129,7 @@ y0 = jnp.array(TestClass.cdg_to_initial_states(graph))
 import matplotlib.pyplot as plt
 
 for i in range(10):
-    a = test(time_info, y0, [1], i, 0, 1)
+    a = test(time_info, y0, [1], i, 1)
 
     plt.plot(a)
 plt.show()

@@ -190,7 +190,7 @@ def gumbel_softmax(
     """
 
     g = jax.random.gumbel(key, logits.shape)
-    ret = jax.nn.softmax(logits + g / temperature)
+    ret = jax.nn.softmax((logits + g) / temperature)
     if hard:
         hard_max = jnp.argmax(logits)
         one_hot = jnp.zeros_like(logits)

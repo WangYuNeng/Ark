@@ -261,6 +261,7 @@ class OptCompiler:
     D_TRAINABLE = "d_trainable"
     GUMBEL_TEMP = "gumbel_temp"
     GUMBEL_FN = "gumbel_softmax"
+    HARD_GUMBEL_FLAG = "hard_gumbel"
     NORMALIZE_MIN, NORMALIZE_MAX = -1, 1
 
     def __init__(self) -> None:
@@ -367,8 +368,7 @@ class OptCompiler:
         self_dot_d_trainable = ast.Attribute(
             value=self_expr_gen(), attr=self.D_TRAINABLE
         )
-        self_dot_hard_gumbel = ast.Attribute(value=self_expr_gen(), attr="hard_gumbel")
-
+        hard_gumbel = ast.Name(id=self.HARD_GUMBEL_FLAG)
         # Unrole the rhs array
         # Collect the value choices for the digital trainable
         d_trainable_choice = [None for _ in range(d_trainable_len)]
@@ -390,7 +390,7 @@ class OptCompiler:
                     mk_arr_access(self_dot_d_trainable, ast.Constant(value=i)),
                     ast.Name(id=self.GUMBEL_TEMP),
                     mk_arr_access(prng_key_arr_expr_gen(), ast.Constant(value=i)),
-                    self_dot_hard_gumbel,
+                    hard_gumbel,
                 ],
             )
             for i in range(d_trainable_len)
@@ -512,6 +512,7 @@ class OptCompiler:
                     mk_arg(self.SWITCH),
                     mk_arg(self.RAND_SEED),
                     mk_arg(self.GUMBEL_TEMP),
+                    mk_arg(self.HARD_GUMBEL_FLAG),
                 ],
                 vararg=None,
                 kwonlyargs=[],

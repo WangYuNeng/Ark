@@ -44,6 +44,7 @@ N_CLASS = args.n_class
 N_CYCLES = args.n_cycle
 
 SEED = args.seed
+np.random.seed(SEED)
 
 WEIGHT_INIT = args.weight_init
 WEIGHT_BITS = args.weight_bits
@@ -165,21 +166,22 @@ def edge_init_to_trainable_init(
     return (a_trainable, d_trainable)
 
 
-@eqx.filter_jit
+# @eqx.filter_jit
 def make_step(
     model: BaseAnalogCkt,
     opt_state: PyTree,
     loss_fn: Callable,
     data: list[jax.Array],
     gumbel_temp: float,
+    hard_gumbel: bool = False,
 ):
     train_data, val_data = [d[:TRAIN_BZ] for d in data], [d[TRAIN_BZ:] for d in data]
     train_loss, grads = eqx.filter_value_and_grad(loss_fn)(
-        model, *train_data, gumbel_temp
+        model, *train_data, gumbel_temp, hard_gumbel
     )
     updates, opt_state = optim.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
-    val_loss = loss_fn(model, *val_data, gumbel_temp)
+    val_loss = loss_fn(model, *val_data, gumbel_temp, hard_gumbel=True)
     return model, opt_state, train_loss, val_loss
 
 
@@ -189,10 +191,11 @@ def plot_evolution(
     data: list[jax.Array],
     title: str,
     gumbel_temp: float,
+    hard_gumbel: bool = True,
 ):
     x_init, noise_seed = data[0], data[1]
-    y_raw = jax.vmap(model, in_axes=(None, 0, None, None, 0, None))(
-        time_info, x_init, [], 0, noise_seed, gumbel_temp
+    y_raw = jax.vmap(model, in_axes=(None, 0, None, None, 0, None, None))(
+        time_info, x_init, [], 0, noise_seed, gumbel_temp, hard_gumbel
     )
     plot_time = [i for i in range(len(saveat))]
 
@@ -214,7 +217,7 @@ def plot_evolution(
             ax[i, j].imshow(phase_diff, cmap="gray", vmin=0, vmax=1)
 
         di = [d[i : i + 1] for d in data]
-        losses.append(loss_fn(model, *di, gumbel_temp))
+        losses.append(loss_fn(model, *di, gumbel_temp, hard_gumbel))
     loss = jnp.mean(jnp.array(losses))
     plt.suptitle(title + f", Loss: {loss:.4f}")
     plt.subplots_adjust(wspace=0, hspace=0)
@@ -248,10 +251,9 @@ def load_model_and_plot(
         init_trainable=best_weight,
         is_stochastic=is_stochastic,
         solver=Heun(),
-        hard_gumbel=hard_gumbel,
     )
 
-    plot_evolution(model, loss_fn, data, title, gumbel_temp)
+    plot_evolution(model, loss_fn, data, title, gumbel_temp, hard_gumbel)
 
 
 def linear_schedule(step: int, start: float, end: float, tot_steps: int):
@@ -277,18 +279,19 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: st
     val_loss_best = 1e9
 
     gumbel_temp = GUMBEL_TEMP_START
+    hard_gumbel = USE_HARD_GUMBEL
 
     for step, data in zip(range(STEPS), dl(BZ)):
 
         if step == 0:  # Set up the baseline loss
             train_data = [d[:TRAIN_BZ] for d in data]
             val_data = [d[TRAIN_BZ:] for d in data]
-            train_loss = loss_fn(model, *train_data, GUMBEL_TEMP_END)
-            val_loss = loss_fn(model, *val_data, GUMBEL_TEMP_END)
+            train_loss = loss_fn(model, *train_data, gumbel_temp, hard_gumbel=True)
+            val_loss = loss_fn(model, *val_data, gumbel_temp, hard_gumbel=True)
 
         else:
             model, opt_state, train_loss, val_loss = make_step(
-                model, opt_state, loss_fn, data, gumbel_temp
+                model, opt_state, loss_fn, data, gumbel_temp, hard_gumbel
             )
 
         print(
@@ -419,8 +422,6 @@ if __name__ == "__main__":
             N_CLASS=N_CLASS,
         )
 
-    np.random.seed(SEED)
-
     if WEIGHT_INIT == "hebbian":
         row_init, col_init = pattern_to_edge_initialization(NUMBERS[0])
         for i in range(1, N_CLASS):
@@ -455,7 +456,6 @@ if __name__ == "__main__":
             init_trainable=trainable_init,
             is_stochastic=False,
             solver=Heun(),
-            hard_gumbel=USE_HARD_GUMBEL,
         )
         best_loss, best_weight = train(model, loss_fn, dl, "tran_noiseless")
 
@@ -487,7 +487,6 @@ if __name__ == "__main__":
         init_trainable=best_weight,
         is_stochastic=True,
         solver=Heun(),
-        hard_gumbel=USE_HARD_GUMBEL,
     )
 
     best_loss, best_weight = train(model, loss_fn, dl, "tran_noisy")

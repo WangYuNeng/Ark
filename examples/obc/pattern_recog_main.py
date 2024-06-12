@@ -183,25 +183,12 @@ def make_step(
 
 
 def plot_evolution(
-    model_cls: type,
-    best_weight: tuple[jax.Array, list[jax.Array]],
-    is_stochastic: bool,
+    model: BaseAnalogCkt,
     loss_fn: Callable,
     data: list[jax.Array],
-    title: str = None,
-    gumbel_temp: float = 1,
+    title: str,
+    gumbel_temp: float,
 ):
-    """Plot the evolution of the oscillator phase"""
-    if PLOT_EVOLVE == 0:
-        return
-
-    model: BaseAnalogCkt = model_cls(
-        init_trainable=best_weight,
-        is_stochastic=is_stochastic,
-        solver=Heun(),
-        hard_gumbel=True,
-    )
-
     x_init, noise_seed = data[0], data[1]
     y_raw = jax.vmap(model, in_axes=(None, 0, None, None, 0, None))(
         time_info, x_init, [], 0, noise_seed, gumbel_temp
@@ -238,12 +225,40 @@ def plot_evolution(
         plt.show()
 
 
+def load_model_and_plot(
+    model_cls: type,
+    best_weight: tuple[jax.Array, list[jax.Array]],
+    is_stochastic: bool,
+    loss_fn: Callable,
+    data: list[jax.Array],
+    title: str = None,
+    gumbel_temp: float = None,
+):
+    """Plot the evolution of the oscillator phase"""
+    if PLOT_EVOLVE == 0:
+        return
+
+    hard_gumbel = True
+    if gumbel_temp is not None:
+        hard_gumbel = False
+    else:
+        gumbel_temp = 1  # Set to a value to avoid divide by None
+    model: BaseAnalogCkt = model_cls(
+        init_trainable=best_weight,
+        is_stochastic=is_stochastic,
+        solver=Heun(),
+        hard_gumbel=hard_gumbel,
+    )
+
+    plot_evolution(model, loss_fn, data, title, gumbel_temp)
+
+
 def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: str = ""):
     opt_state = optim.init(eqx.filter(model, eqx.is_array))
     val_loss_best = 1e9
 
     gumbel_temp = GUMBEL_TEMP_START
-    gumbel_temp_decay = (GUMBEL_TEMP_START - GUMBEL_TEMP_END) / STEPS
+    gumbel_temp_decay = (GUMBEL_TEMP_START - GUMBEL_TEMP_END) / (STEPS - 1)
 
     for step, data in zip(range(STEPS), dl(BZ)):
 
@@ -258,7 +273,9 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: st
                 model, opt_state, loss_fn, data, gumbel_temp
             )
 
-        print(f"Step {step}, Train loss: {train_loss}, Val loss: {val_loss}")
+        print(
+            f"Step {step}, Train loss: {train_loss}, Val loss: {val_loss}, Gumbel temp: {gumbel_temp}"
+        )
         if val_loss < val_loss_best:
             val_loss_best = val_loss
             best_weight = (model.a_trainable.copy(), model.d_trainable.copy())
@@ -353,7 +370,6 @@ if __name__ == "__main__":
         readout_nodes=nodes_flat,
         normalize_weight=False,
         do_clipping=False,
-        hard_gumbel=USE_HARD_GUMBEL,
     )
 
     if DIFF_FN == "periodic_mse":
@@ -406,7 +422,7 @@ if __name__ == "__main__":
 
     plot_data = next(dl(PLOT_BZ))
 
-    plot_evolution(
+    load_model_and_plot(
         model_cls=rec_circuit_class,
         best_weight=trainable_init,
         is_stochastic=False,
@@ -428,7 +444,7 @@ if __name__ == "__main__":
         print(f"Best Loss: {best_loss}")
         print(f"Best Weights: {best_weight}")
 
-        plot_evolution(
+        load_model_and_plot(
             model_cls=rec_circuit_class,
             best_weight=best_weight,
             is_stochastic=False,
@@ -439,7 +455,7 @@ if __name__ == "__main__":
     else:
         best_weight = trainable_init
 
-    plot_evolution(
+    load_model_and_plot(
         model_cls=rec_circuit_class,
         best_weight=best_weight,
         is_stochastic=True,
@@ -461,7 +477,7 @@ if __name__ == "__main__":
     print(f"Fine-tune Best Weights: {best_weight}")
 
     # Model after fine-tune
-    plot_evolution(
+    load_model_and_plot(
         model_cls=rec_circuit_class,
         best_weight=best_weight,
         is_stochastic=True,

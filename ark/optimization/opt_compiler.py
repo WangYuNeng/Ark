@@ -275,7 +275,6 @@ class OptCompiler:
         readout_nodes: list[CDGNode] = None,
         normalize_weight: bool = True,
         do_clipping: bool = True,
-        hard_gumbel: bool = False,
     ) -> type:
         """Compile the cdg to an equinox.Module.
 

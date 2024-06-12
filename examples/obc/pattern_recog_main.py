@@ -72,6 +72,7 @@ NO_NOISELESS_TRAIN = args.no_noiseless_train
 
 USE_HARD_GUMBEL = args.hard_gumbel
 GUMBEL_TEMP_START, GUMBEL_TEMP_END = args.gumbel_temp_start, args.gumbel_temp_end
+GUMBEL_SHEDULE = args.gumbel_schedule
 
 if PLOT_EVOLVE != 0:
     saveat = jnp.linspace(0, T * N_CYCLES, PLOT_EVOLVE, endpoint=True)
@@ -253,12 +254,29 @@ def load_model_and_plot(
     plot_evolution(model, loss_fn, data, title, gumbel_temp)
 
 
+def linear_schedule(step: int, start: float, end: float, tot_steps: int):
+    return start - (start - end) * step / (tot_steps - 1)
+
+
+def exp_schedule(step: int, start: float, end: float, tot_steps: int):
+    return np.exp(-step / (tot_steps - 1) * np.log(start / end)) * start
+
+
+if GUMBEL_SHEDULE == "linear":
+    next_gumbel_temp = partial(
+        linear_schedule, start=GUMBEL_TEMP_START, end=GUMBEL_TEMP_END, tot_steps=STEPS
+    )
+elif GUMBEL_SHEDULE == "exp":
+    next_gumbel_temp = partial(
+        exp_schedule, start=GUMBEL_TEMP_START, end=GUMBEL_TEMP_END, tot_steps=STEPS
+    )
+
+
 def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: str = ""):
     opt_state = optim.init(eqx.filter(model, eqx.is_array))
     val_loss_best = 1e9
 
     gumbel_temp = GUMBEL_TEMP_START
-    gumbel_temp_decay = (GUMBEL_TEMP_START - GUMBEL_TEMP_END) / (STEPS - 1)
 
     for step, data in zip(range(STEPS), dl(BZ)):
 
@@ -288,7 +306,7 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: st
                     "gumbel_temp": gumbel_temp,
                 },
             )
-        gumbel_temp -= gumbel_temp_decay
+        gumbel_temp = next_gumbel_temp(step + 1)
 
     return val_loss_best, best_weight
 

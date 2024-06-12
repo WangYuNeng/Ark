@@ -42,6 +42,13 @@ parser.add_argument(
     help="Use hard gumbel softmax and straight-through estimator. Default is soft gumbel softmax",
 )
 parser.add_argument(
+    "--gumbel_schedule",
+    type=str,
+    default="linear",
+    choices=["linear", "exp"],
+    help="Annealing schedule for the gumbel temperature",
+)
+parser.add_argument(
     "--diff_fn",
     type=str,
     choices=["periodic_mse", "periodic_mean_max_se", "normalize_angular_diff"],

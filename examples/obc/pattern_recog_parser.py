@@ -54,7 +54,10 @@ parser.add_argument(
     help="Whether the locking strength is trainable",
 )
 parser.add_argument(
-    "--locking_strength", type=float, default=1, help="Initial strength of the locking"
+    "--locking_strength",
+    type=float,
+    default=1.0,
+    help="Initial strength of the locking",
 )
 parser.add_argument(
     "--trainable_coupling",
@@ -64,7 +67,7 @@ parser.add_argument(
 parser.add_argument(
     "--coupling_strength",
     type=float,
-    default=1,
+    default=1.0,
     help="Initial strength of the coupling",
 )
 parser.add_argument(

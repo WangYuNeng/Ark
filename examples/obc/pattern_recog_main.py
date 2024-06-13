@@ -374,7 +374,7 @@ if __name__ == "__main__":
                 lock_fn=locking_fn,
                 osc_fn=coupling_fn,
             )
-            self_edge = Coupling(k=1)
+            self_edge = Coupling(k=1.0)
             graph.connect(self_edge, node, node)
             nodes[row][col] = node
 

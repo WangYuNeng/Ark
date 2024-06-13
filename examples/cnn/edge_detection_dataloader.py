@@ -11,6 +11,8 @@ import numpy as np
 from jax import Array
 from torchvision import datasets
 
+from ark.cdg.cdg import CDG, CDGNode
+
 
 class DataLoader:
 
@@ -25,6 +27,18 @@ class DataLoader:
         self.edge_images = edge_images
         self.batch_size = batch_size
 
+    def set_cnn_info(
+        self,
+        inp_nodes: list[list[CDGNode]],
+        graph: CDG,
+        cnn_ckt_cls,
+    ):
+        assert len(inp_nodes) == self.image_shape()[0]
+        assert len(inp_nodes[0]) == self.image_shape()[1]
+        self.inp_nodes = inp_nodes
+        self.cnn_ckt_cls = cnn_ckt_cls
+        self.graph = graph
+
     def __iter__(self) -> Generator[tuple[Array, Array, Array, Array], None, None]:
         images, edge_images = self.images, self.edge_images
         batch_size = self.batch_size
@@ -33,8 +47,18 @@ class DataLoader:
             args_seed = jnp.array(np.random.randint(0, 2**32 - 1, size=batch_size))
             noise_seed = jnp.array(np.random.randint(0, 2**32 - 1, size=batch_size))
 
-            x = jnp.array(images[i : i + batch_size])
-            y = jnp.array(edge_images[i : i + batch_size])
+            imgs = jnp.array(images[i : i + batch_size])
+
+            # Map the image to initial state of input nodes
+            # (which will stay the same throughout the simulation)
+            x = []
+            for img in imgs:
+                for row_id, row in enumerate(img):
+                    for col_id, val in enumerate(row):
+                        self.inp_nodes[row_id][col_id].set_init_val(val, n=0)
+                x.append(self.cnn_ckt_cls.cdg_to_initial_states(self.graph))
+            x = jnp.array(x).reshape(batch_size, -1)
+            y = jnp.array(edge_images[i : i + batch_size]).reshape(batch_size, -1)
             yield x, args_seed, noise_seed, y
 
     def __len__(self):
@@ -66,6 +90,8 @@ if __name__ == "__main__":
     print(len(test_loader))
     print(train_loader.image_shape())
     print(test_loader.image_shape())
+
+    next(iter(train_loader))
 
     for x, args_seed, noise_seed, y in train_loader:
         print(x.shape, y.shape)

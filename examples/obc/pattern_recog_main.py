@@ -76,6 +76,25 @@ USE_HARD_GUMBEL = args.hard_gumbel
 GUMBEL_TEMP_START, GUMBEL_TEMP_END = args.gumbel_temp_start, args.gumbel_temp_end
 GUMBEL_SHEDULE = args.gumbel_schedule
 
+TRAINABLE_LOCKING = args.trainable_locking
+INIT_LOCK_STRENGTH = args.locking_strength
+TRAINABLE_COUPLING = args.trainable_coupling
+INIT_COUPLING_STRENGTH = args.coupling_strength
+
+trainable_mgr = TrainableMgr()
+if TRAINABLE_LOCKING:
+    lock_var = trainable_mgr.new_analog()
+    lock_var.init_val = INIT_LOCK_STRENGTH
+else:
+    lock_var = INIT_LOCK_STRENGTH
+
+if TRAINABLE_COUPLING:
+    cpl_var = trainable_mgr.new_analog()
+    cpl_var.init_val = INIT_COUPLING_STRENGTH
+else:
+    cpl_var = INIT_COUPLING_STRENGTH
+
+
 if PLOT_EVOLVE != 0:
     saveat = jnp.linspace(0, T * N_CYCLES, PLOT_EVOLVE, endpoint=True)
 else:
@@ -92,8 +111,6 @@ time_info = TimeInfo(
 # Osc_modified - Cpl - Osc_modified
 obc_spec.production_rules()[3]._noise_exp = TRANS_NOISE_STD
 obc_spec.production_rules()[4]._noise_exp = TRANS_NOISE_STD
-
-TOT_LOCK_DEFAULT = 1.2
 
 if USE_WANDB:
     wandb_run = wandb.init(project="obc", config=vars(args), tags=["digit_recognition"])
@@ -146,8 +163,6 @@ def edge_init_to_trainable_init(
         # normalize the weight choices to between -1 and 1
         weight_choices = np.array(weight_choices)
 
-        # If digital setup, the only analog trainable is the lock strength
-        trainable_mgr.analog[0].init_val = TOT_LOCK_DEFAULT
         row_init_quantized = one_hot_digitize(row_init, weight_choices)
         col_init_quantized = one_hot_digitize(col_init, weight_choices)
 
@@ -316,18 +331,14 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: st
 
 if __name__ == "__main__":
 
-    trainable_mgr = TrainableMgr()
-
     graph = CDG()
     nodes = [[None for _ in range(N_COL)] for _ in range(N_ROW)]
     row_edges = [[None for _ in range(N_COL - 1)] for _ in range(N_ROW)]
     col_edges = [[None for _ in range(N_COL)] for _ in range(N_ROW - 1)]
 
     if not WEIGHT_BITS:
-        lock_val = TOT_LOCK_DEFAULT
         cpl_type = Coupling
     else:
-        lock_val = trainable_mgr.new_analog()
         cpl_type = Cpl_digital
 
     # Store all the trainable parameters
@@ -358,8 +369,8 @@ if __name__ == "__main__":
     for row in range(N_ROW):
         for col in range(N_COL):
             node = Osc_modified(
-                lock_strength=lock_val,
-                cpl_strength=2,
+                lock_strength=lock_var,
+                cpl_strength=cpl_var,
                 lock_fn=locking_fn,
                 osc_fn=coupling_fn,
             )

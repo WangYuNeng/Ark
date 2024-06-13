@@ -49,6 +49,25 @@ parser.add_argument(
     help="Annealing schedule for the gumbel temperature",
 )
 parser.add_argument(
+    "--trainable_locking",
+    action="store_true",
+    help="Whether the locking strength is trainable",
+)
+parser.add_argument(
+    "--locking_strength", type=float, default=1, help="Initial strength of the locking"
+)
+parser.add_argument(
+    "--trainable_coupling",
+    action="store_true",
+    help="Whether the total coupling strength is trainable",
+)
+parser.add_argument(
+    "--coupling_strength",
+    type=float,
+    default=1,
+    help="Initial strength of the coupling",
+)
+parser.add_argument(
     "--diff_fn",
     type=str,
     choices=["periodic_mse", "periodic_mean_max_se", "normalize_angular_diff"],

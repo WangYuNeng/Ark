@@ -285,17 +285,17 @@ def train(
                 losses.append(train_loss)
             else:
                 model, opt_state, train_loss = make_step(
-                    model, opt_state, loss_fn, data
+                    model, activation, opt_state, loss_fn, data
                 )
                 losses.append(train_loss)
 
-        train_loss = jnp.mean(losses)
+        train_loss = jnp.mean(jnp.array(losses))
 
         losses = []
-        for data in tqdm(train_dl, desc="testing"):
+        for data in tqdm(test_dl, desc="testing"):
             loss = loss_fn(model, *data, activation)
             losses.append(loss)
-        test_loss = jnp.mean(losses)
+        test_loss = jnp.mean(jnp.array(losses))
 
         print(f"Step {step}, Train loss: {train_loss}, Test loss: {test_loss}")
 
@@ -318,7 +318,6 @@ def iterate_all_data(model, data_loader, activation_fn):
 
     imgs = []
     for data in tqdm(data_loader, desc="Generating edge detected images"):
-        eqx.filter_jit(model)
         y_raw = jax.vmap(model, in_axes=(None, 0, None, 0, 0))(
             time_info, data[0], [], data[1], data[2]
         )
@@ -388,10 +387,13 @@ if __name__ == "__main__":
     if STORE_EDGE_DETECTION:
         # Iterate over the training and testing data to generate edge detected
         # images with the current cnn templates
+        train_dl.shuffle = False
+        test_dl.shuffle = False
         train_imgs = iterate_all_data(model, train_dl, activation_fn)
-        print(train_imgs.shape)
         test_imgs = iterate_all_data(model, test_dl, activation_fn)
         np.savez(ED_IMG_PATH, train=train_imgs, test=test_imgs)
+        train_dl.shuffle = True
+        test_dl.shuffle = True
 
     ed_imgs = np.load(ED_IMG_PATH)
     train_idl_imgs = ed_imgs["train"]
@@ -413,3 +415,4 @@ if __name__ == "__main__":
     )
 
     loss_best, best_weight = train(model, activation_fn, mse_loss, train_dl, test_dl)
+    wandb.finish()

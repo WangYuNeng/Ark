@@ -99,7 +99,7 @@ class FunctionAttr(AttrType):
     def check_valid(self, val) -> bool:
         if not isinstance(val, Callable):
             return False
-        if len(val.__code__.co_varnames) != self.nargs:
+        if val.__code__.co_argcount != self.nargs:
             return False
         return True
 

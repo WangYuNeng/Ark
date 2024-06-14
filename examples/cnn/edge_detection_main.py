@@ -26,6 +26,7 @@ from spec import (
     saturation,
     saturation_diffpair,
 )
+from tqdm import tqdm
 
 from ark.cdg.cdg import CDG
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
@@ -45,8 +46,8 @@ LEARNING_RATE = args.lr
 optim = getattr(optax, OPTIMIZER)(LEARNING_RATE)
 
 BZ = args.bz
-train_loader, test_loader = TrainDataLoader(BZ), TestDataLoader(BZ)
-N_ROW, N_COL = train_loader.image_shape()
+train_dl, test_dl = TrainDataLoader(BZ), TestDataLoader(BZ)
+N_ROW, N_COL = train_dl.image_shape()
 
 WEIGHT_INIT = args.weight_init
 MM_NODE = args.mismatched_node
@@ -54,6 +55,11 @@ MM_EDGE = args.mismatched_edge
 ACTIVATION = args.activation
 
 PLOT_EVOLVE = args.plot_evolve
+NUM_PLOT = args.num_plot
+
+STORE_EDGE_DETECTION = args.store_edge_detection
+ED_IMG_PATH = args.ed_img_path
+
 END_TIME = args.end_time
 N_TIME_POINTS = args.n_time_points
 if PLOT_EVOLVE != 0:
@@ -201,10 +207,9 @@ def plot_evolution(
             y_readout_t = y_readout[time].reshape(N_ROW, N_COL)
             ax[i, j].axis("off")
             ax[i, j].imshow(y_readout_t, cmap="gray", vmin=-1, vmax=1)
-        ax[i, 0].imshow(x_init[i].reshape(N_ROW, N_COL), cmap="gray", vmin=0, vmax=1)
 
         ax[i, -1].axis("off")
-        ax[i, -1].imshow(y_true[i].reshape(N_ROW, N_COL), cmap="gray", vmin=0, vmax=1)
+        ax[i, -1].imshow(y_true[i].reshape(N_ROW, N_COL), cmap="gray", vmin=-1, vmax=1)
         di = [d[i : i + 1] for d in data]
         losses.append(loss_fn(model, *di))
     loss = jnp.mean(jnp.array(losses))
@@ -271,9 +276,9 @@ def train(
     for step in range(STEPS):
 
         losses = []
-        for data in train_dl:
+        for data in tqdm(train_dl, desc="training"):
             if step == 0:  # Set up the baseline loss
-                train_loss = loss_fn(model, *data)
+                train_loss = loss_fn(model, *data, activation)
                 losses.append(train_loss)
             else:
                 model, opt_state, train_loss = make_step(
@@ -284,8 +289,8 @@ def train(
         train_loss = jnp.mean(losses)
 
         losses = []
-        for data in test_dl:
-            loss = loss_fn(model, *data)
+        for data in tqdm(train_dl, desc="testing"):
+            loss = loss_fn(model, *data, activation)
             losses.append(loss)
         test_loss = jnp.mean(losses)
 
@@ -304,6 +309,20 @@ def train(
             )
 
     return loss_best, best_weight
+
+
+def iterate_all_data(model, data_loader, activation_fn):
+
+    imgs = []
+    for data in tqdm(data_loader, desc="Generating edge detected images"):
+        eqx.filter_jit(model)
+        y_raw = jax.vmap(model, in_axes=(None, 0, None, 0, 0))(
+            time_info, data[0], [], data[1], data[2]
+        )
+        y_end_readout = activation_fn(y_raw[:, -1, :])
+        y_imgs = y_end_readout.reshape(-1, N_ROW, N_COL)
+        imgs.extend(y_imgs)
+    return np.array(imgs)
 
 
 if __name__ == "__main__":
@@ -349,13 +368,36 @@ if __name__ == "__main__":
         do_clipping=False,
         aggregate_args_lines=True,
     )
-    train_loader.set_cnn_info(inps, graph, cnn_ckt_class)
-    test_loader.set_cnn_info(inps, graph, cnn_ckt_class)
+    train_dl.set_cnn_info(inps, graph, cnn_ckt_class)
+    test_dl.set_cnn_info(inps, graph, cnn_ckt_class)
+
+    plot_dl = TestDataLoader(NUM_PLOT)
+    plot_dl.set_cnn_info(inps, graph, cnn_ckt_class)
 
     loss_fn = partial(mse_loss, activation=activation_fn)
 
     trainable_init = (mgr.get_initial_vals("analog"), mgr.get_initial_vals("digital"))
-    plot_data = next(iter(test_loader))
+
+    model: BaseAnalogCkt = cnn_ckt_class(
+        init_trainable=trainable_init, is_stochastic=False, solver=Heun()
+    )
+
+    if STORE_EDGE_DETECTION:
+        # Iterate over the training and testing data to generate edge detected
+        # images with the current cnn templates
+        train_imgs = iterate_all_data(model, train_dl, activation_fn)
+        print(train_imgs.shape)
+        test_imgs = iterate_all_data(model, test_dl, activation_fn)
+        np.savez(ED_IMG_PATH, train=train_imgs, test=test_imgs)
+
+    ed_imgs = np.load(ED_IMG_PATH)
+    train_idl_imgs = ed_imgs["train"]
+    test_idl_imgs = ed_imgs["test"]
+    train_dl.load_edge_detected_data(train_idl_imgs)
+    test_dl.load_edge_detected_data(test_idl_imgs)
+    plot_dl.load_edge_detected_data(test_idl_imgs)
+
+    plot_data = next(iter(plot_dl))
 
     load_model_and_plot(
         model_cls=cnn_ckt_class,
@@ -367,10 +409,4 @@ if __name__ == "__main__":
         title="Before training",
     )
 
-    model: BaseAnalogCkt = cnn_ckt_class(
-        init_trainable=trainable_init, is_stochastic=False, solver=Heun()
-    )
-
-    loss_best, best_weight = train(
-        model, activation_fn, mse_loss, train_loader, test_loader
-    )
+    loss_best, best_weight = train(model, activation_fn, mse_loss, train_dl, test_dl)

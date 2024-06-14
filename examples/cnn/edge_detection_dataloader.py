@@ -18,7 +18,14 @@ class DataLoader:
 
     def __init__(self, dataset: datasets.MNIST, batch_size=32, shuffle=True):
         images = dataset.data.numpy()
+
+        # Downsample the images
+        # images = images[:, ::14, ::14]
+
+        # Rescale the images to [-1, 1]
         edge_images = np.array([cv2.Canny(img, 100, 200) for img in images])
+        images = images / 255 * 2 - 1
+        edge_images = edge_images / 255 * 2 - 1
         if shuffle:
             indices = np.random.permutation(len(images))
             images = images[indices]
@@ -38,6 +45,11 @@ class DataLoader:
         self.inp_nodes = inp_nodes
         self.cnn_ckt_cls = cnn_ckt_cls
         self.graph = graph
+
+    def load_edge_detected_data(self, edge_images):
+        # Because cnn and cv2 edge detection behave differently
+        # Need to load edge detected data separately
+        self.edge_images = edge_images
 
     def __iter__(self) -> Generator[tuple[Array, Array, Array, Array], None, None]:
         images, edge_images = self.images, self.edge_images

@@ -276,6 +276,7 @@ class OptCompiler:
         readout_nodes: list[CDGNode] = None,
         normalize_weight: bool = True,
         do_clipping: bool = True,
+        aggregate_args_lines: bool = False,
     ) -> type:
         """Compile the cdg to an equinox.Module.
 
@@ -288,6 +289,8 @@ class OptCompiler:
             [-1, 1]. Defaults to True.
             do_clipping (bool, optional): whether to clip the value within the range
             specified in ``cdg_spec``. Defaults to True.
+            aggregate_args_lines (bool, optional): whether to aggregate the lines of
+            args = args.at[idx].set(val) to single line instantiation. Defaults to False.
 
         Returns:
             type: the compiled module.
@@ -414,20 +417,27 @@ class OptCompiler:
             )
         )
 
-        # Initialize the jnp arrays
-        init_arr = mk_jnp_call(args=[args_len], call_fn="zeros")
-        stmts.append(mk_assign(args_expr_gen(), init_arr))
+        if not aggregate_args_lines:
+            # Initialize the jnp arrays
+            init_arr = mk_jnp_call(args=[args_len], call_fn="zeros")
+            stmts.append(mk_assign(args_expr_gen(), init_arr))
 
-        # Initialize the switch array (switch array is always the beginning of the args)
-        # args = args.at[:switch_args_len].set(switch)
-        switch_args_len = len(switch_map)
-        stmts.append(
-            mk_jnp_assign(
-                arr=args_expr_gen(),
-                idx=ast.Slice(upper=ast.Constant(value=switch_args_len)),
-                val=switch_expr_gen(),
+            # Initialize the switch array (switch array is always the beginning of the args)
+            # args = args.at[:switch_args_len].set(switch)
+            switch_args_len = len(switch_map)
+            stmts.append(
+                mk_jnp_assign(
+                    arr=args_expr_gen(),
+                    idx=ast.Slice(upper=ast.Constant(value=switch_args_len)),
+                    val=switch_expr_gen(),
+                )
             )
-        )
+        else:
+            args_arr = [None for _ in range(args_len)]
+            args_arr[: len(switch_map)] = [
+                mk_arr_access(lst=switch_expr_gen(), idx=ast.Constant(i))
+                for i in range(len(switch_map))
+            ]
 
         # Initialize the mismatch array
         mismatch_arr = mk_jax_random_call(
@@ -490,14 +500,27 @@ class OptCompiler:
                             mm_arr_expr=mm_arr_expr_gen(),
                             attr_def=ele.attr_def[attr],
                         )
-
-                    stmts.append(
-                        mk_jnp_assign(
-                            arr=args_expr_gen(),
-                            idx=ast.Constant(value=num_attr_to_idx[attr]),
-                            val=val_expr,
+                    if not aggregate_args_lines:
+                        stmts.append(
+                            mk_jnp_assign(
+                                arr=args_expr_gen(),
+                                idx=ast.Constant(value=num_attr_to_idx[attr]),
+                                val=val_expr,
+                            )
                         )
-                    )
+                    else:
+                        args_arr[num_attr_to_idx[attr]] = val_expr
+
+        if aggregate_args_lines:
+            stmts.append(
+                mk_assign(
+                    args_expr_gen(),
+                    mk_jnp_call(
+                        args=[mk_list(args_arr)],
+                        call_fn="array",
+                    ),
+                )
+            )
 
         # Return the args
         stmts.append(set_ctx(ast.Return(value=args_expr_gen()), ast.Load))
@@ -618,9 +641,7 @@ class OptCompiler:
                 self.NORMALIZE_MAX - self.NORMALIZE_MIN,
                 (self.NORMALIZE_MAX + self.NORMALIZE_MIN) / 2,
             )
-            min_val, max_val = jnp.array(min_arr, dtype=jnp.float64), jnp.array(
-                max_arr, dtype=jnp.float64
-            )
+            min_val, max_val = jnp.array(min_arr), jnp.array(max_arr)
             range_diff, half_range_sum = max_val - min_val, (max_val + min_val) / 2
 
             # Denormalize the trainable values to the original range

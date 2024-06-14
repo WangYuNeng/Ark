@@ -45,7 +45,7 @@ LEARNING_RATE = args.lr
 optim = getattr(optax, OPTIMIZER)(LEARNING_RATE)
 
 BZ = args.bz
-train_loader, test_loader = TrainDataLoader(BZ), TestDataLoader(2)
+train_loader, test_loader = TrainDataLoader(BZ), TestDataLoader(BZ)
 N_ROW, N_COL = train_loader.image_shape()
 
 WEIGHT_INIT = args.weight_init
@@ -180,15 +180,16 @@ def plot_evolution(
     title: str,
 ):
     x_init, args_seed, noise_seed = data[0], data[1], data[2]
+    y_true = data[3]
     y_raw = jax.vmap(model, in_axes=(None, 0, None, 0, 0))(
         time_info, x_init, [], args_seed, noise_seed
     )
     plot_time = [i for i in range(len(saveat))]
 
-    p_rows, p_cols = y_raw.shape[0], len(plot_time)
+    p_rows, p_cols = y_raw.shape[0], len(plot_time) + 1
     fig, ax = plt.subplots(
-        ncols=len(plot_time),
-        nrows=y_raw.shape[0],
+        ncols=p_cols,
+        nrows=p_rows,
         figsize=(p_cols, p_rows * 1.75),
     )
     losses = []
@@ -200,7 +201,10 @@ def plot_evolution(
             y_readout_t = y_readout[time].reshape(N_ROW, N_COL)
             ax[i, j].axis("off")
             ax[i, j].imshow(y_readout_t, cmap="gray", vmin=-1, vmax=1)
+        ax[i, 0].imshow(x_init[i].reshape(N_ROW, N_COL), cmap="gray", vmin=0, vmax=1)
 
+        ax[i, -1].axis("off")
+        ax[i, -1].imshow(y_true[i].reshape(N_ROW, N_COL), cmap="gray", vmin=0, vmax=1)
         di = [d[i : i + 1] for d in data]
         losses.append(loss_fn(model, *di))
     loss = jnp.mean(jnp.array(losses))
@@ -239,11 +243,12 @@ def load_model_and_plot(
 @eqx.filter_jit
 def make_step(
     model: BaseAnalogCkt,
+    activation: Callable,
     opt_state: PyTree,
     loss_fn: Callable,
     data: list[jax.Array],
 ):
-    train_loss, grads = eqx.filter_value_and_grad(loss_fn)(model, *data)
+    train_loss, grads = eqx.filter_value_and_grad(loss_fn)(model, *data, activation)
     updates, opt_state = optim.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
     return model, opt_state, train_loss
@@ -251,6 +256,7 @@ def make_step(
 
 def train(
     model: BaseAnalogCkt,
+    activation: Callable,
     loss_fn: Callable,
     train_dl: Generator,
     test_dl: Generator,
@@ -279,8 +285,8 @@ def train(
 
         losses = []
         for data in test_dl:
-            val_loss = loss_fn(model, *data)
-            losses.append(val_loss)
+            loss = loss_fn(model, *data)
+            losses.append(loss)
         test_loss = jnp.mean(losses)
 
         print(f"Step {step}, Train loss: {train_loss}, Test loss: {test_loss}")
@@ -341,6 +347,7 @@ if __name__ == "__main__":
         readout_nodes=vs_flat,
         normalize_weight=False,
         do_clipping=False,
+        aggregate_args_lines=True,
     )
     train_loader.set_cnn_info(inps, graph, cnn_ckt_class)
     test_loader.set_cnn_info(inps, graph, cnn_ckt_class)
@@ -364,4 +371,6 @@ if __name__ == "__main__":
         init_trainable=trainable_init, is_stochastic=False, solver=Heun()
     )
 
-    loss_best, best_weight = train(model, mse_loss, train_loader, test_loader)
+    loss_best, best_weight = train(
+        model, activation_fn, mse_loss, train_loader, test_loader
+    )

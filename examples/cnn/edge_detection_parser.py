@@ -49,6 +49,12 @@ parser.add_argument(
     type=str,
     help="Path to the edge detected images. If store_edge_detection is True, this path will be used to save the edge detected images",
 )
+parser.add_argument(
+    "--downsample",
+    type=int,
+    default=1,
+    help="Downsample the images by this factor",
+)
 parser.add_argument("--steps", type=int, default=32, help="Number of training steps")
 parser.add_argument("--bz", type=int, default=512, help="Batch size")
 parser.add_argument("--lr", type=float, default=1e-1, help="Learning rate")

@@ -16,11 +16,17 @@ from ark.cdg.cdg import CDG, CDGNode
 
 class DataLoader:
 
-    def __init__(self, dataset: datasets.MNIST, batch_size=32, shuffle=True):
+    def __init__(
+        self,
+        dataset: datasets.MNIST,
+        batch_size=32,
+        shuffle=True,
+        downsample: int = 1,
+    ):
         images = dataset.data.numpy()
 
         # Downsample the images
-        # images = images[:, ::14, ::14]
+        images = images[:, ::downsample, ::downsample]
 
         # Rescale the images to [-1, 1]
         edge_images = np.array([cv2.Canny(img, 100, 200) for img in images])
@@ -82,16 +88,16 @@ class DataLoader:
 
 class TrainDataLoader(DataLoader):
 
-    def __init__(self, batch_size, shuffle=True):
+    def __init__(self, batch_size, shuffle=True, downsample=1):
         dataset = datasets.MNIST(root="data", train=True, download=True)
-        super().__init__(dataset, batch_size, shuffle)
+        super().__init__(dataset, batch_size, shuffle, downsample)
 
 
 class TestDataLoader(DataLoader):
 
-    def __init__(self, batch_size, shuffle=True):
+    def __init__(self, batch_size, shuffle=True, downsample=1):
         dataset = datasets.MNIST(root="data", train=False, download=True)
-        super().__init__(dataset, batch_size, shuffle)
+        super().__init__(dataset, batch_size, shuffle, downsample)
 
 
 if __name__ == "__main__":

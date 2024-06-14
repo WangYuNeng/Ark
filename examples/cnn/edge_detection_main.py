@@ -45,9 +45,6 @@ OPTIMIZER = args.optimizer
 LEARNING_RATE = args.lr
 optim = getattr(optax, OPTIMIZER)(LEARNING_RATE)
 
-BZ = args.bz
-train_dl, test_dl = TrainDataLoader(BZ), TestDataLoader(BZ)
-N_ROW, N_COL = train_dl.image_shape()
 
 WEIGHT_INIT = args.weight_init
 MM_NODE = args.mismatched_node
@@ -59,6 +56,12 @@ NUM_PLOT = args.num_plot
 
 STORE_EDGE_DETECTION = args.store_edge_detection
 ED_IMG_PATH = args.ed_img_path
+DW_SAMPLE = args.downsample
+
+BZ = args.bz
+train_dl = TrainDataLoader(BZ, downsample=DW_SAMPLE)
+test_dl = TestDataLoader(BZ, downsample=DW_SAMPLE)
+N_ROW, N_COL = train_dl.image_shape()
 
 END_TIME = args.end_time
 N_TIME_POINTS = args.n_time_points
@@ -371,7 +374,7 @@ if __name__ == "__main__":
     train_dl.set_cnn_info(inps, graph, cnn_ckt_class)
     test_dl.set_cnn_info(inps, graph, cnn_ckt_class)
 
-    plot_dl = TestDataLoader(NUM_PLOT)
+    plot_dl = TestDataLoader(NUM_PLOT, downsample=DW_SAMPLE)
     plot_dl.set_cnn_info(inps, graph, cnn_ckt_class)
 
     loss_fn = partial(mse_loss, activation=activation_fn)

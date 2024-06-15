@@ -152,6 +152,19 @@ class SimpleShapeDataloader(DataLoader):
             [0, 0, 0, 0, 0, 0, 0, 0],
         ]
     )
+    inverted_circle8x8 = 1 - circle8x8
+    inverted_circle8x8_edge = np.array(
+        [
+            [1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 0, 0, 0, 0, 1, 1],
+            [1, 0, 0, 0, 0, 0, 0, 1],
+            [1, 0, 0, 0, 0, 0, 0, 1],
+            [1, 0, 0, 0, 0, 0, 0, 1],
+            [1, 0, 0, 0, 0, 0, 0, 1],
+            [1, 1, 0, 0, 0, 0, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1],
+        ]
+    )
     square8x8 = np.array(
         [
             [0, 0, 0, 0, 0, 0, 0, 0],
@@ -176,7 +189,20 @@ class SimpleShapeDataloader(DataLoader):
             [0, 0, 0, 0, 0, 0, 0, 0],
         ]
     )
-    reactangle8x8 = np.array(
+    inverted_square8x8 = 1 - square8x8
+    inverted_square8x8_edge = np.array(
+        [
+            [1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 0, 0, 0, 0, 0, 0, 1],
+            [1, 0, 0, 0, 0, 0, 0, 1],
+            [1, 0, 0, 0, 0, 0, 0, 1],
+            [1, 0, 0, 0, 0, 0, 0, 1],
+            [1, 0, 0, 0, 0, 0, 0, 1],
+            [1, 0, 0, 0, 0, 0, 0, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1],
+        ]
+    )
+    rectangle8x8 = np.array(
         [
             [0, 0, 0, 0, 0, 0, 0, 0],
             [0, 0, 0, 0, 0, 0, 0, 0],
@@ -188,7 +214,7 @@ class SimpleShapeDataloader(DataLoader):
             [0, 0, 0, 0, 0, 0, 0, 0],
         ]
     )
-    reactangle8x8_edge = np.array(
+    rectangle8x8_edge = np.array(
         [
             [0, 0, 0, 0, 0, 0, 0, 0],
             [0, 0, 0, 0, 0, 0, 0, 0],
@@ -198,6 +224,19 @@ class SimpleShapeDataloader(DataLoader):
             [0, 0, 0, 1, 1, 1, 0, 0],
             [0, 0, 0, 0, 0, 0, 0, 0],
             [0, 0, 0, 0, 0, 0, 0, 0],
+        ]
+    )
+    inverted_rectangle8x8 = 1 - rectangle8x8
+    inverted_rectangle8x8_edge = np.array(
+        [
+            [1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 0, 1, 1, 1, 1, 1, 1],
+            [1, 0, 1, 0, 0, 0, 1, 1],
+            [1, 0, 1, 0, 0, 0, 1, 1],
+            [1, 0, 1, 0, 0, 0, 1, 1],
+            [1, 0, 1, 0, 0, 0, 1, 1],
+            [1, 0, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1],
         ]
     )
     diamond8x8 = np.array(
@@ -224,18 +263,44 @@ class SimpleShapeDataloader(DataLoader):
             [0, 0, 0, 0, 0, 0, 0, 0],
         ]
     )
+    inverted_diamond8x8 = 1 - diamond8x8
+    inverted_diamond8x8_edge = np.array(
+        [
+            [1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 0, 0, 1, 1, 1],
+            [1, 1, 0, 0, 0, 0, 1, 1],
+            [1, 0, 0, 0, 0, 0, 0, 1],
+            [1, 0, 0, 0, 0, 0, 0, 1],
+            [1, 1, 0, 0, 0, 0, 1, 1],
+            [1, 1, 1, 0, 0, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1],
+        ]
+    )
 
     def __init__(self, batch_size, shuffle=True):
         base_images = np.array(
-            [self.circle8x8, self.square8x8, self.reactangle8x8, self.diamond8x8]
+            [
+                self.circle8x8,
+                self.square8x8,
+                self.rectangle8x8,
+                self.diamond8x8,
+                self.inverted_circle8x8,
+                self.inverted_square8x8,
+                self.inverted_rectangle8x8,
+                self.inverted_diamond8x8,
+            ]
         )
         base_images = 2 * base_images - 1
         base_edge_images = np.array(
             [
                 self.circle8x8_edge,
                 self.square8x8_edge,
-                self.reactangle8x8_edge,
+                self.rectangle8x8_edge,
                 self.diamond8x8_edge,
+                self.inverted_circle8x8_edge,
+                self.inverted_square8x8_edge,
+                self.inverted_rectangle8x8_edge,
+                self.inverted_diamond8x8_edge,
             ]
         )
         base_edge_images = 2 * base_edge_images - 1

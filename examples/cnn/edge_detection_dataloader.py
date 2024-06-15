@@ -5,7 +5,6 @@ Load the MNIST from torchvision and apply edge detection with CV2 to create
 
 from typing import Generator
 
-import cv2
 import jax.numpy as jnp
 import numpy as np
 from jax import Array
@@ -18,23 +17,15 @@ class DataLoader:
 
     def __init__(
         self,
-        dataset: datasets.MNIST,
+        images: np.ndarray,
         batch_size=32,
         shuffle=True,
-        downsample: int = 1,
     ):
-        images = dataset.data.numpy()
-
-        # Downsample the images
-        images = images[:, ::downsample, ::downsample]
-
-        # Rescale the images to [-1, 1]
-        edge_images = np.array([cv2.Canny(img, 100, 200) for img in images])
-        images = images / 255 * 2 - 1
-        edge_images = edge_images / 255 * 2 - 1
 
         self.images = images
-        self.edge_images = edge_images
+        # Because cv2 edge detection behaves differently
+        # Need to load edge detected data separately
+        self.edge_images = np.zeros_like(images)
         self.batch_size = batch_size
         self.shuffle = shuffle
 
@@ -97,6 +88,8 @@ class DataLoader:
             yield x, args_seed, noise_seed, y
 
     def __len__(self):
+        if len(self.images) % self.batch_size == 0:
+            return len(self.images) // self.batch_size
         return len(self.images) // self.batch_size + 1
 
     def image_shape(self):
@@ -107,34 +100,161 @@ class DataLoader:
         return img[indices], edg[indices]
 
 
-class TrainDataLoader(DataLoader):
+class MNISTDataLoader(DataLoader):
+
+    def __init__(
+        self, dataset: datasets.MNIST, batch_size: int, shuffle=True, downsample=1
+    ):
+        images = dataset.data.numpy()
+
+        # Downsample the images
+        images = images[:, ::downsample, ::downsample]
+        super().__init__(images, batch_size, shuffle)
+
+
+class MNISTTrainDataLoader(MNISTDataLoader):
 
     def __init__(self, batch_size, shuffle=True, downsample=1):
         dataset = datasets.MNIST(root="data", train=True, download=True)
         super().__init__(dataset, batch_size, shuffle, downsample)
 
 
-class TestDataLoader(DataLoader):
+class MNISTTestDataLoader(MNISTDataLoader):
 
     def __init__(self, batch_size, shuffle=True, downsample=1):
         dataset = datasets.MNIST(root="data", train=False, download=True)
         super().__init__(dataset, batch_size, shuffle, downsample)
 
 
+class SimpleShapeDataloader(DataLoader):
+
+    circle8x8 = np.array(
+        [
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 1, 1, 1, 1, 0, 0],
+            [0, 1, 1, 1, 1, 1, 1, 0],
+            [0, 1, 1, 1, 1, 1, 1, 0],
+            [0, 1, 1, 1, 1, 1, 1, 0],
+            [0, 1, 1, 1, 1, 1, 1, 0],
+            [0, 0, 1, 1, 1, 1, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+        ]
+    )
+    circle8x8_edge = np.array(
+        [
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 1, 1, 1, 1, 0, 0],
+            [0, 1, 1, 0, 0, 1, 1, 0],
+            [0, 1, 0, 0, 0, 0, 1, 0],
+            [0, 1, 0, 0, 0, 0, 1, 0],
+            [0, 1, 1, 0, 0, 1, 1, 0],
+            [0, 0, 1, 1, 1, 1, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+        ]
+    )
+    square8x8 = np.array(
+        [
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 1, 1, 1, 1, 1, 1, 0],
+            [0, 1, 1, 1, 1, 1, 1, 0],
+            [0, 1, 1, 1, 1, 1, 1, 0],
+            [0, 1, 1, 1, 1, 1, 1, 0],
+            [0, 1, 1, 1, 1, 1, 1, 0],
+            [0, 1, 1, 1, 1, 1, 1, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+        ]
+    )
+    square8x8_edge = np.array(
+        [
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 1, 1, 1, 1, 1, 1, 0],
+            [0, 1, 0, 0, 0, 0, 1, 0],
+            [0, 1, 0, 0, 0, 0, 1, 0],
+            [0, 1, 0, 0, 0, 0, 1, 0],
+            [0, 1, 0, 0, 0, 0, 1, 0],
+            [0, 1, 1, 1, 1, 1, 1, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+        ]
+    )
+    reactangle8x8 = np.array(
+        [
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 1, 1, 1, 0, 0],
+            [0, 0, 0, 1, 1, 1, 0, 0],
+            [0, 0, 0, 1, 1, 1, 0, 0],
+            [0, 0, 0, 1, 1, 1, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+        ]
+    )
+    reactangle8x8_edge = np.array(
+        [
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 1, 1, 1, 0, 0],
+            [0, 0, 0, 1, 0, 1, 0, 0],
+            [0, 0, 0, 1, 0, 1, 0, 0],
+            [0, 0, 0, 1, 1, 1, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+        ]
+    )
+    diamond8x8 = np.array(
+        [
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 1, 1, 0, 0, 0],
+            [0, 0, 1, 1, 1, 1, 0, 0],
+            [0, 1, 1, 1, 1, 1, 1, 0],
+            [0, 1, 1, 1, 1, 1, 1, 0],
+            [0, 0, 1, 1, 1, 1, 0, 0],
+            [0, 0, 0, 1, 1, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+        ]
+    )
+    diamond8x8_edge = np.array(
+        [
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 1, 1, 0, 0, 0],
+            [0, 0, 1, 1, 1, 1, 0, 0],
+            [0, 1, 1, 0, 0, 1, 1, 0],
+            [0, 1, 1, 0, 0, 1, 1, 0],
+            [0, 0, 1, 1, 1, 1, 0, 0],
+            [0, 0, 0, 1, 1, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+        ]
+    )
+
+    def __init__(self, batch_size, shuffle=True):
+        base_images = np.array(
+            [self.circle8x8, self.square8x8, self.reactangle8x8, self.diamond8x8]
+        )
+        base_images = 2 * base_images - 1
+        base_edge_images = np.array(
+            [
+                self.circle8x8_edge,
+                self.square8x8_edge,
+                self.reactangle8x8_edge,
+                self.diamond8x8_edge,
+            ]
+        )
+        base_edge_images = 2 * base_edge_images - 1
+
+        n_images = len(base_images)
+        # Sample batch_size number of images from the base images
+        images = np.array([base_images[i % n_images] for i in range(batch_size)])
+        edge_images = np.array(
+            [base_edge_images[i % n_images] for i in range(batch_size)]
+        )
+        super().__init__(images, batch_size, shuffle)
+        self.load_edge_detected_data(edge_images)
+
+
 if __name__ == "__main__":
-    train_loader = TrainDataLoader(32)
-    test_loader = TestDataLoader(32)
+    train_loader = SimpleShapeDataloader(32)
+    test_loader = SimpleShapeDataloader(32)
 
     print(len(train_loader))
     print(len(test_loader))
     print(train_loader.image_shape())
     print(test_loader.image_shape())
-
-    next(iter(train_loader))
-
-    for x, args_seed, noise_seed, y in train_loader:
-        print(x.shape, y.shape)
-        break
-    for x, args_seed, noise_seed, y in test_loader:
-        print(x.shape, y.shape)
-        break

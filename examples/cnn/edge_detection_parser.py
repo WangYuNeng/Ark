@@ -19,8 +19,9 @@ parser.add_argument(
 )
 parser.add_argument(
     "--mismatched_edge",
-    action="store_true",
-    help="Use 1 percent random mismatched edge for the CNN",
+    type=float,
+    default=0.0,
+    help="Use random mismatched edge with specified rstd for the CNN",
 )
 parser.add_argument(
     "--activation",
@@ -69,5 +70,11 @@ parser.add_argument(
 )
 parser.add_argument("--num_plot", type=int, default=4, help="Number of samples to plot")
 parser.add_argument("--wandb", action="store_true", help="Log to wandb")
-
+parser.add_argument(
+    "--dataset",
+    type=str,
+    default="simple",
+    choices=["simple", "mnist"],
+    help="Dataset to use",
+)
 args = parser.parse_args()

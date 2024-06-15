@@ -1,5 +1,9 @@
 if True:  # Temporarily solution to avoid the libomp.dylib error
-    from edge_detection_dataloader import TestDataLoader, TrainDataLoader
+    from edge_detection_dataloader import (
+        MNISTTestDataLoader,
+        MNISTTrainDataLoader,
+        SimpleShapeDataloader,
+    )
 
 from functools import partial
 from typing import Callable, Generator
@@ -59,8 +63,17 @@ ED_IMG_PATH = args.ed_img_path
 DW_SAMPLE = args.downsample
 
 BZ = args.bz
-train_dl = TrainDataLoader(BZ, downsample=DW_SAMPLE)
-test_dl = TestDataLoader(BZ, downsample=DW_SAMPLE)
+DATASET = args.dataset
+
+if DATASET == "mnist":
+    train_dl = MNISTTrainDataLoader(BZ)
+    test_dl = MNISTTestDataLoader(BZ, downsample=DW_SAMPLE)
+    plot_dl = MNISTTestDataLoader(NUM_PLOT, downsample=DW_SAMPLE)
+
+elif DATASET == "simple":
+    train_dl = SimpleShapeDataloader(BZ)
+    test_dl = SimpleShapeDataloader(BZ)
+    plot_dl = SimpleShapeDataloader(NUM_PLOT)
 N_ROW, N_COL = train_dl.image_shape()
 
 END_TIME = args.end_time
@@ -76,6 +89,7 @@ time_info = TimeInfo(
     dt0=END_TIME / N_TIME_POINTS,
     saveat=saveat,
 )
+
 
 USE_WANDB = args.wandb
 if USE_WANDB:
@@ -100,23 +114,23 @@ def create_cnn(
     """
 
     graph = CDG()
-    # Create nodes
-    if v_nt == IdealV:
-        vs = [
-            [v_nt(z=mgr.new_analog(bias)) for _ in range(ncols)] for _ in range(nrows)
-        ]
-    elif v_nt == Vm:
-        vs = [
-            [v_nt(z=mgr.new_analog(bias), mm=1.0) for _ in range(ncols)]
-            for _ in range(nrows)
-        ]
-    inps = [[Inp() for _ in range(ncols)] for _ in range(nrows)]
-    outs = [[Out(act=saturation_fn) for _ in range(ncols)] for _ in range(nrows)]
-
     # Create shared trainable attributes
     if weight_sharing:
         A_mat_var = [[mgr.new_analog(val) for val in row] for row in A_mat]
         B_mat_var = [[mgr.new_analog(val) for val in row] for row in B_mat]
+        bias_var = mgr.new_analog(bias)
+
+    # Create nodes
+    if v_nt == IdealV:
+        if not weight_sharing:
+            bias_var = mgr.new_analog(bias)
+        vs = [[v_nt(z=bias_var) for _ in range(ncols)] for _ in range(nrows)]
+    elif v_nt == Vm:
+        if not weight_sharing:
+            bias_var = mgr.new_analog(bias)
+        vs = [[v_nt(z=bias_var, mm=1.0) for _ in range(ncols)] for _ in range(nrows)]
+    inps = [[Inp() for _ in range(ncols)] for _ in range(nrows)]
+    outs = [[Out(act=saturation_fn) for _ in range(ncols)] for _ in range(nrows)]
 
     # Create edges
     # All v nodes connect from self, and connect to output
@@ -209,10 +223,12 @@ def plot_evolution(
         for j, time in enumerate(plot_time):
             y_readout_t = y_readout[time].reshape(N_ROW, N_COL)
             ax[i, j].axis("off")
-            ax[i, j].imshow(y_readout_t, cmap="gray", vmin=-1, vmax=1)
+            ax[i, j].imshow(y_readout_t, cmap="gray_r", vmin=-1, vmax=1)
 
         ax[i, -1].axis("off")
-        ax[i, -1].imshow(y_true[i].reshape(N_ROW, N_COL), cmap="gray", vmin=-1, vmax=1)
+        ax[i, -1].imshow(
+            y_true[i].reshape(N_ROW, N_COL), cmap="gray_r", vmin=-1, vmax=1
+        )
         di = [d[i : i + 1] for d in data]
         losses.append(loss_fn(model, *di))
     loss = jnp.mean(jnp.array(losses))
@@ -343,8 +359,9 @@ if __name__ == "__main__":
     else:
         v_nt = IdealV
 
-    if MM_EDGE:
+    if MM_EDGE != 0:
         flow_et = fEm_1p
+        flow_et.attr_def["g"].rstd = MM_EDGE
     else:
         flow_et = FlowE
 
@@ -372,8 +389,6 @@ if __name__ == "__main__":
     )
     train_dl.set_cnn_info(inps, graph, cnn_ckt_class)
     test_dl.set_cnn_info(inps, graph, cnn_ckt_class)
-
-    plot_dl = TestDataLoader(NUM_PLOT, downsample=DW_SAMPLE)
     plot_dl.set_cnn_info(inps, graph, cnn_ckt_class)
 
     loss_fn = partial(mse_loss, activation=activation_fn)
@@ -384,23 +399,25 @@ if __name__ == "__main__":
         init_trainable=trainable_init, is_stochastic=False, solver=Heun()
     )
 
-    if STORE_EDGE_DETECTION:
-        # Iterate over the training and testing data to generate edge detected
-        # images with the current cnn templates
-        train_dl.shuffle = False
-        test_dl.shuffle = False
-        train_imgs = iterate_all_data(model, train_dl, activation_fn)
-        test_imgs = iterate_all_data(model, test_dl, activation_fn)
-        np.savez(ED_IMG_PATH, train=train_imgs, test=test_imgs)
-        train_dl.shuffle = True
-        test_dl.shuffle = True
+    if DATASET == "mnist":
+        if STORE_EDGE_DETECTION:
+            # Iterate over the training and testing data to generate edge detected
+            # images with the current cnn templates
+            train_dl.shuffle = False
+            test_dl.shuffle = False
+            train_imgs = iterate_all_data(model, train_dl, activation_fn)
+            test_imgs = iterate_all_data(model, test_dl, activation_fn)
+            np.savez(ED_IMG_PATH, train=train_imgs, test=test_imgs)
+            train_dl.shuffle = True
+            test_dl.shuffle = True
+            exit()
 
-    ed_imgs = np.load(ED_IMG_PATH)
-    train_idl_imgs = ed_imgs["train"]
-    test_idl_imgs = ed_imgs["test"]
-    train_dl.load_edge_detected_data(train_idl_imgs)
-    test_dl.load_edge_detected_data(test_idl_imgs)
-    plot_dl.load_edge_detected_data(test_idl_imgs)
+        ed_imgs = np.load(ED_IMG_PATH)
+        train_idl_imgs = ed_imgs["train"]
+        test_idl_imgs = ed_imgs["test"]
+        train_dl.load_edge_detected_data(train_idl_imgs)
+        test_dl.load_edge_detected_data(test_idl_imgs)
+        plot_dl.load_edge_detected_data(test_idl_imgs)
 
     plot_data = next(iter(plot_dl))
 
@@ -415,4 +432,16 @@ if __name__ == "__main__":
     )
 
     loss_best, best_weight = train(model, activation_fn, mse_loss, train_dl, test_dl)
+
+    print(f"Best loss: {loss_best}")
+    print(f"Best weight: {best_weight}")
+    load_model_and_plot(
+        model_cls=cnn_ckt_class,
+        activation=activation_fn,
+        best_weight=best_weight,
+        is_stochastic=False,
+        loss_fn=loss_fn,
+        data=plot_data,
+        title="After training",
+    )
     wandb.finish()

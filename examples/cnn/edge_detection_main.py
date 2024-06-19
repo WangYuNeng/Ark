@@ -65,15 +65,17 @@ DW_SAMPLE = args.downsample
 BZ = args.bz
 DATASET = args.dataset
 
+LONG_COMPILE_DEMO = args.long_compile_demo
+
 if DATASET == "mnist":
-    train_dl = MNISTTrainDataLoader(BZ)
+    train_dl = MNISTTrainDataLoader(BZ, downsample=DW_SAMPLE)
     test_dl = MNISTTestDataLoader(BZ, downsample=DW_SAMPLE)
     plot_dl = MNISTTestDataLoader(NUM_PLOT, downsample=DW_SAMPLE)
 
 elif DATASET == "simple":
     train_dl = SimpleShapeDataloader(BZ)
     test_dl = SimpleShapeDataloader(BZ)
-    plot_dl = SimpleShapeDataloader(NUM_PLOT)
+    plot_dl = SimpleShapeDataloader(NUM_PLOT, shuffle=False)
 N_ROW, N_COL = train_dl.image_shape()
 
 END_TIME = args.end_time
@@ -330,6 +332,7 @@ def train(
     return loss_best, best_weight
 
 
+@eqx.filter_jit
 def iterate_all_data(model, data_loader, activation_fn):
 
     imgs = []
@@ -394,10 +397,23 @@ if __name__ == "__main__":
     loss_fn = partial(mse_loss, activation=activation_fn)
 
     trainable_init = (mgr.get_initial_vals("analog"), mgr.get_initial_vals("digital"))
+    print(f"Trainable init: {trainable_init}")
 
     model: BaseAnalogCkt = cnn_ckt_class(
         init_trainable=trainable_init, is_stochastic=False, solver=Heun()
     )
+
+    if LONG_COMPILE_DEMO:
+        assert DATASET == "mnist"
+        # Just use the input for output image so that we
+        # don't need to recollect the ideal edge detected images
+        train_dl.load_edge_detected_data(train_dl.images)
+        opt_state = optim.init(eqx.filter(model, eqx.is_array))
+        for step in range(10):
+            for data in tqdm(train_dl, desc="training"):
+                model, opt_state, train_loss = make_step(
+                    model, activation_fn, opt_state, mse_loss, data
+                )
 
     if DATASET == "mnist":
         if STORE_EDGE_DETECTION:

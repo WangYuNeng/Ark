@@ -8,7 +8,15 @@ from typing import Generator
 import jax.numpy as jnp
 import numpy as np
 from jax import Array
-from torchvision import datasets
+
+
+try:
+    from torchvision import datasets
+except ImportError:
+    print(
+        "Please install torchvision to run this example to download the MNIST dataset."
+    )
+    raise ImportError
 
 from ark.cdg.cdg import CDG, CDGNode
 

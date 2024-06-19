@@ -77,4 +77,9 @@ parser.add_argument(
     choices=["simple", "mnist"],
     help="Dataset to use",
 )
+parser.add_argument(
+    "--long_compile_demo",
+    action="store_true",
+    help="A special setup to demonstrate the long compile time when trying to train on 28x28 images",
+)
 args = parser.parse_args()

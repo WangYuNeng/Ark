@@ -16,6 +16,8 @@ from ark.specification.production_rule import ProdRule
 from ark.specification.range import Range
 from ark.specification.rule_keyword import DST, EDGE, SRC, TIME, VAR
 from ark.specification.specification import CDGSpec
+from ark.specification.attribute_type import AnalogAttr, FunctionAttr
+from math import inf
 
 # Capacitors
 Cap = NodeType(
@@ -24,7 +26,7 @@ Cap = NodeType(
         "order": 1,
         "reduction": SUM,
         "attr_def": {
-            "c": AttrDef(attr_type=float, attr_range=Range(min=0)),
+            "c": AttrDef(attr_type=AnalogAttr((0, inf))),
         },
     },
 )
@@ -34,8 +36,8 @@ InpV = NodeType(
     attrs={
         "order": 0,
         "attr_def": {
-            "fn": AttrDef(attr_type=FunctionType, nargs=1),
-            "r": AttrDef(attr_type=float, attr_range=Range(min=0)),
+            "fn": AttrDef(attr_type=FunctionAttr(nargs=1)),
+            "r": AttrDef(attr_type=AnalogAttr((0, inf))),
         },
     },
 )
@@ -45,10 +47,10 @@ SwE = EdgeType(
     name="SwE",
     attrs={
         "attr_def": {
-            "ctrl": AttrDef(attr_type=FunctionType, nargs=1),
-            "offset": AttrDef(attr_type=float, attr_range=Range(min=0)),
-            "period": AttrDef(attr_type=float, attr_range=Range(min=0)),
-            "duty_cycle": AttrDef(attr_type=float, attr_range=Range(min=0, max=1)),
+            "ctrl": AttrDef(attr_type=FunctionAttr(nargs=4)),
+            "offset": AttrDef(attr_type=AnalogAttr((0, inf))),
+            "period": AttrDef(attr_type=AnalogAttr((0, inf))),
+            "duty_cycle": AttrDef(attr_type=AnalogAttr((0, 1))),
         },
     },
 )

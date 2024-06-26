@@ -21,6 +21,8 @@ from ark.specification.range import Range
 from ark.specification.rule_keyword import DST, EDGE, SRC, VAR
 from ark.specification.specification import CDGSpec
 from ark.specification.validation_rule import ValPattern, ValRule
+from ark.specification.attribute_type import AnalogAttr
+from math import inf
 
 Cpd = NodeType(name="Cpd", attrs={"order": 1})
 Rct = NodeType(
@@ -28,15 +30,15 @@ Rct = NodeType(
     attrs={
         "order": 0,
         "reduction": PRODUCT,
-        "attr_def": {"k": AttrDef(attr_type=float, attr_range=Range(min=0.0, max=1.0))},
+        "attr_def": {"k": AttrDef(attr_type=AnalogAttr((0, 1)))},
     },
 )
 Rct_et = EdgeType(
     name="Rct_et",
     attrs={
         "attr_def": {
-            "nc": AttrDef(attr_type=int),
-            "coeff": AttrDef(attr_type=int, attr_range=Range(min=1)),
+            "nc": AttrDef(attr_type=AnalogAttr((-inf, inf))),
+            "coeff": AttrDef(attr_type=AnalogAttr((1, 1))),
         }
     },
 )

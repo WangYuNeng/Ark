@@ -11,6 +11,7 @@ from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule
 from ark.specification.rule_keyword import DST, EDGE, SRC, VAR
 from ark.specification.specification import CDGSpec
+from ark.specification.attribute_type import AnalogAttr
 
 # Specification of coupled oscillator
 co_spec = CDGSpec("co")
@@ -21,13 +22,13 @@ co_spec = CDGSpec("co")
 # The mass attribute models the mass of the oscillator
 Osc = NodeType(
     name="Osc",
-    attrs={"order": 2, "attr_def": {"mass": AttrDef(attr_type=float)}},
+    attrs={"order": 2, "attr_def": {"mass": AttrDef(attr_type=AnalogAttr((0, 10)))}},
 )
 
 # Coupling springs
 # k: coupling strength
 Coupling = EdgeType(
-    name="Coupling", attrs={"attr_def": {"k": AttrDef(attr_type=float)}}
+    name="Coupling", attrs={"attr_def": {"k": AttrDef(attr_type=AnalogAttr((0, 10)))}}
 )
 
 cdg_types = [Osc, Coupling]

@@ -20,8 +20,8 @@ apt-get install libngspice0
 conda install -c conda-forge pyspice
 ```
 
-## Run in a container
-
+## Run in a container 
+Note: This is not tested in the current version. If you want to run this please refer to [this commit](https://github.com/WangYuNeng/Ark/tree/baa94b989f4e6064d122d99ac72961905faeadc8)
 ```
 ./build_image.sh
 ./run_image.sh

@@ -1,11 +1,11 @@
 """Wrapper class for the ARK framework"""
+
 import warnings
 from types import FunctionType
 from typing import Optional
 
 from ark.cdg.cdg import CDG, AttrImpl, CDGEdge, CDGExecutionData, CDGNode
 from ark.compiler import ArkCompiler
-from ark.rewrite import RewriteGen
 from ark.solver import SMTSolver
 from ark.specification.specification import CDGSpec
 from ark.validator import FAILED_CHECK, NOT_ACC, REJ, VALID, ArkValidator
@@ -23,7 +23,7 @@ class Ark:
     def __init__(
         self,
         validator: Optional[ArkValidator] = ArkValidator(solver=SMTSolver()),
-        compiler: Optional[ArkCompiler] = ArkCompiler(rewrite=RewriteGen()),
+        compiler: Optional[ArkCompiler] = ArkCompiler(),
         cdg_spec: Optional[CDGSpec] = None,
     ) -> None:
         """Initialize the ARK framework

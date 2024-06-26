@@ -2,15 +2,15 @@
 Attribute class for CDGType.
 """
 
-from functools import partial
-from types import FunctionType
-from typing import NewType, Optional, Union
+from typing import Callable, NewType, Optional, Union
 
 import numpy as np
 
-from ark.specification.range import Range
+from ark.specification.attribute_type import AttrType, FunctionAttr, Trainable
 
-AttrImpl = NewType("AttrImpl", Union[int, float, FunctionType])  # why pylint error?
+AttrImpl = NewType(
+    "AttrImpl", Union[int, float, Callable, Trainable]
+)  # why pylint error?
 
 
 class AttrDef:
@@ -18,46 +18,15 @@ class AttrDef:
 
     def __init__(
         self,
-        attr_type: type,
-        attr_range: Optional[Range] = None,
-        nargs: Optional[int] = None,
+        attr_type: AttrType,
     ):
-        self.type = attr_type
-        self.valid_range = attr_range
-        self.nargs = nargs
-        if self.type == FunctionType:
-            assert nargs is not None
+        self.attr_type = attr_type
 
-    def __repr__(self) -> str:
-        return f"AttrDef(name={self.name}, type={self.type}, \
-            valid_range={self.valid_range})"
-
-    def attr_str(self, val: AttrImpl) -> str:
-        """Get an AST expression for this attribute."""
-        if self.type == int or self.type == float:
-            val_str = str(val)
-        elif self.type == FunctionType:
-            val_str = val.__name__
-        else:
-            raise NotImplementedError(
-                f"AST expression for type {self.type} not implemented"
-            )
-        return val_str
-
-    def check(self, val: AttrImpl) -> bool:
+    def check(self, val) -> bool:
         """Check if val is in the valid range of this attribute."""
 
         # Special case: partial function is also consdiered as a function type.
-        if self.type == FunctionType:
-            if not isinstance(val, FunctionType) and not isinstance(val, partial):
-                raise TypeError(f"Expected type {self.type}, got {type(val)}")
-        elif not isinstance(val, self.type):
-            raise TypeError(f"Expected type {self.type}, got {type(val)}")
-        if self.valid_range is None:
-            return True
-        if not self.valid_range.check_in_range(val):
-            raise ValueError(f"Expected value in range {self.valid_range}, got {val}")
-        return True
+        return self.attr_type.check_valid(val)
 
     @property
     def default(self) -> AttrImpl:
@@ -70,43 +39,23 @@ class AttrDef:
             AttrImpl: The default value of this attribute.
         """
 
-        def empty_func(*args):
-            raise RuntimeError("Default function not implemented")
-
-        if self.type == FunctionType:
-            return empty_func
-        if self.valid_range is None:
-            return self.type(0)
-        if self.valid_range.is_exact():
-            return self.valid_range.exact
-        if self.valid_range.is_lower_bound() or self.valid_range.is_interval_bound():
-            return self.valid_range.min
-        if self.valid_range.is_upper_bound():
-            return self.valid_range.max
-
-    @property
-    def mean(self) -> float:
-        """Return the mean of the valid range of this attribute."""
-        if self.valid_range is None:
-            raise ValueError("Cannot get mean of an attribute without valid range")
-        return self.valid_range.mean()
-
-    @property
-    def full_scale(self) -> float:
-        """Return the full scale of the valid range of this attribute."""
-        if self.valid_range is None:
-            raise ValueError(
-                "Cannot get full scale of an attribute without valid range"
-            )
-        return self.valid_range.full_scale()
+        return self.attr_type.default
 
 
 class AttrDefMismatch(AttrDef):
     """Attribute definition for a CDGType where the value is sampled
     from a normal distribution to model the random mismatch in hardware.
 
+    if rstd is given, the value is sampled from a normal distribution with
+    mean as the nominal value and standard deviation as the relative standard
+    deviation times the nominal value.
+
+    if std is given, the value is sampled from a normal distribution with
+    mean as the nominal value and standard deviation as the given std.
+
     Args:
         rstd: relative standard deviation of the random value
+        std: standard deviation of the random value
 
     The check() method only check whether the nominal value is in range
     and does not check the random value.
@@ -114,29 +63,19 @@ class AttrDefMismatch(AttrDef):
 
     def __init__(
         self,
-        attr_type: type,
+        attr_type: AttrType,
         rstd: Optional[float] = None,
         std: Optional[float] = None,
-        attr_range: Optional[Range] = None,
     ):
+        if (rstd or std) and isinstance(attr_type, FunctionAttr):
+            raise ValueError("Function attribute don't have mismatch")
         if rstd and std:
             raise ValueError("Cannot specify both rstd and std")
         if not rstd and not std:
             raise ValueError("Must specify either rstd or std")
         self.rstd = rstd
         self.std = std
-        super().__init__(attr_type, attr_range)
-
-    def attr_str(self, val: AttrImpl) -> str:
-        if not self.type == float:
-            raise NotImplementedError(
-                f"AST expression for a mismatched attribute \
-                                      should be float, not {self.type}"
-            )
-        if self.rstd:
-            return f"np.random.normal({val}, np.abs({val} * {self.rstd}))"
-        else:
-            return f"np.random.normal({val}, {self.std})"
+        super().__init__(attr_type)
 
     def sample(self, mean: float) -> float:
         """Sample a random value from the normal distribution.

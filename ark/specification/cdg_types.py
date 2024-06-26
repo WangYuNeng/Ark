@@ -68,6 +68,8 @@ class CDGType(type):
             # Somehow this calls the CDGNode/CDGEdge __init__ method as specified in
             # the bases respectively and I forgot why I know this works.
             return super().__call__(cdg_type=cls, name=element_name, **attrs)
+        else:
+            raise AttributeError(f"Invalid attributes {attrs} for {cls.name}")
 
     def check_attr(cls, **attrs: Mapping[str, AttrImpl]) -> bool:
         """Check whether the given attributes are valid for this CDGType.

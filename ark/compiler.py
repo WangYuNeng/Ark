@@ -5,7 +5,7 @@ import copy
 import inspect
 from functools import partial
 from itertools import product
-from types import FunctionType
+from typing import Callable
 
 import jax.numpy as jnp
 import numpy as np
@@ -67,11 +67,11 @@ def mk_list_assign(targets: list[ast.Name], value: ast.expr) -> ast.Assign:
     )
 
 
-def parse_expr(val: "int | float | FunctionType | str") -> ast.expr:
+def parse_expr(val: "int | float | Callable | str") -> ast.expr:
     """parse value to expression"""
     if isinstance(val, int) or isinstance(val, float):
         val_str = str(val)
-    elif isinstance(val, FunctionType):
+    elif isinstance(val, Callable):
         val_str = val.__name__
     elif isinstance(val, str):
         val_str = val
@@ -110,13 +110,22 @@ def concat_expr(
 
 
 def apply_gen_rule(
-    rule: ProdRule, transformer: BaseRewriteGen, to_sympy: bool = False
+    rule: ProdRule,
+    transformer: BaseRewriteGen,
+    to_sympy: bool = False,
+    from_noise: bool = False,
 ) -> ast.expr | sympy.Expr:
     """Return the rewritten ast from the given rule"""
-    if not to_sympy:
-        gen_expr = copy.deepcopy(rule.fn_ast)
+    if not from_noise:
+        if not to_sympy:
+            gen_expr = copy.deepcopy(rule.fn_ast)
+        else:
+            gen_expr = rule.fn_sympy
     else:
-        gen_expr = rule.fn_sympy
+        if not to_sympy:
+            assert False, "Noise term is not implemented in ast"
+        else:
+            gen_expr = rule.noise_sympy
     rr_expr = transformer.visit(gen_expr)
     return rr_expr
 
@@ -190,6 +199,7 @@ class ArkCompiler:
     SIM_SEED = "sim_seed"
     SIM_RAND_EXPT = parse_expr(f"np.random.rand({SIM_SEED})")
     ODE_FN_NAME, ODE_INPUT_VAR = "__ode_fn", "__variables"
+    NOISE_FN_NAME = "__noise_fn"
     INIT_STATE, TIME_RANGE = "init_states", "time_range"
     SWITCH_VAL = "switch_vals"
     ATTR_VAL = "attr_vals"
@@ -260,7 +270,7 @@ class ArkCompiler:
             1 -- print the compilation progress.
 
         Returns:
-            prog (FunctionType): The compiled function.
+            prog (Callable): The compiled function.
             node_mapping (dict[str, int]): map the name of CDGNode to the corresponding
             index in the state variables. The node_mapping[name] points to the index
             of the 0th order term and the n-th order deravitves (if applicable) index
@@ -307,13 +317,19 @@ class ArkCompiler:
             attr_mapping,
         )
 
-    def compile_odeterm(self, cdg: CDG, cdg_spec: CDGSpec, verbose: int = 0):
+    def compile_odeterm(self, cdg: CDG, cdg_spec: CDGSpec, verbose: int = 0) -> tuple[
+        tuple[Callable, Callable],
+        dict[str, int],
+        dict[str, int],
+        dict[str, dict[str, int]],
+        dict[str, dict[str, int]],
+    ]:
         """Compile the cdg to an executable function representing the derivative term.
 
         The function will in the form of `__ode_fn(time, __variables, args, fargs)`
         where `args` is the list of arguments mapped to
         the float/int attribute values and switch values, and `fargs` is the list of
-        function arguments mapped to the FunctionType attribute values.
+        function arguments mapped to the Callable attribute values.
 
         The separation of the two arguments is for compatibility to Diffrax
         1. The function arguments can't be jitted. Need to be treat as static value
@@ -327,16 +343,18 @@ class ArkCompiler:
             1 -- print the compilation progress.
 
         Returns:
-            prog (FunctionType): The compiled function.
+            ode_term and noise_term ((Callable, Callable)): The compiled function.
             node_mapping (dict[str, int]): map the name of CDGNode to the corresponding
             index in the state variables. The node_mapping[name] points to the index
             of the 0th order term and the n-th order deravitves (if applicable) index
             is node_mapping[name] + n.
             switch_mapping (dict[str, int]): map the name of CDGEdge to the corresponding
             index in the switch variables.
-            attr_mapping (dict[str, dict[str, int]]): map the name of CDGElement to the
-            corresponding index in the attribute variables. The attr_mapping[name][attr]
-            points to the index of the attribute.
+            num_attr_mapping (dict[str, dict[str, int]]): map the name of CDGElement to the
+            corresponding index in the numerical attribute variables.
+            The num_attr_mapping[name][attr] points to the index of the attribute.
+            fn_attr_mapping (dict[str, dict[str, int]]): map the name of CDGElement to the
+            corresponding index in the function attribute variables.
         """
 
         self._verbose = verbose
@@ -403,31 +421,39 @@ class ArkCompiler:
         _, ode_stmts = self._compile_ode_fn(
             cdg, cdg_spec, ode_fn_io_names, return_jax=True
         )
-        stmts.extend(ode_stmts)
-        arguments = ast.arguments(
-            posonlyargs=[],
-            args=[
-                mk_arg(kw_name(TIME)),
-                mk_arg(self.ODE_INPUT_VAR),
-                mk_arg(self.ARGS),
-                mk_arg(self.FN_ARGS),
-            ],
-            kwonlyargs=[],
-            kw_defaults=[],
-            defaults=[],
+        _, noise_ode_stmts = self._compile_ode_fn(
+            cdg, cdg_spec, ode_fn_io_names, return_jax=True, noise_ode=True
         )
-        func_def = ast.FunctionDef(
-            name=self.ODE_FN_NAME, args=arguments, body=stmts, decorator_list=[]
-        )
-        module = ast.Module([func_def], type_ignores=[])
-        module = ast.fix_missing_locations(module)
-        self._ode_term_ast = module
+        for fn_name, ode_stmt in zip(
+            [self.ODE_FN_NAME, self.NOISE_FN_NAME], [ode_stmts, noise_ode_stmts]
+        ):
+            fn_stmts = [stmt for stmt in stmts]
 
-        code = compile(source=module, filename=self.tmp_file_name, mode="exec")
-        exec(code, self._namespace)
+            fn_stmts.extend(ode_stmt)
+            arguments = ast.arguments(
+                posonlyargs=[],
+                args=[
+                    mk_arg(kw_name(TIME)),
+                    mk_arg(self.ODE_INPUT_VAR),
+                    mk_arg(self.ARGS),
+                    mk_arg(self.FN_ARGS),
+                ],
+                kwonlyargs=[],
+                kw_defaults=[],
+                defaults=[],
+            )
+            func_def = ast.FunctionDef(
+                name=fn_name, args=arguments, body=fn_stmts, decorator_list=[]
+            )
+            module = ast.Module([func_def], type_ignores=[])
+            module = ast.fix_missing_locations(module)
+            self._ode_term_ast = module
+
+            code = compile(source=module, filename=self.tmp_file_name, mode="exec")
+            exec(code, self._namespace)
 
         return (
-            self._namespace[self.ODE_FN_NAME],
+            (self._namespace[self.ODE_FN_NAME], self._namespace[self.NOISE_FN_NAME]),
             node_mapping,
             switch_mapping,
             num_attr_mapping,
@@ -435,7 +461,7 @@ class ArkCompiler:
         )
 
     def compile_sympy_diffeqs(
-        self, cdg: CDG, cdg_spec: CDGSpec
+        self, cdg: CDG, cdg_spec: CDGSpec, noise_ode: bool = False
     ) -> list[sympy.Equality]:
         """Compile the cdg to the ode function into a list of sympy equations
         describing the dynamical system.
@@ -443,6 +469,7 @@ class ArkCompiler:
         Args:
             cdg (CDG): The input CDG
             cdg_spec (CDGSpec): Specification
+            noise_ode (bool): whether the ode function is for noise term.
 
         Returns:
             equations (list[sympy.Expr]): list of sympy equations
@@ -472,13 +499,22 @@ class ArkCompiler:
             for node in nodes:
                 for sub_order in range(1, order):
                     vname = n_state(ddt(node.name, order=sub_order))
-                    cur_vname = ddt(node.name, order=sub_order)
-                    equations.append(
-                        sympy.codegen.Assignment(
-                            lhs=mk_var(vname, to_sympy=True),
-                            rhs=mk_var(cur_vname, to_sympy=True),
+                    if noise_ode:
+                        # For higher order noise terms, the derivative is 0
+                        equations.append(
+                            sympy.codegen.Assignment(
+                                lhs=mk_var(vname, to_sympy=True),
+                                rhs=sympy.Float(0),
+                            )
                         )
-                    )
+                    else:
+                        cur_vname = ddt(node.name, order=sub_order)
+                        equations.append(
+                            sympy.codegen.Assignment(
+                                lhs=mk_var(vname, to_sympy=True),
+                                rhs=mk_var(cur_vname, to_sympy=True),
+                            )
+                        )
                 vname = ddt(node.name, order=order)
                 if order != 0:
                     vname = n_state(vname)
@@ -496,7 +532,10 @@ class ArkCompiler:
                     if gen_rule is not None:
                         rewrite.mapping = gen_rule.get_rewrite_mapping(edge=edge)
                         rhs_expr = apply_gen_rule(
-                            rule=gen_rule, transformer=rewrite, to_sympy=True
+                            rule=gen_rule,
+                            transformer=rewrite,
+                            to_sympy=True,
+                            from_noise=noise_ode,
                         )
                         if edge.switchable:
                             rhs_expr = reduction.sympy_switch(
@@ -512,7 +551,7 @@ class ArkCompiler:
                     )
         return equations
 
-    def _compile_user_def_fn(self, funcs: list[FunctionType]) -> list[ast.FunctionDef]:
+    def _compile_user_def_fn(self, funcs: list[Callable]) -> list[ast.FunctionDef]:
         """Compile user defined functions to ast.FunctionDef"""
         return [ast.parse(inspect.getsource(fn)).body[0] for fn in funcs]
 
@@ -596,7 +635,7 @@ class ArkCompiler:
             attr_mapping[ele.name] = {}
             for attr_name, attr in ele.attrs.items():
                 if separate_fn_attr:
-                    if isinstance(attr, FunctionType) or isinstance(attr, partial):
+                    if isinstance(attr, Callable) or isinstance(attr, partial):
                         attr_mapping[ele.name][attr_name] = False
                     else:
                         attr_mapping[ele.name][attr_name] = True
@@ -612,7 +651,12 @@ class ArkCompiler:
         )
 
     def _compile_ode_fn(
-        self, cdg: CDG, cdg_spec: CDGSpec, io_names: list[str], return_jax: bool = False
+        self,
+        cdg: CDG,
+        cdg_spec: CDGSpec,
+        io_names: list[str],
+        return_jax: bool = False,
+        noise_ode: bool = False,
     ) -> tuple[ast.FunctionDef, list[ast.stmt]]:
         """Compile the cdg to the ode function for scipy.integrate.solve_ivp simulation
 
@@ -628,6 +672,7 @@ class ArkCompiler:
             cdg_spec (CDGSpec): Specification
             io_names (list[str]): names of the state variables `var1, var2, ...`
             return_jax (bool): whether the return value is a list or a jax array.
+            noise_ode (bool): whether the ode function is for noise term.
 
         """
 
@@ -644,7 +689,7 @@ class ArkCompiler:
         )
 
         # Generate the ddt_var = f(var) statements
-        equations = self.compile_sympy_diffeqs(cdg, cdg_spec)
+        equations = self.compile_sympy_diffeqs(cdg, cdg_spec, noise_ode)
 
         # Convert sympy equations to ast statements
         for eq in equations:

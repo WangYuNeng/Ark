@@ -9,6 +9,7 @@ from types import FunctionType
 import numpy as np
 
 from ark.specification.attribute_def import AttrDef, AttrDefMismatch
+from ark.specification.attribute_type import AnalogAttr, FunctionAttr
 from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule
 from ark.specification.range import Range
@@ -59,24 +60,23 @@ Osc = NodeType(
     attrs={
         "order": 1,
         "attr_def": {
-            "lock_fn": AttrDef(attr_type=FunctionType, nargs=1),
-            "osc_fn": AttrDef(attr_type=FunctionType, nargs=1),
+            "lock_fn": AttrDef(attr_type=FunctionAttr(nargs=1)),
+            "osc_fn": AttrDef(attr_type=FunctionAttr(nargs=1)),
         },
     },
 )
 
 # k: coupling strength
+cpl_range = (-10, 10)
 Coupling = EdgeType(
-    name="Coupling", attrs={"attr_def": {"k": AttrDef(attr_type=float)}}
+    name="Coupling", attrs={"attr_def": {"k": AttrDef(attr_type=AnalogAttr(cpl_range))}}
 )
 Coupling_offset = EdgeType(
     name="Coupling_offset",
     bases=Coupling,
     attrs={
         "attr_def": {
-            "offset": AttrDefMismatch(
-                attr_type=float, std=OFFSET_STD, attr_range=Range(exact=0)
-            )
+            "offset": AttrDefMismatch(attr_type=AnalogAttr((0, 0)), std=OFFSET_STD)
         }
     },
 )

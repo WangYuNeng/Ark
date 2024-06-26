@@ -3,7 +3,12 @@ from typing import Mapping, NewType, Optional
 import numpy as np
 
 from ark.reduction import Reduction
-from ark.specification.attribute_def import AttrDef, AttrDefMismatch, AttrImpl
+from ark.specification.attribute_def import (
+    AttrDef,
+    AttrDefMismatch,
+    AttrImpl,
+    Trainable,
+)
 from ark.specification.rule_keyword import DST, SELF, SRC, Target
 
 CDGExecutionData = NewType(
@@ -68,6 +73,8 @@ class CDGElement:
         Returns:
             AttrImpl: the concretized attribute value
         """
+        if isinstance(self.attrs[attr_name], Trainable):
+            raise RuntimeError(f"Trainable attribute {attr_name} is not concretized")
         if not isinstance(self.attr_def[attr_name], AttrDefMismatch):
             return self.attrs[attr_name]
         return self.attr_def[attr_name].sample(self.attrs[attr_name])
@@ -141,6 +148,7 @@ class CDGNode(CDGElement):
     reduction: Reduction
     _init_vals: list[float]
     _traces: list[np.ndarray]
+    order: int
 
     def __init__(self, cdg_type: "NodeType", name: str, **attrs) -> None:
         super().__init__(cdg_type, name, **attrs)
@@ -573,3 +581,8 @@ class CDG:
     def ds_order(self) -> int:
         """Order of the system of differential equations."""
         return len(self._order_to_nodes) - 1
+
+    @property
+    def elements(self) -> list[CDGElement]:
+        """Return all elements in the graph."""
+        return self.nodes + self.edges

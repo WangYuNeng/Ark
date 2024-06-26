@@ -77,3 +77,11 @@ class Range:
         if not self.is_interval_bound():
             raise ValueError("The range is not an interval.")
         return self.min, self.max
+
+    def __eq__(self, value: object) -> bool:
+        return (
+            isinstance(value, Range)
+            and self.min == value.min
+            and self.max == value.max
+            and self.exact == value.exact
+        )

@@ -15,5 +15,10 @@ setup(
         "palettable>=3.3.3",
         "pylatexenc>=2.10",
         "graphviz>=0.20.1",
+        "jax>=0.4.24",
+        "optax>=0.1.9",
+        "equinox>=0.11.3",
+        "jaxtyping>=0.2.25",
+        "diffrax>=0.5.0",
     ],
 )

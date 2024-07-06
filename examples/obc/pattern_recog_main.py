@@ -237,7 +237,7 @@ def plot_evolution(
             # Calculate the phase difference
             phase_diff = jnp.where(y_readout_t > 1, 2 - y_readout_t, y_readout_t)
             ax[i, j].axis("off")
-            ax[i, j].imshow(phase_diff, cmap="gray", vmin=0, vmax=1)
+            ax[i, j].imshow(phase_diff, cmap="gray_r", vmin=0, vmax=1)
 
         di = [d[i : i + 1] for d in data]
         losses.append(loss_fn(model, *di, gumbel_temp, hard_gumbel))

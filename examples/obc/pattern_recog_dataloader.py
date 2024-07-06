@@ -6,7 +6,7 @@ import numpy as np
 from ark.cdg.cdg import CDG, CDGNode
 
 # Create 5x3 arrays of the numbers 0-0
-NUMBERS = {
+NUMBERS_5x3 = {
     0: np.array([[1, 1, 1], [1, 0, 1], [1, 0, 1], [1, 0, 1], [1, 1, 1]]),
     1: np.array([[0, 1, 0], [1, 1, 0], [0, 1, 0], [0, 1, 0], [1, 1, 1]]),
     2: np.array([[1, 1, 1], [0, 0, 1], [1, 1, 1], [1, 0, 0], [1, 1, 1]]),
@@ -19,11 +19,88 @@ NUMBERS = {
     9: np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1], [0, 0, 1], [1, 1, 1]]),
 }
 
+NUMBERS_10x6 = {
+    0: np.array(
+        [
+            [0, 1, 1, 1, 1, 0],
+            [0, 1, 0, 0, 1, 0],
+            [1, 1, 0, 0, 1, 1],
+            [1, 1, 0, 0, 1, 1],
+            [1, 0, 0, 0, 0, 1],
+            [1, 0, 0, 0, 0, 1],
+            [1, 1, 0, 0, 1, 1],
+            [1, 1, 0, 0, 1, 1],
+            [0, 1, 0, 0, 1, 0],
+            [0, 1, 1, 1, 1, 0],
+        ]
+    ),
+    1: np.array(
+        [
+            [0, 0, 1, 1, 0, 0],
+            [0, 1, 1, 1, 0, 0],
+            [1, 1, 1, 1, 0, 0],
+            [0, 0, 1, 1, 0, 0],
+            [0, 0, 1, 1, 0, 0],
+            [0, 0, 1, 1, 0, 0],
+            [0, 0, 1, 1, 0, 0],
+            [0, 0, 1, 1, 0, 0],
+            [0, 0, 1, 1, 0, 0],
+            [1, 1, 1, 1, 1, 1],
+        ]
+    ),
+    2: np.array(
+        [
+            [0, 1, 1, 1, 1, 0],
+            [1, 1, 0, 0, 1, 1],
+            [0, 0, 0, 0, 1, 1],
+            [0, 0, 0, 0, 1, 1],
+            [0, 0, 0, 0, 1, 1],
+            [0, 0, 0, 1, 1, 0],
+            [0, 0, 1, 1, 0, 0],
+            [0, 1, 1, 0, 0, 0],
+            [1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1],
+        ]
+    ),
+    3: np.array(
+        [
+            [0, 1, 1, 1, 1, 0],
+            [1, 0, 0, 0, 1, 1],
+            [0, 0, 0, 0, 1, 1],
+            [0, 0, 0, 1, 1, 1],
+            [0, 0, 1, 1, 1, 0],
+            [0, 0, 1, 1, 1, 0],
+            [0, 0, 0, 1, 1, 1],
+            [0, 0, 0, 0, 1, 1],
+            [1, 0, 0, 0, 1, 1],
+            [0, 1, 1, 1, 1, 0],
+        ]
+    ),
+    4: np.array(
+        [
+            [0, 0, 0, 0, 1, 0],
+            [0, 0, 0, 1, 1, 0],
+            [0, 0, 1, 1, 1, 0],
+            [0, 1, 1, 0, 1, 0],
+            [1, 1, 0, 0, 1, 0],
+            [1, 0, 0, 0, 1, 0],
+            [1, 1, 1, 1, 1, 1],
+            [0, 0, 0, 0, 1, 0],
+            [0, 0, 0, 0, 1, 0],
+            [0, 0, 0, 0, 1, 0],
+        ]
+    ),
+}
+
+
 # Node pattern: relative to the first node
-NODE_PATTERNS = [None for _ in NUMBERS.keys()]
-for i, pattern in NUMBERS.items():
-    pattern_flat = pattern.flatten()
-    NODE_PATTERNS[i] = jnp.abs(jnp.array(pattern_flat[1:] - pattern_flat[0]))
+def get_node_pattern(pattern: np.ndarray):
+    p_flat = pattern.flatten()
+    return jnp.abs(jnp.array(p_flat[1:] - p_flat[0]))
+
+
+NODE_PATTERNS_5x3 = [get_node_pattern(pattern) for pattern in NUMBERS_5x3.values()]
+NODE_PATTERNS_10x6 = [get_node_pattern(pattern) for pattern in NUMBERS_10x6.values()]
 
 
 def dataloader(batch_size: int, n_node: int):
@@ -71,9 +148,17 @@ def dataloader2(
         # Generate the noisy numbers
         x, y = [], []
         n_row, n_col = len(osc_array), len(osc_array[0])
+
+        if (n_row, n_col) == NUMBERS_5x3[0].shape:
+            numbers = NUMBERS_5x3
+            pattern = NODE_PATTERNS_5x3
+        elif (n_row, n_col) == NUMBERS_10x6[0].shape:
+            numbers = NUMBERS_10x6
+            pattern = NODE_PATTERNS_10x6
         for number in sampled_numbers:
-            node_init = NUMBERS[number].copy().astype(np.float64)
-            ideal_pattern = NODE_PATTERNS[number]
+
+            node_init = numbers[number].copy().astype(np.float64)
+            ideal_pattern = pattern[number]
 
             # Add salt-and-pepper noise
             snp_mask = np.random.rand(*node_init.shape) < snp_prob

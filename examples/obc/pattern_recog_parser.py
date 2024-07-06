@@ -2,9 +2,16 @@ from argparse import ArgumentParser
 
 parser = ArgumentParser()
 
-# Example command: python pattern_recog_digit.py --gauss_std 0.1 --trans_noise_std 0.1
+# Example command: python pattern_recog_main.py --gauss_std 0.1 --trans_noise_std 0.1
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--task", type=str, default="one-to-one")
+parser.add_argument(
+    "--pattern_shape",
+    type=str,
+    default="5x3",
+    choices=["5x3", "10x6"],
+    help="Shape of the digit patterns, currently support 5x3 and 10x6",
+)
 parser.add_argument(
     "--n_cycle",
     type=int,

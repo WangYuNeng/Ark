@@ -10,7 +10,7 @@ import optax
 import wandb
 from diffrax import Heun
 from jaxtyping import PyTree
-from pattern_recog_dataloader import NUMBERS, dataloader, dataloader2
+from pattern_recog_dataloader import NUMBERS_5x3, NUMBERS_10x6, dataloader, dataloader2
 from pattern_recog_loss import (
     min_rand_reconstruction_loss,
     normalize_angular_diff,
@@ -36,7 +36,15 @@ from ark.specification.trainable import Trainable, TrainableMgr
 
 jax.config.update("jax_enable_x64", True)
 
-N_ROW, N_COL = 5, 3
+PATTERN_SHAPE = args.pattern_shape
+
+if PATTERN_SHAPE == "5x3":
+    N_ROW, N_COL = 5, 3
+    NUMBERS = NUMBERS_5x3
+elif PATTERN_SHAPE == "10x6":
+    N_ROW, N_COL = 10, 6
+    NUMBERS = NUMBERS_10x6
+
 N_NODE = N_ROW * N_COL
 N_EDGE = (N_ROW - 1) * N_COL + (N_COL - 1) * N_ROW
 

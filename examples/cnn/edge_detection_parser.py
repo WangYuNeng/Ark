@@ -2,7 +2,7 @@ from argparse import ArgumentParser
 
 parser = ArgumentParser()
 
-# Example command: python pattern_recog_digit.py --gauss_std 0.1 --trans_noise_std 0.1
+# Example command: python edge_detection_main.py --plot_evolve 5 --dataset random --mismatched_edge 0.1
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--task", type=str, default="one-to-one")
 parser.add_argument(
@@ -74,8 +74,14 @@ parser.add_argument(
     "--dataset",
     type=str,
     default="simple",
-    choices=["simple", "mnist"],
+    choices=["simple", "mnist", "random"],
     help="Dataset to use",
+)
+parser.add_argument(
+    "--rand_img_size",
+    type=int,
+    default=3,
+    help="Size of the random images to generate",
 )
 parser.add_argument(
     "--long_compile_demo",

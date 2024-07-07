@@ -2,6 +2,7 @@ if True:  # Temporarily solution to avoid the libomp.dylib error
     from edge_detection_dataloader import (
         MNISTTestDataLoader,
         MNISTTrainDataLoader,
+        RandomImgDataloader,
         SimpleShapeDataloader,
     )
 
@@ -76,6 +77,12 @@ elif DATASET == "simple":
     train_dl = SimpleShapeDataloader(BZ)
     test_dl = SimpleShapeDataloader(BZ)
     plot_dl = SimpleShapeDataloader(NUM_PLOT, shuffle=False)
+
+elif DATASET == "random":
+    img_size = (args.rand_img_size, args.rand_img_size)
+    train_dl = RandomImgDataloader(BZ, img_size)
+    test_dl = RandomImgDataloader(BZ, img_size)
+    plot_dl = RandomImgDataloader(NUM_PLOT, img_size, shuffle=False)
 N_ROW, N_COL = train_dl.image_shape()
 
 END_TIME = args.end_time
@@ -372,6 +379,41 @@ if __name__ == "__main__":
         activation_fn = saturation
     elif ACTIVATION == "diffpair":
         activation_fn = saturation_diffpair
+
+    if DATASET == "random":
+        # Create ideal CNN to generate data
+        # Using saturation activation function as the target
+        # (Although strictly speaking, the "ideal" activation function should
+        # not be the diffpair, but in practice diffpair is better)
+        vs, inps, outs, graph = create_cnn(
+            N_ROW, N_COL, IdealV, FlowE, A_mat, B_mat, bias, activation_fn
+        )
+        vs_flat = [v for row in vs for v in row]
+        ideal_cnn_class = OptCompiler().compile(
+            "ideal_cnn",
+            graph,
+            mm_cnn_spec,
+            trainable_mgr=mgr,
+            readout_nodes=vs_flat,
+            normalize_weight=False,
+            do_clipping=False,
+            aggregate_args_lines=True,
+        )
+        trainable_init = (
+            mgr.get_initial_vals("analog"),
+            mgr.get_initial_vals("digital"),
+        )
+
+        model: BaseAnalogCkt = ideal_cnn_class(
+            init_trainable=trainable_init, is_stochastic=False, solver=Heun()
+        )
+
+        for dl in [train_dl, test_dl, plot_dl]:
+            assert isinstance(dl, RandomImgDataloader)
+            dl.set_cnn_info(inps, graph, ideal_cnn_class)
+            dl.gen_edge_detected_img(model, time_info, activation_fn)
+
+        mgr.reset()
 
     vs, inps, outs, graph = create_cnn(
         N_ROW, N_COL, v_nt, flow_et, A_mat, B_mat, bias, activation_fn

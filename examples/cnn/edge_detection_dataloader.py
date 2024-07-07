@@ -3,12 +3,12 @@ Load the MNIST from torchvision and apply edge detection with CV2 to create
 (image, edges of image) data.
 """
 
-from typing import Generator
+from typing import Callable, Generator
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import Array
-
 
 try:
     from torchvision import datasets
@@ -19,6 +19,7 @@ except ImportError:
     raise ImportError
 
 from ark.cdg.cdg import CDG, CDGNode
+from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 
 
 class DataLoader:
@@ -321,6 +322,42 @@ class SimpleShapeDataloader(DataLoader):
         )
         super().__init__(images, batch_size, shuffle)
         self.load_edge_detected_data(edge_images)
+
+
+class RandomImgDataloader(DataLoader):
+
+    def __init__(self, batch_size, image_shape=(3, 3), shuffle=True):
+        images = np.random.rand(batch_size, *image_shape)
+        images = 2 * images - 1
+        super().__init__(images, batch_size, shuffle)
+
+    def gen_edge_detected_img(
+        self,
+        ideal_edge_detector: BaseAnalogCkt,
+        time_info: TimeInfo,
+        activation: Callable,
+    ):
+        """Simulate ideal edge detection with CNN on the images.
+
+        Before use this function, the cnn_info should be set with the ideal edge detector.
+        Afterward, should reset the info with the CNN for training.
+
+        Args:
+            ideal_edge_detector (BaseAnalogCkt): A CNN circuit with ideal components.
+            time_info (TimeInfo): Simulation timing information.
+            activation (Callable): activation function used in the CNN.
+        """
+        assert hasattr(self, "inp_nodes"), "Please set CNN info first."
+        y = []
+        for img in self.images:
+            for row_id, row in enumerate(img):
+                for col_id, val in enumerate(row):
+                    self.inp_nodes[row_id][col_id].set_init_val(val, n=0)
+            x = jnp.array(self.cnn_ckt_cls.cdg_to_initial_states(self.graph)).flatten()
+            y_raw = ideal_edge_detector(time_info, x, [], 0, 0)
+            y_end_readout = activation(y_raw[-1, :])
+            y.append(y_end_readout)
+        self.load_edge_detected_data(jnp.array(y))
 
 
 if __name__ == "__main__":

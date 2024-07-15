@@ -40,11 +40,17 @@ The results will be stored in `output` directory and also shwon in the terminal.
 Here's a very simple example to describe mechanical coupled oscillator governed by the Law of Motion with Ark
 
 ```python
+"""
+Coupled oscillator governed by the Law of Motion
+"""
+from ark.ark import Ark
+from ark.cdg.cdg import CDG
 from ark.specification.attribute_def import AttrDef
 from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule
 from ark.specification.rule_keyword import DST, EDGE, SRC, VAR
 from ark.specification.specification import CDGSpec
+from ark.specification.attribute_type import AnalogAttr
 
 # Specification of coupled oscillator
 co_spec = CDGSpec("co")
@@ -53,11 +59,16 @@ co_spec = CDGSpec("co")
 # Oscillator node: The state variable models the displacement of the oscillator
 # Order = 2 means the state variable controlled by its second derivative - acceleration
 # The mass attribute models the mass of the oscillator
-Osc = NodeType(name="Osc", order=2, attr_def=[AttrDef("mass", attr_type=float)])
+Osc = NodeType(
+    name="Osc",
+    attrs={"order": 2, "attr_def": {"mass": AttrDef(attr_type=AnalogAttr((0, 10)))}},
+)
 
 # Coupling springs
 # k: coupling strength
-Coupling = EdgeType(name="Coupling", attr_def=[AttrDef("k", attr_type=float)])
+Coupling = EdgeType(
+    name="Coupling", attrs={"attr_def": {"k": AttrDef(attr_type=AnalogAttr((0, 10)))}}
+)
 
 cdg_types = [Osc, Coupling]
 co_spec.add_cdg_types(cdg_types)
@@ -81,8 +92,6 @@ Ideally, hardware designers write down the **specification** (or the **language*
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ark.ark import Ark
-from ark.cdg.cdg import CDG
 # Manipulate the dynamical system with the CDG and execute it with Ark
 system = Ark(cdg_spec=co_spec)
 
@@ -95,6 +104,9 @@ graph.connect(cpl, node1, node2)
 
 # Compile the CDG to an executable dynamical system
 system.compile(cdg=graph)
+
+# Comment out this line if you want this to run in a python notebook
+system.dump_prog("../../output/mechanical_co-prog.py")
 
 # Specify the simulation time and initial values
 time_range = [0, 10]
@@ -114,7 +126,9 @@ for node in [node1, node2]:
 plt.xlabel("Time")
 plt.ylabel("Displacement")
 plt.legend()
-plt.show()
+
+# Comment out this line if you want this to run in a python notebook
+plt.savefig("../../output/mechanical_co-transient.pdf")
 ```
 
 The resulting figures show the oscillating behaviors.

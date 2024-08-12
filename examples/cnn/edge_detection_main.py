@@ -88,7 +88,8 @@ N_ROW, N_COL = train_dl.image_shape()
 END_TIME = args.end_time
 N_TIME_POINTS = args.n_time_points
 if PLOT_EVOLVE != 0:
-    saveat = np.linspace(0, END_TIME, PLOT_EVOLVE)
+    # Don't need to plot the initial state (always 0)
+    saveat = np.linspace(0, END_TIME, PLOT_EVOLVE, endpoint=True)[1:]
 else:
     saveat = [END_TIME]
 
@@ -216,7 +217,7 @@ def plot_evolution(
     y_raw = jax.vmap(model, in_axes=(None, 0, None, 0, 0))(
         time_info, x_init, [], args_seed, noise_seed
     )
-    plot_time = [i for i in range(len(saveat))]
+    plot_time = [i for i in range(len(saveat) + 1)]
 
     p_rows, p_cols = y_raw.shape[0], len(plot_time) + 1
     fig, ax = plt.subplots(
@@ -226,7 +227,6 @@ def plot_evolution(
     )
     losses = []
     for i, y in enumerate(y_raw):
-        # phase is periodic over 2
         y_readout = activation(y)
 
         for j, time in enumerate(plot_time):
@@ -234,6 +234,7 @@ def plot_evolution(
             ax[i, j].axis("off")
             ax[i, j].imshow(y_readout_t, cmap="gray_r", vmin=-1, vmax=1)
 
+        # Plot the image under ideal cnn (target)
         ax[i, -1].axis("off")
         ax[i, -1].imshow(
             y_true[i].reshape(N_ROW, N_COL), cmap="gray_r", vmin=-1, vmax=1

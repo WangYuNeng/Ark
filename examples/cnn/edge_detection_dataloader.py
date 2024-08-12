@@ -327,7 +327,39 @@ class SimpleShapeDataloader(DataLoader):
 class RandomImgDataloader(DataLoader):
 
     def __init__(self, batch_size, image_shape=(3, 3), shuffle=True):
-        images = np.random.rand(batch_size, *image_shape)
+        base_images = np.array(
+            [
+                SimpleShapeDataloader.circle8x8,
+                SimpleShapeDataloader.square8x8,
+                SimpleShapeDataloader.rectangle8x8,
+                SimpleShapeDataloader.diamond8x8,
+                SimpleShapeDataloader.inverted_circle8x8,
+                SimpleShapeDataloader.inverted_square8x8,
+                SimpleShapeDataloader.inverted_rectangle8x8,
+                SimpleShapeDataloader.inverted_diamond8x8,
+            ]
+        )
+        images = np.array(
+            [base_images[i % len(base_images)] for i in range(batch_size)]
+        )
+
+        # 1/3 stay the same
+        # 1/3 apply one-sided white noise with 0.05 std
+        #   If the original pixel is 0, add the noise
+        #   If the original pixel is 1, subtract the noise
+        # 1/3 is uniform noise
+        for i in range(batch_size):
+            choice = np.random.choice(3)
+            if choice == 2:
+                continue
+            elif choice == 1:
+                std = 0.05 * (2**choice)
+                noise = np.abs(np.random.normal(0, std, image_shape))
+                noise = np.where(images[i] == 1, -noise, noise)
+                images[i] = np.clip(images[i] + noise, 0, 1)
+            else:
+                images[i] = np.random.randn(*image_shape)
+
         images = 2 * images - 1
         super().__init__(images, batch_size, shuffle)
 

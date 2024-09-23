@@ -1,6 +1,9 @@
 import ast
+import os
 from copy import copy
 from typing import Callable, Iterable
+
+os.environ["JAX_COMPILATION_CACHE_DIR"] = "/tmp/jax_cache"
 
 import jax
 import jax.numpy as jnp
@@ -12,6 +15,11 @@ from ark.specification.attribute_def import AttrDefMismatch, Trainable
 from ark.specification.attribute_type import AnalogAttr, DigitalAttr
 from ark.specification.specification import CDGSpec
 from ark.specification.trainable import TrainableMgr
+
+jax.config.update("jax_enable_x64", True)
+jax.config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
+jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
+jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 
 ark_compiler = ArkCompiler()
 
@@ -725,4 +733,6 @@ class OptCompiler:
             raise ValueError("Must specify either rstd or std")
 
         self.mm_used_idx += 1
+        return mm_expr
+        return mm_expr
         return mm_expr

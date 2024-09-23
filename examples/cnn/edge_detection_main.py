@@ -4,6 +4,7 @@ if True:  # Temporarily solution to avoid the libomp.dylib error
         MNISTTrainDataLoader,
         RandomImgDataloader,
         SimpleShapeDataloader,
+        SilhouettesDataLoader,
     )
 
 from functools import partial
@@ -83,6 +84,12 @@ elif DATASET == "random":
     train_dl = RandomImgDataloader(BZ, img_size)
     test_dl = RandomImgDataloader(BZ, img_size)
     plot_dl = RandomImgDataloader(NUM_PLOT, img_size, shuffle=False)
+
+elif DATASET == "silhouettes":
+    # python edge_detection_main.py --plot_evolve 5 --dataset silhouettes --mismatched_edge 0.1 --end_time 2.0
+    train_dl = SilhouettesDataLoader(BZ, dataset_type="train")
+    test_dl = SilhouettesDataLoader(BZ, dataset_type="test")
+    plot_dl = SilhouettesDataLoader(NUM_PLOT, dataset_type="train", shuffle=False)
 N_ROW, N_COL = train_dl.image_shape()
 
 END_TIME = args.end_time
@@ -381,7 +388,7 @@ if __name__ == "__main__":
     elif ACTIVATION == "diffpair":
         activation_fn = saturation_diffpair
 
-    if DATASET == "random":
+    if DATASET in {"random", "silhouettes"}:
         # Create ideal CNN to generate data
         # Using saturation activation function as the target
         # (Although strictly speaking, the "ideal" activation function should
@@ -410,7 +417,7 @@ if __name__ == "__main__":
         )
 
         for dl in [train_dl, test_dl, plot_dl]:
-            assert isinstance(dl, RandomImgDataloader)
+            assert isinstance(dl, (RandomImgDataloader, SilhouettesDataLoader))
             dl.set_cnn_info(inps, graph, ideal_cnn_class)
             dl.gen_edge_detected_img(model, time_info, activation_fn)
 

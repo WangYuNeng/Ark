@@ -3,9 +3,10 @@ Load the MNIST from torchvision and apply edge detection with CV2 to create
 (image, edges of image) data.
 """
 
-from typing import Callable, Generator
+import os
+from pathlib import Path
+from typing import Callable, Generator, Literal
 
-import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import Array
@@ -54,6 +55,37 @@ class DataLoader:
         # Because cnn and cv2 edge detection behave differently
         # Need to load edge detected data separately
         self.edge_images = edge_images
+
+    def gen_edge_detected_img(
+        self,
+        ideal_edge_detector: BaseAnalogCkt,
+        time_info: TimeInfo,
+        activation: Callable,
+    ):
+        """Simulate ideal edge detection with CNN on the images.
+
+        Before use this function, the cnn_info should be set with the ideal edge detector.
+        Afterward, should reset the info with the CNN for training.
+
+        Args:
+            ideal_edge_detector (BaseAnalogCkt): A CNN circuit with ideal components.
+            time_info (TimeInfo): Simulation timing information.
+            activation (Callable): activation function used in the CNN.
+        """
+        from tqdm import tqdm
+
+        assert hasattr(self, "inp_nodes"), "Please set CNN info first."
+        y = []
+        print("Generating edge detected images...")
+        for img in tqdm(self.images):
+            for row_id, row in enumerate(img):
+                for col_id, val in enumerate(row):
+                    self.inp_nodes[row_id][col_id].set_init_val(val, n=0)
+            x = jnp.array(self.cnn_ckt_cls.cdg_to_initial_states(self.graph)).flatten()
+            y_raw = ideal_edge_detector(time_info, x, [], 0, 0)
+            y_end_readout = activation(y_raw[-1, :]).reshape(self.image_shape())
+            y.append(y_end_readout)
+        self.load_edge_detected_data(jnp.array(y))
 
     def __iter__(self) -> Generator[tuple[Array, Array, Array, Array], None, None]:
         images, edge_images = self.images, self.edge_images
@@ -363,33 +395,74 @@ class RandomImgDataloader(DataLoader):
         images = 2 * images - 1
         super().__init__(images, batch_size, shuffle)
 
+
+class SilhouettesDataLoader(DataLoader):
+    """Caltech 101 Silhouettes Dataset"""
+
+    DATA_DIR = Path("data/silhouettes")
+
+    def __init__(
+        self,
+        batch_size,
+        dataset_type: Literal["train", "validation", "test"],
+        img_size=16,
+        shuffle=True,
+    ):
+        # Try if the dataset is downloaded at DATA_DIR
+        # If not, download from source
+        if not os.path.exists("data/silhouettes"):
+
+            import requests
+            from scipy.io import loadmat
+
+            os.makedirs(self.DATA_DIR, exist_ok=True)
+            url = f"https://people.cs.umass.edu/~marlin/data/caltech101_silhouettes_{img_size}_split1.mat"
+            tmp_file = "caltech101_silhouettes.mat"
+            with open(tmp_file, "wb") as file:
+                response = requests.get(url)
+                file.write(response.content)
+
+            mat = loadmat(tmp_file)
+
+            train, valid, test = (
+                mat["train_data"].reshape(-1, img_size, img_size),
+                mat["val_data"].reshape(-1, img_size, img_size),
+                mat["test_data"].reshape(-1, img_size, img_size),
+            )
+
+            # Augment dataset with inverted images
+            # and shift the dataset to [-1, 1] to fit CNN io
+            train = 2 * np.concatenate([train, 1 - train]) - 1
+            valid = 2 * np.concatenate([valid, 1 - valid]) - 1
+            test = 2 * np.concatenate([test, 1 - test]) - 1
+
+            np.savez(self.DATA_DIR / "train.npz", images=train)
+            np.savez(self.DATA_DIR / "validation.npz", images=valid)
+            np.savez(self.DATA_DIR / "test.npz", images=test)
+
+        data: dict = np.load(self.DATA_DIR / f"{dataset_type}.npz")
+        images = data["images"]
+        self.dataset_type = dataset_type
+
+        super().__init__(images, batch_size, shuffle)
+
     def gen_edge_detected_img(
         self,
         ideal_edge_detector: BaseAnalogCkt,
         time_info: TimeInfo,
         activation: Callable,
     ):
-        """Simulate ideal edge detection with CNN on the images.
-
-        Before use this function, the cnn_info should be set with the ideal edge detector.
-        Afterward, should reset the info with the CNN for training.
-
-        Args:
-            ideal_edge_detector (BaseAnalogCkt): A CNN circuit with ideal components.
-            time_info (TimeInfo): Simulation timing information.
-            activation (Callable): activation function used in the CNN.
-        """
-        assert hasattr(self, "inp_nodes"), "Please set CNN info first."
-        y = []
-        for img in self.images:
-            for row_id, row in enumerate(img):
-                for col_id, val in enumerate(row):
-                    self.inp_nodes[row_id][col_id].set_init_val(val, n=0)
-            x = jnp.array(self.cnn_ckt_cls.cdg_to_initial_states(self.graph)).flatten()
-            y_raw = ideal_edge_detector(time_info, x, [], 0, 0)
-            y_end_readout = activation(y_raw[-1, :])
-            y.append(y_end_readout)
-        self.load_edge_detected_data(jnp.array(y))
+        # Try if the edge detected data is computed and stored at DATA_DIR
+        # If not, compute and store
+        edge_detected_img_path = (
+            self.DATA_DIR / f"{self.dataset_type}_edge_detected.npz"
+        )
+        if not os.path.exists(edge_detected_img_path):
+            super().gen_edge_detected_img(ideal_edge_detector, time_info, activation)
+            np.savez(edge_detected_img_path, images=self.edge_images)
+        else:
+            data: dict = np.load(edge_detected_img_path)
+            self.edge_images = data["images"]
 
 
 if __name__ == "__main__":

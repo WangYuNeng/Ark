@@ -74,7 +74,7 @@ parser.add_argument(
     "--dataset",
     type=str,
     default="simple",
-    choices=["simple", "mnist", "random"],
+    choices=["simple", "mnist", "random", "silhouettes"],
     help="Dataset to use",
 )
 parser.add_argument(

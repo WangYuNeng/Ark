@@ -3,6 +3,7 @@ Dataype definitions for attributes in the specification.
 """
 
 from abc import ABC, abstractmethod
+from functools import partial
 from typing import Callable
 
 from ark.specification.range import Range
@@ -52,7 +53,7 @@ class AnalogAttr(AttrType):
     @property
     def default(self) -> float | int:
         if self.has_range:
-            return self.val_range.mean
+            return self.val_range.min if self.val_range.min else self.val_range.max
         else:
             raise ValueError(
                 "Cannot get default value for an attribute without valid range"
@@ -97,11 +98,15 @@ class FunctionAttr(AttrType):
         return val.__name__
 
     def check_valid(self, val) -> bool:
+        # FIXME: this is for consistency with the Ark paper, checking if
+        # the function has the correct number of arguments
+        # In practice, I don't think this is necessary. Also. default arguments
+        # and partial function complicates the check.
         if not isinstance(val, Callable):
             return False
-        if val.__code__.co_argcount != self.nargs:
-            return False
-        return True
+        if isinstance(val, partial):
+            return True
+        return val.__code__.co_argcount == self.nargs
 
     @property
     def default(self) -> Callable:

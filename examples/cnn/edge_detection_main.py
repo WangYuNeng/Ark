@@ -322,27 +322,46 @@ def train(
                 )
                 losses.append(train_loss)
 
+                # Dataset is large, iterate the dataset 1-2 times will converge
+                # Use fewer steps but log the loss more frequently
+                if DATASET == "silhouettes":
+                    if USE_WANDB:
+                        wandb.log(
+                            data={
+                                "train_loss": train_loss,
+                            },
+                        )
+
         train_loss = jnp.mean(jnp.array(losses))
-
-        losses = []
-        for data in tqdm(test_dl, desc="testing"):
-            loss = loss_fn(model, *data, activation)
-            losses.append(loss)
-        test_loss = jnp.mean(jnp.array(losses))
-
-        print(f"Step {step}, Train loss: {train_loss}, Test loss: {test_loss}")
-
         if train_loss < loss_best:
-            loss_best = test_loss
+            loss_best = train_loss
             best_weight = (model.a_trainable.copy(), model.d_trainable.copy())
 
-        if USE_WANDB:
-            wandb.log(
-                data={
-                    "test_loss": test_loss,
-                    "train_loss": train_loss,
-                },
-            )
+        if DATASET == "silhouettes":
+            # 0th step: log baseline loss
+            if USE_WANDB and step == 0:
+                wandb.log(
+                    data={
+                        "train_loss": train_loss,
+                    },
+                )
+        # For other datasets, traning info is updated per step
+        else:
+            losses = []
+            for data in tqdm(test_dl, desc="testing"):
+                loss = loss_fn(model, *data, activation)
+                losses.append(loss)
+            test_loss = jnp.mean(jnp.array(losses))
+
+            print(f"Step {step}, Train loss: {train_loss}, Test loss: {test_loss}")
+
+            if USE_WANDB:
+                wandb.log(
+                    data={
+                        "test_loss": test_loss,
+                        "train_loss": train_loss,
+                    },
+                )
 
     return loss_best, best_weight
 

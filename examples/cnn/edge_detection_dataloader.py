@@ -103,6 +103,7 @@ class DataLoader:
 
             # Pad the last batch
             if i + batch_size > len(images):
+                raise ValueError("The last incomplete batch should be dropped.")
                 imgs_i = jnp.pad(
                     imgs_i,
                     ((0, batch_size - imgs_i.shape[0]), (0, 0), (0, 0)),
@@ -131,7 +132,7 @@ class DataLoader:
     def __len__(self):
         if len(self.images) % self.batch_size == 0:
             return len(self.images) // self.batch_size
-        return len(self.images) // self.batch_size + 1
+        return len(self.images) // self.batch_size
 
     def image_shape(self):
         return self.images[0].shape

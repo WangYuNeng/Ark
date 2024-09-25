@@ -3,8 +3,8 @@ if True:  # Temporarily solution to avoid the libomp.dylib error
         MNISTTestDataLoader,
         MNISTTrainDataLoader,
         RandomImgDataloader,
-        SimpleShapeDataloader,
         SilhouettesDataLoader,
+        SimpleShapeDataloader,
     )
 
 from functools import partial
@@ -328,7 +328,7 @@ def train(
                     if USE_WANDB:
                         wandb.log(
                             data={
-                                "train_loss": train_loss,
+                                "train_loss": jnp.mean(train_loss),
                             },
                         )
 

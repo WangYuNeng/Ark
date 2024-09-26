@@ -734,5 +734,3 @@ class OptCompiler:
 
         self.mm_used_idx += 1
         return mm_expr
-        return mm_expr
-        return mm_expr

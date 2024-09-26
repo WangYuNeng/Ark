@@ -101,9 +101,10 @@ class DataLoader:
             imgs_i = jnp.array(images[i : i + batch_size])
             edge_imgs_i = jnp.array(edge_images[i : i + batch_size])
 
-            # Pad the last batch
+            # The last batch is dropped
             if i + batch_size > len(images):
-                raise ValueError("The last incomplete batch should be dropped.")
+                break
+                # Pad the last batch
                 imgs_i = jnp.pad(
                     imgs_i,
                     ((0, batch_size - imgs_i.shape[0]), (0, 0), (0, 0)),

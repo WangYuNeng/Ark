@@ -80,6 +80,7 @@ def create_switchable_star_cdg(
         list[tuple[CDG, list[CDGNode], list[CDGNode], list[CDGEdge]]],
         list[tuple[CDG, list[CDGNode], list[CDGNode], list[CDGEdge]]],
     ],
+    PUFParams,
 ]:
     """Create a switchable star puf cdg with TLN
 
@@ -99,10 +100,9 @@ def create_switchable_star_cdg(
             list[tuple[CDG, list[CDGNode], list[CDGNode], list[CDGEdge]]],
             list[tuple[CDG, list[CDGNode], list[CDGNode], list[CDGEdge]]],
         ],
-        PUFParams:
-        The CDG, the middle capacitor nodes, the switch pairs correspond to bits, and
-        all the branches' CDG, capacitor nodes, the inductor nodes, the edges,
-        and the symbolic PUF parameters.
+        PUFParams: The CDG, the middle capacitor nodes, the switch pairs correspond to bits,
+        and all the branches' CDG, capacitor nodes, the inductor nodes, the edges, and the
+        symbolic PUF parameters.
     """
 
     # Initialize all the trainable elements

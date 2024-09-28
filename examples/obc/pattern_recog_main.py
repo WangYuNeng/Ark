@@ -124,43 +124,37 @@ if USE_WANDB:
     wandb_run = wandb.init(project="obc", config=vars(args), tags=["digit_recognition"])
 
 
-def node_idx_to_coord(idx: int):
-    return idx // N_COL, idx % N_COL
-
-
-def coord_to_node_idx(row: int, col: int):
-    return row * N_COL + col
-
-
-def pattern_to_edge_initialization(pattern: np.ndarray) -> np.ndarray:
+def pattern_to_edge_initialization(pattern: np.ndarray):
     """Map the pattern to the edge initialization
 
     If two pixels are different, the edge is initialized with -1.0
     Otherwise, the edge is initialized with 1.0
     """
 
-    init_weights = np.zeros((N_NODE, N_NODE))
-    for node_idx in range(N_NODE):
-        for n_node_idx in range(N_NODE):
+    row_init = [[None for _ in range(N_COL - 1)] for _ in range(N_ROW)]
+    col_init = [[None for _ in range(N_COL)] for _ in range(N_ROW - 1)]
 
-            row, col = node_idx_to_coord(node_idx)
-            n_row, n_col = node_idx_to_coord(n_node_idx)
-            diff = pattern[row, col] - pattern[n_row, n_col]
-            init_weights[node_idx, n_node_idx] = -1.0 if diff else 1.0
+    for row in range(N_ROW):
+        for col in range(N_COL - 1):
+            diff = pattern[row, col] - pattern[row, col + 1]
+            row_init[row][col] = -1.0 if diff else 1.0
 
-    return init_weights
+    for row in range(N_ROW - 1):
+        for col in range(N_COL):
+            diff = pattern[row, col] - pattern[row + 1, col]
+            col_init[row][col] = -1.0 if diff else 1.0
+
+    return np.array(row_init), np.array(col_init)
 
 
 def edge_init_to_trainable_init(
-    init_weights: np.ndarray,
-    edge_ks: list[list[Trainable]],
+    row_init: np.ndarray,
+    col_init: np.ndarray,
+    k_rows: list[list[Trainable]],
+    k_cols: list[list[Trainable]],
     trainable_mgr: TrainableMgr,
 ) -> tuple[jax.Array, list[jax.Array]]:
-    """Convert the edge initialization to trainable initialization
-
-    Enumerate through the edge_ks; If not None, set the initial value
-    according to the init_weights
-    """
+    """Convert the edge initialization to trainable initialization"""
 
     def one_hot_digitize(x: np.ndarray, bins: np.ndarray):
         # Digitize with the nearest bin and then one-hot encode
@@ -169,7 +163,7 @@ def edge_init_to_trainable_init(
         one_hot = jax.nn.one_hot(nearest_bins, bins.shape[0])
         return one_hot
 
-    init_weights_quantized = init_weights
+    row_init_quantized, col_init_quantized = row_init, col_init
 
     if WEIGHT_BITS is not None:
         weight_choices: list = Cpl_digital.attr_def["k"].attr_type.val_choices
@@ -177,13 +171,16 @@ def edge_init_to_trainable_init(
         # normalize the weight choices to between -1 and 1
         weight_choices = np.array(weight_choices)
 
-        init_weights_quantized = one_hot_digitize(init_weights, weight_choices)
+        row_init_quantized = one_hot_digitize(row_init, weight_choices)
+        col_init_quantized = one_hot_digitize(col_init, weight_choices)
 
-    for node_idx, node_kss in enumerate(edge_ks):
-        for next_node_idx, k in enumerate(node_kss):
-            if k is None or next_node_idx <= node_idx:
-                continue
-            k.init_val = init_weights_quantized[node_idx, next_node_idx]
+    for row in range(N_ROW):
+        for col in range(N_COL - 1):
+            k_rows[row][col].init_val = row_init_quantized[row, col]
+
+    for row in range(N_ROW - 1):
+        for col in range(N_COL):
+            k_cols[row][col].init_val = col_init_quantized[row, col]
 
     a_trainable = trainable_mgr.get_initial_vals("analog")
     d_trainable = trainable_mgr.get_initial_vals("digital")
@@ -344,38 +341,37 @@ if __name__ == "__main__":
 
     graph = CDG()
     nodes = [[None for _ in range(N_COL)] for _ in range(N_ROW)]
+    row_edges = [[None for _ in range(N_COL - 1)] for _ in range(N_ROW)]
+    col_edges = [[None for _ in range(N_COL)] for _ in range(N_ROW - 1)]
 
     if not WEIGHT_BITS:
         cpl_type = Coupling
     else:
         cpl_type = Cpl_digital
 
-    # Store all the trainable parameters with connectivity matrix
-    # Connect 8 neighbor nodes
-    edge_ks = [[None for _ in range(N_NODE)] for _ in range(N_NODE)]
-    for row in range(N_ROW):
-        for col in range(N_COL):
-            # Connect to right, bottom, bottom-right, bottom-left
-            node_idx = coord_to_node_idx(row, col)
-            for dr, dc in [(0, 1), (1, 0), (1, 1), (1, -1)]:
-                next_row, next_col = row + dr, col + dc
-                if (
-                    next_row < 0
-                    or next_row >= N_ROW
-                    or next_col < 0
-                    or next_col >= N_COL
-                ):
-                    continue
-
-                new_var = (
-                    trainable_mgr.new_analog()
-                    if not WEIGHT_BITS
-                    else trainable_mgr.new_digital()
-                )
-                next_node_idx = coord_to_node_idx(next_row, next_col)
-                edge_ks[node_idx][next_node_idx] = edge_ks[next_node_idx][node_idx] = (
-                    new_var
-                )
+    # Store all the trainable parameters
+    row_ks = [
+        [
+            (
+                trainable_mgr.new_analog()
+                if not WEIGHT_BITS
+                else trainable_mgr.new_digital()
+            )
+            for _ in range(N_COL - 1)
+        ]
+        for _ in range(N_ROW)
+    ]
+    col_ks = [
+        [
+            (
+                trainable_mgr.new_analog()
+                if not WEIGHT_BITS
+                else trainable_mgr.new_digital()
+            )
+            for _ in range(N_COL)
+        ]
+        for _ in range(N_ROW - 1)
+    ]
 
     # Initialze nodes
     for row in range(N_ROW):
@@ -391,14 +387,17 @@ if __name__ == "__main__":
             nodes[row][col] = node
 
     # Connect neighboring nodes
-    for node_idx, node_kss in enumerate(edge_ks):
-        row, col = node_idx_to_coord(node_idx)
-        for next_node_idx, k in enumerate(node_kss):
-            if k is None or next_node_idx <= node_idx:
-                continue
-            next_row, next_col = node_idx_to_coord(next_node_idx)
-            edge = cpl_type(k=k)
-            graph.connect(edge, nodes[row][col], nodes[next_row][next_col])
+    for row in range(N_ROW):
+        for col in range(N_COL - 1):
+            edge = cpl_type(k=row_ks[row][col])
+            graph.connect(edge, nodes[row][col], nodes[row][col + 1])
+            row_edges[row][col] = edge
+
+    for row in range(N_ROW - 1):
+        for col in range(N_COL):
+            edge = cpl_type(k=col_ks[row][col])
+            graph.connect(edge, nodes[row][col], nodes[row + 1][col])
+            col_edges[row][col] = edge
 
     # flatten the nodes for readout
     nodes_flat = [node for row in nodes for node in row]
@@ -443,16 +442,21 @@ if __name__ == "__main__":
         )
 
     if WEIGHT_INIT == "hebbian":
-        init_weights = pattern_to_edge_initialization(NUMBERS[0])
+        row_init, col_init = pattern_to_edge_initialization(NUMBERS[0])
         for i in range(1, N_CLASS):
-            w = pattern_to_edge_initialization(NUMBERS[i])
-            init_weights += w
+            r, c = pattern_to_edge_initialization(NUMBERS[i])
+            row_init += r
+            col_init += c
 
-        init_weights /= N_CLASS
+        row_init /= N_CLASS
+        col_init /= N_CLASS
     elif WEIGHT_INIT == "random":
-        init_weights = np.random.normal(size=(N_NODE, N_NODE))
+        row_init = np.random.normal(size=(N_ROW, N_COL - 1))
+        col_init = np.random.normal(size=(N_ROW - 1, N_COL))
 
-    trainable_init = edge_init_to_trainable_init(init_weights, edge_ks, trainable_mgr)
+    trainable_init = edge_init_to_trainable_init(
+        row_init, col_init, row_ks, col_ks, trainable_mgr
+    )
 
     plot_data = next(dl(PLOT_BZ))
 

@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import optax
 import wandb
-from diffrax import Heun
+from diffrax import Tsit5
 from jaxtyping import Array, PyTree
 from puf import PUFParams, create_switchable_star_cdg
 from spec import IdealE, InpI, MmE, MmI, MmV, lc_range, mm_tln_spec, w_range
@@ -29,7 +29,6 @@ parser.add_argument("--n_time_points", type=int, default=100)
 parser.add_argument("--readout_time", type=float, default=10e-9)
 parser.add_argument("--rand_init", action="store_true")
 parser.add_argument("--normalize_weight", action="store_true")
-parser.add_argument("--batch_size", type=int, default=256)
 parser.add_argument("--chl_per_bit", type=int, default=64)
 parser.add_argument("--inst_per_batch", type=int, default=1)
 parser.add_argument("--steps", type=int, default=200)
@@ -66,7 +65,6 @@ N_TIME_POINTS = args.n_time_points
 READOUT_TIME = args.readout_time
 RAND_INIT = args.rand_init
 NORMALIZE_WEIGHT = args.normalize_weight
-BATCH_SIZE = args.batch_size
 CHL_PER_BIT = args.chl_per_bit
 INST_PER_BATCH = args.inst_per_batch
 STEPS = args.steps
@@ -376,7 +374,7 @@ if __name__ == "__main__":
     model: BaseAnalogCkt = puf_ckt_class(
         init_trainable=trainable_init,
         is_stochastic=False,
-        solver=Heun(),
+        solver=Tsit5(),
         # init_trainable=trainable_init,
         # is_stochastic=False,
         # solver=Tsit5(),

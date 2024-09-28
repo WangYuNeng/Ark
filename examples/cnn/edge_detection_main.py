@@ -335,7 +335,7 @@ def train(
         train_loss = jnp.mean(jnp.array(losses))
         if train_loss < loss_best:
             loss_best = train_loss
-            best_weight = (model.a_trainable.copy(), model.d_trainable.copy())
+            best_weight = model.weights()
 
         if DATASET == "silhouettes":
             # 0th step: log baseline loss
@@ -520,6 +520,9 @@ if __name__ == "__main__":
 
     print(f"Best loss: {loss_best}")
     print(f"Best weight: {best_weight}")
+    if args.save_weight:
+        jnp.savez(args.save_weight, analog=best_weight[0], digital=best_weight[1])
+
     load_model_and_plot(
         model_cls=cnn_ckt_class,
         activation=activation_fn,

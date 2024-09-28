@@ -37,6 +37,9 @@ parser.add_argument("--print_every", type=int, default=1)
 parser.add_argument("--logistic_k", type=float, default=40)
 parser.add_argument("--wandb", action="store_true")
 parser.add_argument("--tag", type=str, default=None)
+parser.add_argument(
+    "--save_weight", type=str, default=None, help="Path to save weights"
+)
 args = parser.parse_args()
 np.random.seed(args.seed)
 
@@ -286,6 +289,7 @@ def train(
         return loss_value
 
     best_loss_precise = 0.5  # Upper bound of the i2o and bit-flipping test loss
+    best_weight = (model.a_trainable.copy(), model.d_trainable.copy())
     for step, (init_vals, switches, mismatch) in zip(range(steps), dataloader):
         if (step % print_every) == 0 or (step == steps - 1):
             train_loss_precise = validate(model, init_vals, switches, mismatch)
@@ -307,8 +311,9 @@ def train(
 
         if train_loss_precise < best_loss_precise:
             best_loss_precise = train_loss_precise
+            best_weight = model.weights()
             eqx.tree_serialise_leaves(checkpoint, model)
-    return model
+    return best_loss_precise, best_weight
 
 
 if __name__ == "__main__":
@@ -384,7 +389,7 @@ if __name__ == "__main__":
     #         switches,
     #         mismatch,
     #     )
-    model = train(
+    best_loss, best_weight = train(
         model=model,
         loss=train_loss,
         precise_loss=train_loss_precise,
@@ -394,3 +399,6 @@ if __name__ == "__main__":
         checkpoint=CHECKPOINT,
         print_every=PRINT_EVERY,
     )
+
+    if args.save_weight:
+        jnp.savez(args.save_weight, analog=best_weight[0], digital=best_weight[1])

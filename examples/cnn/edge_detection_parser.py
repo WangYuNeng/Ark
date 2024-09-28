@@ -88,4 +88,7 @@ parser.add_argument(
     action="store_true",
     help="A special setup to demonstrate the long compile time when trying to train on 28x28 images",
 )
+parser.add_argument(
+    "--save_weight", type=str, default=None, help="Path to save weights"
+)
 args = parser.parse_args()

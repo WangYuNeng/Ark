@@ -322,7 +322,7 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: st
         )
         if val_loss < val_loss_best:
             val_loss_best = val_loss
-            best_weight = (model.a_trainable.copy(), model.d_trainable.copy())
+            best_weight = model.weights()
 
         if USE_WANDB:
             wandb.log(
@@ -511,6 +511,9 @@ if __name__ == "__main__":
     best_loss, best_weight = train(model, loss_fn, dl, "tran_noisy")
     print(f"\tFine-tune Best Loss: {best_loss}")
     print(f"Fine-tune Best Weights: {best_weight}")
+
+    if args.save_weight:
+        jnp.savez(args.save_weight, analog=best_weight[0], digital=best_weight[1])
 
     # Model after fine-tune
     load_model_and_plot(

@@ -145,3 +145,8 @@ class BaseAnalogCkt(eqx.Module):
         """Extract the switch values from a CDG."""
 
         raise NotImplementedError
+
+    def weights(self) -> tuple[jax.Array, list[jax.Array]]:
+        """Return a copy of the trainable parameters of the circuit."""
+
+        return (self.a_trainable.copy(), self.d_trainable.copy())

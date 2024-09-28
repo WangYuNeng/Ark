@@ -115,5 +115,8 @@ parser.add_argument(
     "--no_noiseless_train", action="store_true", help="Skip noiseless training"
 )
 parser.add_argument("--wandb", action="store_true", help="Log to wandb")
+parser.add_argument(
+    "--save_weight", type=str, default=None, help="Path to save weights"
+)
 
 args = parser.parse_args()

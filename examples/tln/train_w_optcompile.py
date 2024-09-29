@@ -1,8 +1,7 @@
 import argparse
 import time
 from functools import partial
-from types import FunctionType
-from typing import Generator
+from typing import Callable, Generator
 
 import equinox as eqx
 import jax
@@ -34,6 +33,7 @@ parser.add_argument("--inst_per_batch", type=int, default=1)
 parser.add_argument("--steps", type=int, default=200)
 parser.add_argument("--print_every", type=int, default=1)
 parser.add_argument("--logistic_k", type=float, default=40)
+parser.add_argument("--logistic_k_end", type=float, default=40)
 parser.add_argument("--wandb", action="store_true")
 parser.add_argument("--tag", type=str, default=None)
 parser.add_argument(
@@ -70,6 +70,7 @@ INST_PER_BATCH = args.inst_per_batch
 STEPS = args.steps
 PRINT_EVERY = args.print_every
 LOGISTIC_K = args.logistic_k
+LOGISTIC_K_END = args.logistic_k_end
 
 print("Config:", train_config)
 
@@ -103,8 +104,10 @@ def plot_single_star_rsp(model, init_vals, switch, mismatch):
     plt.close()
 
 
-def step(x):
+def step(x, *args, **kwargs):
     """step function that maps x to {0, 1} for ideal PUF ADC.
+
+    The argument is dummy for compatibility with logistic function.
 
     If use this for optimization, the gradient can't pass through.
     All parameters are hardly updated.
@@ -121,12 +124,22 @@ def diff(model, switch, mismatch, t):
     return jnp.mean(jnp.abs(jax.vmap(model)(switch, mismatch, t)))
 
 
+def linear_schedule(step: int, start: float, end: float, tot_steps: int):
+    return start - (start - end) * step / (tot_steps - 1)
+
+
+next_logistic_k = partial(
+    linear_schedule, start=LOGISTIC_K, end=LOGISTIC_K_END, tot_steps=STEPS
+)
+
+
 def i2o_loss(
     model: BaseAnalogCkt,
     init_vals: Array,
     switch: Array,
     mismatch: Array,
-    quantize_fn,
+    logistic_k: float,
+    quantize_fn: Callable,
 ):
     """Calculating the I2O score.
 
@@ -162,7 +175,7 @@ def i2o_loss(
     ).reshape(-1, 2)
     # Take the difference between the two stars
     out_diff = analog_out[:, 0] - analog_out[:, 1]
-    digital_out: Array = quantize_fn(out_diff).reshape(-1, 2)
+    digital_out: Array = quantize_fn(out_diff, k=logistic_k).reshape(-1, 2)
     # Reshape to calculate the I2O score
     digital_out = digital_out.reshape(inst_per_batch, chl_per_bit, n_bit + 1)
 
@@ -246,8 +259,8 @@ def I2O_chls(
 
 def train(
     model: BaseAnalogCkt,
-    loss: FunctionType,
-    precise_loss: FunctionType,  # Due to approximation, use another loss function for validation
+    loss: Callable,
+    precise_loss: Callable,  # Due to approximation, use another loss function for validation
     dataloader: Generator[Array, Array, jax.typing.DTypeLike],
     optim: optax.GradientTransformation,
     steps: int,
@@ -266,9 +279,10 @@ def train(
         init_vals: Array,
         switch: Array,
         mismatch: Array,
+        logistic_k: float,
     ):
         loss_value, grads = eqx.filter_value_and_grad(loss)(
-            model, init_vals, switch, mismatch
+            model, init_vals, switch, mismatch, logistic_k
         )
         updates, opt_state = optim.update(grads, opt_state, model)
         model = eqx.apply_updates(model, updates)
@@ -280,25 +294,31 @@ def train(
         init_vals: Array,
         switch: Array,
         mismatch: Array,
+        logistic_k: float,
     ):
         loss_value, _ = eqx.filter_value_and_grad(precise_loss)(
-            model, init_vals, switch, mismatch
+            model, init_vals, switch, mismatch, logistic_k
         )
         return loss_value
 
     best_loss_precise = 0.5  # Upper bound of the i2o and bit-flipping test loss
     best_weight = (model.a_trainable.copy(), model.d_trainable.copy())
     for step, (init_vals, switches, mismatch) in zip(range(steps), dataloader):
+        logistic_k = next_logistic_k(step)
         if step == 0:
-            init_loss_precise = validate(model, init_vals, switches, mismatch)
+            init_loss_precise = validate(
+                model, init_vals, switches, mismatch, logistic_k
+            )
             print(f"Initial loss_precise={init_loss_precise.item()}")
             if args.wandb:
-                wandb_run.log({"init_loss_precise": init_loss_precise.item()})
+                wandb_run.log({"loss_precise": init_loss_precise.item()})
         model, opt_state, train_loss = make_step(
-            model, opt_state, init_vals, switches, mismatch
+            model, opt_state, init_vals, switches, mismatch, logistic_k
         )
         if (step % print_every) == 0 or (step == steps - 1):
-            train_loss_precise = validate(model, init_vals, switches, mismatch)
+            train_loss_precise = validate(
+                model, init_vals, switches, mismatch, logistic_k
+            )
             if args.wandb:
                 wandb_run.log(
                     {
@@ -369,7 +389,7 @@ if __name__ == "__main__":
     loader = I2O_chls(
         INST_PER_BATCH, CHL_PER_BIT, N_BRANCH, puf_cdg, switch_pairs, puf_ckt_class
     )
-    train_loss = partial(i2o_loss, quantize_fn=partial(logistic, k=LOGISTIC_K))
+    train_loss = partial(i2o_loss, quantize_fn=logistic)
     train_loss_precise = partial(i2o_loss, quantize_fn=step)
 
     trainable_init = (mgr.get_initial_vals("analog"), mgr.get_initial_vals("digital"))

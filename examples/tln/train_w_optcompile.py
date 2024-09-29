@@ -289,12 +289,16 @@ def train(
     best_loss_precise = 0.5  # Upper bound of the i2o and bit-flipping test loss
     best_weight = (model.a_trainable.copy(), model.d_trainable.copy())
     for step, (init_vals, switches, mismatch) in zip(range(steps), dataloader):
-        if (step % print_every) == 0 or (step == steps - 1):
-            train_loss_precise = validate(model, init_vals, switches, mismatch)
+        if step == 0:
+            init_loss_precise = validate(model, init_vals, switches, mismatch)
+            print(f"Initial loss_precise={init_loss_precise.item()}")
+            if args.wandb:
+                wandb_run.log({"init_loss_precise": init_loss_precise.item()})
         model, opt_state, train_loss = make_step(
             model, opt_state, init_vals, switches, mismatch
         )
         if (step % print_every) == 0 or (step == steps - 1):
+            train_loss_precise = validate(model, init_vals, switches, mismatch)
             if args.wandb:
                 wandb_run.log(
                     {
@@ -310,7 +314,7 @@ def train(
         if train_loss_precise < best_loss_precise:
             best_loss_precise = train_loss_precise
             best_weight = model.weights()
-            eqx.tree_serialise_leaves(checkpoint, model)
+            # eqx.tree_serialise_leaves(checkpoint, model)
     return best_loss_precise, best_weight
 
 

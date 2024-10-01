@@ -100,6 +100,17 @@ if PLOT_EVOLVE != 0:
 else:
     saveat = [END_TIME]
 
+LOAD_WEIGHT = args.load_weight
+if LOAD_WEIGHT and WEIGHT_INIT:
+    print("Ignoring the weight init argument since the weight is loaded")
+
+TESTING = args.test
+if TESTING and not DATASET == "silhouettes":
+    raise ValueError(
+        "Testing-only mode is currently supported for the silhouettes dataset. "
+        "Other datasets have testing along wiht training."
+    )
+
 time_info = TimeInfo(
     t0=0,
     t1=END_TIME,
@@ -304,14 +315,36 @@ def train(
 ):
     opt_state = optim.init(eqx.filter(model, eqx.is_array))
     loss_best = 1e9
+    best_weight = model.weights()
 
     # Have testing set in the training loop for loggin simplicity...
     # Don't use any information from the testing set for training
     # TODO: Add validation split to better monitor overfitting
-
+    test_losses = []
     for step in range(STEPS):
 
         losses = []
+        if TESTING:
+            for data in tqdm(test_dl, desc="testing"):
+                test_loss = loss_fn(model, *data, activation)
+                test_losses.append(test_loss)
+
+                if USE_WANDB:
+                    wandb.log(
+                        data={
+                            "test_loss": test_loss,
+                        },
+                    )
+            if step == STEPS - 1:
+                print(f"Average test loss: {np.mean(test_losses)}")
+                if USE_WANDB:
+                    wandb.log(
+                        data={
+                            "average_test_loss": np.mean(test_losses),
+                        },
+                    )
+
+            continue
         for data in tqdm(train_dl, desc="training"):
             if step == 0:  # Set up the baseline loss
                 train_loss = loss_fn(model, *data, activation)
@@ -465,7 +498,14 @@ if __name__ == "__main__":
 
     loss_fn = partial(mse_loss, activation=activation_fn)
 
-    trainable_init = (mgr.get_initial_vals("analog"), mgr.get_initial_vals("digital"))
+    if LOAD_WEIGHT:
+        loaded_weight = jnp.load(LOAD_WEIGHT)
+        trainable_init = (loaded_weight["analog"], loaded_weight["digital"])
+    else:
+        trainable_init = (
+            mgr.get_initial_vals("analog"),
+            mgr.get_initial_vals("digital"),
+        )
     print(f"Trainable init: {trainable_init}")
 
     model: BaseAnalogCkt = cnn_ckt_class(

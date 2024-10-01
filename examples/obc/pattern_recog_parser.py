@@ -118,5 +118,9 @@ parser.add_argument("--wandb", action="store_true", help="Log to wandb")
 parser.add_argument(
     "--save_weight", type=str, default=None, help="Path to save weights"
 )
+parser.add_argument(
+    "--load_weight", type=str, default=None, help="Path to load weights"
+)
+parser.add_argument("--test", action="store_true", help="Test the model")
 
 args = parser.parse_args()

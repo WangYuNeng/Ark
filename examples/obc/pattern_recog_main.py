@@ -108,6 +108,12 @@ if PLOT_EVOLVE != 0:
 else:
     saveat = [T * N_CYCLES]
 
+LOAD_WEIGHT = args.load_weight
+if LOAD_WEIGHT and WEIGHT_INIT:
+    print("Ignoring the weight init argument since the weight is loaded")
+
+TESTING = args.test
+
 time_info = TimeInfo(
     t0=0,
     t1=T * N_CYCLES,
@@ -300,11 +306,38 @@ elif GUMBEL_SHEDULE == "exp":
 def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: str = ""):
     opt_state = optim.init(eqx.filter(model, eqx.is_array))
     val_loss_best = 1e9
+    best_weight = model.weights()
 
     gumbel_temp = GUMBEL_TEMP_START
     hard_gumbel = USE_HARD_GUMBEL
 
+    test_losses = []
+
     for step, data in zip(range(STEPS), dl(BZ)):
+
+        if TESTING:
+            # Test the model: Make sure the seed is different from the training seed
+            # so that the data contains different static and transient noise
+            test_loss = loss_fn(model, *data, gumbel_temp, hard_gumbel=True)
+            test_losses.append(test_loss)
+            print(f"Step {step}, Test loss: {test_loss}")
+
+            if USE_WANDB:
+                wandb.log(
+                    data={
+                        f"{log_prefix}_test_loss": test_loss,
+                    },
+                )
+
+            if step == STEPS - 1:
+                print(f"Average test loss: {np.mean(test_losses)}")
+                if USE_WANDB:
+                    wandb.log(
+                        data={
+                            f"{log_prefix}_average_test_loss": np.mean(test_losses),
+                        },
+                    )
+            continue
 
         if step == 0:  # Set up the baseline loss
             train_data = [d[:TRAIN_BZ] for d in data]
@@ -454,9 +487,13 @@ if __name__ == "__main__":
         row_init = np.random.normal(size=(N_ROW, N_COL - 1))
         col_init = np.random.normal(size=(N_ROW - 1, N_COL))
 
-    trainable_init = edge_init_to_trainable_init(
-        row_init, col_init, row_ks, col_ks, trainable_mgr
-    )
+    if not LOAD_WEIGHT:
+        trainable_init = edge_init_to_trainable_init(
+            row_init, col_init, row_ks, col_ks, trainable_mgr
+        )
+    else:
+        weights = jnp.load(LOAD_WEIGHT)
+        trainable_init = (weights["analog"], weights["digital"])
 
     plot_data = next(dl(PLOT_BZ))
 

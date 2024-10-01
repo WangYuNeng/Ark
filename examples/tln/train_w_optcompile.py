@@ -39,6 +39,10 @@ parser.add_argument("--tag", type=str, default=None)
 parser.add_argument(
     "--save_weight", type=str, default=None, help="Path to save weights"
 )
+parser.add_argument(
+    "--load_weight", type=str, default=None, help="Path to load weights"
+)
+parser.add_argument("--test", action="store_true", help="Test the model")
 args = parser.parse_args()
 np.random.seed(args.seed)
 
@@ -70,6 +74,9 @@ INST_PER_BATCH = args.inst_per_batch
 STEPS = args.steps
 PRINT_EVERY = args.print_every
 LOGISTIC_K = args.logistic_k
+
+LOAD_WEIGHT = args.load_weight
+TESTING = args.test
 
 print("Config:", train_config)
 
@@ -287,8 +294,33 @@ def train(
         return loss_value
 
     best_loss_precise = 0.5  # Upper bound of the i2o and bit-flipping test loss
-    best_weight = (model.a_trainable.copy(), model.d_trainable.copy())
+    best_weight = model.weights()
+
+    test_losses = []
+
     for step, (init_vals, switches, mismatch) in zip(range(steps), dataloader):
+        if TESTING:
+            # Test the model: Make sure the seed is different from the training seed
+            # so that the data contains different static and transient noise
+            test_loss = validate(model, init_vals, switches, mismatch)
+            test_losses.append(test_loss)
+            print(f"Test loss: {test_loss}")
+
+            if args.wandb:
+                wandb.log(
+                    data={
+                        "test_loss": test_loss,
+                    },
+                )
+            if step == STEPS - 1:
+                print(f"Average test loss: {np.mean(test_losses)}")
+                if args.wandb:
+                    wandb.log(
+                        data={
+                            "average_test_loss": np.mean(test_losses),
+                        },
+                    )
+            continue
         if step == 0:
             init_loss_precise = validate(model, init_vals, switches, mismatch)
             print(f"Initial loss_precise={init_loss_precise.item()}")
@@ -372,7 +404,14 @@ if __name__ == "__main__":
     train_loss = partial(i2o_loss, quantize_fn=partial(logistic, k=LOGISTIC_K))
     train_loss_precise = partial(i2o_loss, quantize_fn=step)
 
-    trainable_init = (mgr.get_initial_vals("analog"), mgr.get_initial_vals("digital"))
+    if LOAD_WEIGHT:
+        loaded_weight = jnp.load(LOAD_WEIGHT)
+        trainable_init = (loaded_weight["analog"], loaded_weight["digital"])
+    else:
+        trainable_init = (
+            mgr.get_initial_vals("analog"),
+            mgr.get_initial_vals("digital"),
+        )
     print(f"Trainable init: {trainable_init}")
 
     model: BaseAnalogCkt = puf_ckt_class(

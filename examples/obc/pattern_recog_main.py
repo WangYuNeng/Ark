@@ -484,8 +484,8 @@ if __name__ == "__main__":
         row_init /= N_CLASS
         col_init /= N_CLASS
     elif WEIGHT_INIT == "random":
-        row_init = np.random.normal(size=(N_ROW, N_COL - 1))
-        col_init = np.random.normal(size=(N_ROW - 1, N_COL))
+        row_init = np.random.uniform(low=-1, high=1, size=(N_ROW, N_COL - 1))
+        col_init = np.random.uniform(low=-1, high=1, size=(N_ROW - 1, N_COL))
 
     if not LOAD_WEIGHT:
         trainable_init = edge_init_to_trainable_init(

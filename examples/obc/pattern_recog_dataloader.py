@@ -124,6 +124,7 @@ def dataloader2(
     mapping_fn: Callable,
     snp_prob: float,
     gauss_std: float,
+    uniform_noise: bool = False,
 ):
     """Data loader for one-to-one reconstruction task
 
@@ -166,6 +167,11 @@ def dataloader2(
 
             # Add Gaussian noise
             node_init += np.random.normal(0, gauss_std, node_init.shape)
+
+            # Add uniform noise in [-0.5, 0.5]
+            # https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=7105424
+            if uniform_noise:
+                node_init += np.random.rand(*node_init.shape) - 0.5
 
             # Assign the initial state to the nodes
             for row in range(n_row):

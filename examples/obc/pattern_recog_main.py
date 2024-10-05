@@ -73,8 +73,10 @@ optim = getattr(optax, OPTIMIZER)(LEARNING_RATE)
 
 SNP_PROB, GAUSS_STD = args.snp_prob, args.gauss_std
 TRANS_NOISE_STD = args.trans_noise_std
+UNIFORM_NOISE = args.uniform_noise
 
 USE_WANDB = args.wandb
+TAG = args.tag
 TASK = args.task
 DIFF_FN = args.diff_fn
 
@@ -127,7 +129,8 @@ obc_spec.production_rules()[3]._noise_exp = TRANS_NOISE_STD
 obc_spec.production_rules()[4]._noise_exp = TRANS_NOISE_STD
 
 if USE_WANDB:
-    wandb_run = wandb.init(project="obc", config=vars(args), tags=["digit_recognition"])
+    tags = ["digit_recognitio"] if not TAG else ["digit_recognition", TAG]
+    wandb_run = wandb.init(project="obc", config=vars(args), tags=tags)
 
 
 def pattern_to_edge_initialization(pattern: np.ndarray):
@@ -461,6 +464,7 @@ if __name__ == "__main__":
             mapping_fn=rec_circuit_class.cdg_to_initial_states,
             snp_prob=SNP_PROB,
             gauss_std=GAUSS_STD,
+            uniform_noise=UNIFORM_NOISE,
         )
         loss_fn = partial(
             pattern_reconstruction_loss, time_info=time_info, diff_fn=diff_fn

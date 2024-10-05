@@ -87,8 +87,23 @@ parser.add_argument(
 parser.add_argument(
     "--point_per_cycle", type=int, default=50, help="Number of time points per cycle"
 )
-parser.add_argument("--snp_prob", type=float, default=0.0, help="Salt-and-pepper noise")
-parser.add_argument("--gauss_std", type=float, default=0.0, help="Gaussian noise std")
+parser.add_argument(
+    "--snp_prob",
+    type=float,
+    default=0.0,
+    help="Salt-and-pepper noise of the initial image",
+)
+parser.add_argument(
+    "--gauss_std",
+    type=float,
+    default=0.0,
+    help="Gaussian noise std of the initial image",
+)
+parser.add_argument(
+    "--uniform_noise",
+    action="store_true",
+    help="Add uniform noise to the initial image",
+)
 parser.add_argument(
     "--trans_noise_std", type=float, default=0.0, help="Transition noise std"
 )
@@ -115,6 +130,7 @@ parser.add_argument(
     "--no_noiseless_train", action="store_true", help="Skip noiseless training"
 )
 parser.add_argument("--wandb", action="store_true", help="Log to wandb")
+parser.add_argument("--tag", type=str, default=None, help="Tag for the wandb run")
 parser.add_argument(
     "--save_weight", type=str, default=None, help="Path to save weights"
 )

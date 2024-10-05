@@ -94,5 +94,6 @@ parser.add_argument(
 parser.add_argument(
     "--load_weight", type=str, default=None, help="Path to load weights"
 )
+parser.add_argument("--weight_scale", type=float, default=1.0, help="Scale the weights")
 parser.add_argument("--test", action="store_true", help="Test the model")
 args = parser.parse_args()

@@ -16,10 +16,17 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
-import wandb
+from ark.cdg.cdg import CDG
+from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
+from ark.optimization.opt_compiler import OptCompiler
+from ark.specification.cdg_types import EdgeType, NodeType
+from ark.specification.trainable import TrainableMgr
 from diffrax import Heun
-from edge_detection_parser import args
 from jaxtyping import PyTree
+from tqdm import tqdm
+
+import wandb
+from edge_detection_parser import args
 from spec import (
     FlowE,
     IdealV,
@@ -32,13 +39,6 @@ from spec import (
     saturation,
     saturation_diffpair,
 )
-from tqdm import tqdm
-
-from ark.cdg.cdg import CDG
-from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
-from ark.optimization.opt_compiler import OptCompiler
-from ark.specification.cdg_types import EdgeType, NodeType
-from ark.specification.trainable import TrainableMgr
 
 mgr = TrainableMgr()
 
@@ -235,9 +235,9 @@ def plot_evolution(
     y_raw = jax.vmap(model, in_axes=(None, 0, None, 0, 0))(
         time_info, x_init, [], args_seed, noise_seed
     )
-    plot_time = [i for i in range(len(saveat) + 1)]
+    plot_idx = [i for i in range(len(saveat))]
 
-    p_rows, p_cols = y_raw.shape[0], len(plot_time) + 1
+    p_rows, p_cols = y_raw.shape[0], len(plot_idx) + 1
     fig, ax = plt.subplots(
         ncols=p_cols,
         nrows=p_rows,
@@ -247,8 +247,8 @@ def plot_evolution(
     for i, y in enumerate(y_raw):
         y_readout = activation(y)
 
-        for j, time in enumerate(plot_time):
-            y_readout_t = y_readout[time].reshape(N_ROW, N_COL)
+        for j in plot_idx:
+            y_readout_t = y_readout[j].reshape(N_ROW, N_COL)
             ax[i, j].axis("off")
             ax[i, j].imshow(y_readout_t, cmap="gray_r", vmin=-1, vmax=1)
 
@@ -345,7 +345,8 @@ def train(
                     )
 
             continue
-        for data in tqdm(train_dl, desc="training"):
+        # for data in tqdm(train_dl, desc="training"):
+        for data in train_dl:
             if step == 0:  # Set up the baseline loss
                 train_loss = loss_fn(model, *data, activation)
                 losses.append(train_loss)
@@ -354,6 +355,8 @@ def train(
                     model, activation, opt_state, loss_fn, data
                 )
                 losses.append(train_loss)
+                print("Loss: ", train_loss)
+                print("Weight: ", model.weights())
 
                 # Dataset is large, iterate the dataset 1-2 times will converge
                 # Use fewer steps but log the loss more frequently
@@ -420,9 +423,9 @@ if __name__ == "__main__":
         B_mat = np.array([[-1.0, -1.0, -1.0], [-1.0, 8.0, -1.0], [-1.0, -1.0, -1.0]])
         bias = -0.5
     elif WEIGHT_INIT == "random":
-        A_mat = np.random.rand(3, 3)
-        B_mat = np.random.rand(3, 3)
-        bias = np.random.rand()
+        A_mat = args.weight_scale * (np.random.rand(3, 3) - 0.5)
+        B_mat = args.weight_scale * (np.random.rand(3, 3) - 0.5)
+        bias = args.weight_scale * (np.random.rand() - -0.5)
 
     if MM_NODE:
         v_nt = Vm

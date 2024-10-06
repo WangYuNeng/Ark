@@ -44,7 +44,15 @@ if args.weight_bits is None:
 else:
     N_BITS = args.weight_bits
 N_CHOICES = 2**N_BITS
-val_choices = [(-(2 ** (N_BITS - 1)) + i) * 2 / N_CHOICES for i in range(N_CHOICES)]
+
+
+def nbits_to_val_choices(n_bits: int) -> list[float]:
+    if n_bits == 1:
+        return [-1, 1]
+    return [(-(2 ** (n_bits - 1)) + i) * 2 / N_CHOICES for i in range(N_CHOICES)]
+
+
+val_choices = nbits_to_val_choices(N_BITS)
 Cpl_digital = EdgeType(
     "Cpl_digital",
     bases=Coupling,

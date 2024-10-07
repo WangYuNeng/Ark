@@ -52,6 +52,11 @@ N_CLASS = args.n_class
 N_CYCLES = args.n_cycle
 
 SEED = args.seed
+TEST_SEED = args.test_seed
+TEST_BZ = args.test_bz
+assert (
+    SEED != TEST_SEED
+), f"Training seed {SEED} is the same as the testing seed {TEST_SEED}"
 np.random.seed(SEED)
 
 WEIGHT_INIT = args.weight_init
@@ -115,6 +120,7 @@ if LOAD_WEIGHT and WEIGHT_INIT:
     print("Ignoring the weight init argument since the weight is loaded")
 
 TESTING = args.test
+TEST_DATA = None
 
 time_info = TimeInfo(
     t0=0,
@@ -215,6 +221,14 @@ def make_step(
     # When validating, always use hard gumbel to force the param to be physical
     val_loss = loss_fn(model, *val_data, gumbel_temp, hard_gumbel=True)
     return model, opt_state, train_loss, val_loss
+
+
+@eqx.filter_jit
+def test_model(
+    model: BaseAnalogCkt,
+    loss_fn: Callable,
+):
+    return loss_fn(model, *TEST_DATA, 1.0, True)
 
 
 def plot_evolution(
@@ -321,6 +335,7 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: st
         if TESTING:
             # Test the model: Make sure the seed is different from the training seed
             # so that the data contains different static and transient noise
+            # This is for testing more samples than the one tested with training steps.
             test_loss = loss_fn(model, *data, gumbel_temp, hard_gumbel=True)
             test_losses.append(test_loss)
             print(f"Step {step}, Test loss: {test_loss}")
@@ -352,12 +367,14 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: st
             model, opt_state, train_loss, val_loss = make_step(
                 model, opt_state, loss_fn, data, gumbel_temp, hard_gumbel
             )
+        test_loss = test_model(model, loss_fn)
 
         print(
-            f"Step {step}, Train loss: {train_loss}, Val loss: {val_loss}, Gumbel temp: {gumbel_temp}"
+            f"Step {step}, Train loss: {train_loss}, Val loss: {val_loss}, Test loss: {test_loss}, Gumbel temp: {gumbel_temp}"
         )
         if val_loss < val_loss_best:
             val_loss_best = val_loss
+            test_loss_best = test_loss
             best_weight = model.weights()
 
         if USE_WANDB:
@@ -365,10 +382,17 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: st
                 data={
                     f"{log_prefix}_train_loss": train_loss,
                     f"{log_prefix}_val_loss": val_loss,
+                    f"{log_prefix}_test_loss": test_loss,
                     "gumbel_temp": gumbel_temp,
                 },
             )
         gumbel_temp = next_gumbel_temp(step + 1)
+
+    if USE_WANDB:
+        # Report the test loss on the iteration with the best validation loss
+        wandb.log(
+            data={f"{log_prefix}_test_loss_w_best_val": test_loss_best},
+        )
 
     return val_loss_best, best_weight
 
@@ -470,6 +494,7 @@ if __name__ == "__main__":
             pattern_reconstruction_loss, time_info=time_info, diff_fn=diff_fn
         )
     elif TASK == "rand-to-many":
+
         dl = partial(dataloader, n_node=N_NODE)
         loss_fn = partial(
             min_rand_reconstruction_loss,
@@ -477,6 +502,13 @@ if __name__ == "__main__":
             diff_fn=diff_fn,
             N_CLASS=N_CLASS,
         )
+    # Store the random state and restore later
+    random_state = np.random.get_state()
+
+    # Generate the testing data with fixed seed
+    np.random.seed(TEST_SEED)
+    TEST_DATA = next(dl(TEST_BZ))
+    np.random.set_state(random_state)
 
     if WEIGHT_INIT == "hebbian":
         row_init, col_init = pattern_to_edge_initialization(NUMBERS[0])

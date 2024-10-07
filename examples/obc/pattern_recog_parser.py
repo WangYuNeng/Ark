@@ -138,5 +138,9 @@ parser.add_argument(
     "--load_weight", type=str, default=None, help="Path to load weights"
 )
 parser.add_argument("--test", action="store_true", help="Test the model")
+parser.add_argument("--test_bz", type=int, default=1024, help="Size of the test batch")
+parser.add_argument(
+    "--test_seed", type=int, default=428, help="Random seed for testing"
+)
 
 args = parser.parse_args()

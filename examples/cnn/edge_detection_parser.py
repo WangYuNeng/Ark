@@ -70,6 +70,7 @@ parser.add_argument(
 )
 parser.add_argument("--num_plot", type=int, default=4, help="Number of samples to plot")
 parser.add_argument("--wandb", action="store_true", help="Log to wandb")
+parser.add_argument("--tag", type=str, default=None, help="Tag for the wandb run")
 parser.add_argument(
     "--dataset",
     type=str,

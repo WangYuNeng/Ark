@@ -120,8 +120,9 @@ time_info = TimeInfo(
 
 
 USE_WANDB = args.wandb
+TAGS = ["edge-detection", args.tag] if args.tag else ["edge-detection"]
 if USE_WANDB:
-    wandb_run = wandb.init(project="cnn", config=vars(args), tags=["edge-detection"])
+    wandb_run = wandb.init(project="cnn", config=vars(args), tags=TAGS)
 
 
 def create_cnn(

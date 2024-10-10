@@ -16,17 +16,10 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
-from ark.cdg.cdg import CDG
-from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
-from ark.optimization.opt_compiler import OptCompiler
-from ark.specification.cdg_types import EdgeType, NodeType
-from ark.specification.trainable import TrainableMgr
-from diffrax import Heun
-from jaxtyping import PyTree
-from tqdm import tqdm
-
 import wandb
+from diffrax import Heun
 from edge_detection_parser import args
+from jaxtyping import PyTree
 from spec import (
     FlowE,
     IdealV,
@@ -39,6 +32,13 @@ from spec import (
     saturation,
     saturation_diffpair,
 )
+from tqdm import tqdm
+
+from ark.cdg.cdg import CDG
+from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
+from ark.optimization.opt_compiler import OptCompiler
+from ark.specification.cdg_types import EdgeType, NodeType
+from ark.specification.trainable import TrainableMgr
 
 mgr = TrainableMgr()
 
@@ -144,8 +144,22 @@ def create_cnn(
     graph = CDG()
     # Create shared trainable attributes
     if weight_sharing:
-        A_mat_var = [[mgr.new_analog(val) for val in row] for row in A_mat]
-        B_mat_var = [[mgr.new_analog(val) for val in row] for row in B_mat]
+        A_corner_var = mgr.new_analog(A_mat[0, 0])
+        A_edge_var = mgr.new_analog(A_mat[0, 1])
+        A_center_var = mgr.new_analog(A_mat[1, 1])
+        B_corner_var = mgr.new_analog(B_mat[0, 0])
+        B_edge_var = mgr.new_analog(B_mat[0, 1])
+        B_center_var = mgr.new_analog(B_mat[1, 1])
+        A_mat_var = [
+            [A_corner_var, A_edge_var, A_corner_var],
+            [A_edge_var, A_center_var, A_edge_var],
+            [A_corner_var, A_edge_var, A_corner_var],
+        ]
+        B_mat_var = [
+            [B_corner_var, B_edge_var, B_corner_var],
+            [B_edge_var, B_center_var, B_edge_var],
+            [B_corner_var, B_edge_var, B_corner_var],
+        ]
         bias_var = mgr.new_analog(bias)
 
     # Create nodes

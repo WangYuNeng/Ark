@@ -362,42 +362,30 @@ def train(
             continue
         # for data in tqdm(train_dl, desc="training"):
         for data in train_dl:
-            if step == 0:  # Set up the baseline loss
-                train_loss = loss_fn(model, *data, activation)
-                losses.append(train_loss)
-            else:
-                model, opt_state, train_loss = make_step(
-                    model, activation, opt_state, loss_fn, data
-                )
-                losses.append(train_loss)
-                print("Loss: ", train_loss)
-                print("Weight: ", model.weights())
+            model, opt_state, train_loss = make_step(
+                model, activation, opt_state, loss_fn, data
+            )
+            losses.append(train_loss)
+            print("Loss: ", train_loss)
+            print("Weight: ", model.weights())
 
-                # Dataset is large, iterate the dataset 1-2 times will converge
-                # Use fewer steps but log the loss more frequently
-                if DATASET == "silhouettes":
-                    if USE_WANDB:
-                        wandb.log(
-                            data={
-                                "train_loss": jnp.mean(train_loss),
-                            },
-                        )
+            # Dataset is large, iterate the dataset 1-2 times will converge
+            # Use fewer steps but log the loss more frequently
+            if DATASET == "silhouettes":
+                if USE_WANDB:
+                    wandb.log(
+                        data={
+                            "train_loss": jnp.mean(train_loss),
+                        },
+                    )
 
         train_loss = jnp.mean(jnp.array(losses))
         if train_loss < loss_best:
             loss_best = train_loss
             best_weight = model.weights()
 
-        if DATASET == "silhouettes":
-            # 0th step: log baseline loss
-            if USE_WANDB and step == 0:
-                wandb.log(
-                    data={
-                        "train_loss": train_loss,
-                    },
-                )
         # For other datasets, traning info is updated per step
-        else:
+        if DATASET != "silhouettes":
             losses = []
             for data in tqdm(test_dl, desc="testing"):
                 loss = loss_fn(model, *data, activation)

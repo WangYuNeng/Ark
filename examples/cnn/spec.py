@@ -6,7 +6,7 @@ ref: https://onlinelibrary.wiley.com/doi/abs/10.1002/cta.564
 import jax.numpy as jnp
 
 from ark.specification.attribute_def import AttrDef, AttrDefMismatch
-from ark.specification.attribute_type import AnalogAttr, FunctionAttr
+from ark.specification.attribute_type import AnalogAttr, DigitalAttr, FunctionAttr
 from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule
 from ark.specification.range import Range
@@ -79,6 +79,7 @@ fEm_1p = EdgeType(
         },
     },
 )
+
 fEm_10p = EdgeType(
     name="fEm_10p",
     bases=FlowE,
@@ -88,8 +89,28 @@ fEm_10p = EdgeType(
         },
     },
 )
+quantization_levels = [-8.0, -4.0, -2.0, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0, 4.0, 8.0]
+fEm_1p_quantized = EdgeType(
+    name="fEm_1p_quantized",
+    bases=FlowE,
+    attrs={
+        "attr_def": {
+            "g": AttrDefMismatch(attr_type=DigitalAttr(quantization_levels), rstd=0.01),
+        },
+    },
+)
+V_qunatized = NodeType(
+    name="V_quantized",
+    bases=IdealV,
+    attrs={
+        "attr_def": {
+            "z": AttrDef(attr_type=DigitalAttr(quantization_levels)),
+        },
+    },
+)
+
 cdg_types = [IdealV, Out, Inp, MapE, FlowE]
-mm_cdg_types = [Vm, fEm_1p, fEm_10p]
+mm_cdg_types = [Vm, fEm_1p, fEm_10p, fEm_1p_quantized, V_qunatized]
 cnn_spec.add_cdg_types(cdg_types)
 mm_cnn_spec.add_cdg_types(mm_cdg_types)
 #### Type definitions end ####

@@ -16,29 +16,32 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
-from ark.cdg.cdg import CDG
-from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
-from ark.optimization.opt_compiler import OptCompiler
-from ark.specification.cdg_types import EdgeType, NodeType
-from ark.specification.trainable import TrainableMgr
-from diffrax import Heun
-from jaxtyping import PyTree
-from tqdm import tqdm
-
 import wandb
+from diffrax import Heun
 from edge_detection_parser import args
+from jaxtyping import PyTree
 from spec import (
     FlowE,
     IdealV,
     Inp,
     MapE,
     Out,
+    V_qunatized,
     Vm,
     fEm_1p,
+    fEm_1p_quantized,
     mm_cnn_spec,
+    quantization_levels,
     saturation,
     saturation_diffpair,
 )
+from tqdm import tqdm
+
+from ark.cdg.cdg import CDG
+from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
+from ark.optimization.opt_compiler import OptCompiler
+from ark.specification.cdg_types import EdgeType, NodeType
+from ark.specification.trainable import TrainableMgr
 
 mgr = TrainableMgr()
 
@@ -56,6 +59,7 @@ WEIGHT_INIT = args.weight_init
 MM_NODE = args.mismatched_node
 MM_EDGE = args.mismatched_edge
 ACTIVATION = args.activation
+GUMBEL_TEMP_START, GUMBEL_TEMP_END = args.gumbel_temp_start, args.gumbel_temp_end
 
 PLOT_EVOLVE = args.plot_evolve
 NUM_PLOT = args.num_plot
@@ -111,6 +115,8 @@ if TESTING and not DATASET == "silhouettes":
         "Other datasets have testing along wiht training."
     )
 
+QUANTIZED_WEIGHT = args.quantized_weight
+
 time_info = TimeInfo(
     t0=0,
     t1=END_TIME,
@@ -122,6 +128,12 @@ time_info = TimeInfo(
 USE_WANDB = args.wandb
 if USE_WANDB:
     wandb_run = wandb.init(project="cnn", config=vars(args), tags=["edge-detection"])
+
+
+def quantize_to_one_hot(val: float, levels: list[float] = quantization_levels):
+    # Find the closest level and return the one-hot encoding
+    idx = np.argmin(np.abs(np.array(levels) - val))
+    return jnp.eye(len(levels))[idx]
 
 
 def create_cnn(
@@ -143,13 +155,38 @@ def create_cnn(
 
     graph = CDG()
     # Create shared trainable attributes
-    if weight_sharing:
-        A_mat_var = [[mgr.new_analog(val) for val in row] for row in A_mat]
-        B_mat_var = [[mgr.new_analog(val) for val in row] for row in B_mat]
-        bias_var = mgr.new_analog(bias)
+    if QUANTIZED_WEIGHT:
+        if not weight_sharing:
+            raise NotImplementedError(
+                "Quantized weight is not supported for non-weight sharing case"
+            )
+
+        # Further use the symmetry to reduce the number of trainable parameters
+        A_corner_var = mgr.new_digital(quantize_to_one_hot(A_mat[0, 0]))
+        A_edge_var = mgr.new_digital(quantize_to_one_hot(A_mat[0, 1]))
+        A_center_var = mgr.new_digital(quantize_to_one_hot(A_mat[1, 1]))
+        B_corner_var = mgr.new_digital(quantize_to_one_hot(B_mat[0, 0]))
+        B_edge_var = mgr.new_digital(quantize_to_one_hot(B_mat[0, 1]))
+        B_center_var = mgr.new_digital(quantize_to_one_hot(B_mat[1, 1]))
+        A_mat_var = [
+            [A_corner_var, A_edge_var, A_corner_var],
+            [A_edge_var, A_center_var, A_edge_var],
+            [A_corner_var, A_edge_var, A_corner_var],
+        ]
+        B_mat_var = [
+            [B_corner_var, B_edge_var, B_corner_var],
+            [B_edge_var, B_center_var, B_edge_var],
+            [B_corner_var, B_edge_var, B_corner_var],
+        ]
+        bias_var = mgr.new_digital(quantize_to_one_hot(bias))
+    else:
+        if weight_sharing:
+            A_mat_var = [[mgr.new_analog(val) for val in row] for row in A_mat]
+            B_mat_var = [[mgr.new_analog(val) for val in row] for row in B_mat]
+            bias_var = mgr.new_analog(bias)
 
     # Create nodes
-    if v_nt == IdealV:
+    if v_nt == IdealV or v_nt == V_qunatized:
         if not weight_sharing:
             bias_var = mgr.new_analog(bias)
         vs = [[v_nt(z=bias_var) for _ in range(ncols)] for _ in range(nrows)]
@@ -214,10 +251,12 @@ def mse_loss(
     args_seed: jnp.array,
     noise_seed: jnp.array,
     y: jnp.ndarray,
+    gumbel_temp: float,
+    hard_gumbel: bool,
     activation: Callable,
 ):
-    y_raw = jax.vmap(model, in_axes=(None, 0, None, 0, 0))(
-        time_info, x, [], args_seed, noise_seed
+    y_raw = jax.vmap(model, in_axes=(None, 0, None, 0, 0, None, None))(
+        time_info, x, [], args_seed, noise_seed, gumbel_temp, hard_gumbel
     )
     y_end_readout = activation(y_raw[:, -1, :])
     return jnp.mean(jnp.square(y_end_readout - y))
@@ -232,8 +271,8 @@ def plot_evolution(
 ):
     x_init, args_seed, noise_seed = data[0], data[1], data[2]
     y_true = data[3]
-    y_raw = jax.vmap(model, in_axes=(None, 0, None, 0, 0))(
-        time_info, x_init, [], args_seed, noise_seed
+    y_raw = jax.vmap(model, in_axes=(None, 0, None, 0, 0, None, None))(
+        time_info, x_init, [], args_seed, noise_seed, 1, True
     )
     plot_idx = [i for i in range(len(saveat))]
 
@@ -258,7 +297,7 @@ def plot_evolution(
             y_true[i].reshape(N_ROW, N_COL), cmap="gray_r", vmin=-1, vmax=1
         )
         di = [d[i : i + 1] for d in data]
-        losses.append(loss_fn(model, *di))
+        losses.append(loss_fn(model, *di, 1, True))
     loss = jnp.mean(jnp.array(losses))
     plt.suptitle(title + f", Loss: {loss:.4f}")
     plt.subplots_adjust(wspace=0, hspace=0)
@@ -299,11 +338,28 @@ def make_step(
     opt_state: PyTree,
     loss_fn: Callable,
     data: list[jax.Array],
+    gumbel_temp: float,
 ):
-    train_loss, grads = eqx.filter_value_and_grad(loss_fn)(model, *data, activation)
+    train_loss, grads = eqx.filter_value_and_grad(loss_fn)(
+        model, *data, gumbel_temp, False, activation
+    )
     updates, opt_state = optim.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
     return model, opt_state, train_loss
+
+
+@eqx.filter_jit
+def loss_hard_gumbel(
+    loss_fn: Callable,
+    model: BaseAnalogCkt,
+    data: list,
+    activation: Callable,
+):
+    return loss_fn(model, *data, 1, True, activation)
+
+
+def exp_schedule(step: int, start: float, end: float, tot_steps: int):
+    return np.exp(-step / (tot_steps - 1) * np.log(start / end)) * start
 
 
 def train(
@@ -317,16 +373,26 @@ def train(
     loss_best = 1e9
     best_weight = model.weights()
 
+    next_gumbel_temp = partial(
+        exp_schedule,
+        start=GUMBEL_TEMP_START,
+        end=GUMBEL_TEMP_END,
+        tot_steps=STEPS * len(train_dl),
+    )
+
     # Have testing set in the training loop for loggin simplicity...
     # Don't use any information from the testing set for training
     # TODO: Add validation split to better monitor overfitting
     test_losses = []
+    tot_step, gumbel_temp = 0, GUMBEL_TEMP_START
     for step in range(STEPS):
 
         losses = []
         if TESTING:
             for data in tqdm(test_dl, desc="testing"):
-                test_loss = loss_fn(model, *data, activation)
+                test_loss = loss_hard_gumbel(
+                    loss_fn=loss_fn, model=model, data=data, activation=activation
+                )
                 test_losses.append(test_loss)
 
                 if USE_WANDB:
@@ -348,13 +414,19 @@ def train(
         # for data in tqdm(train_dl, desc="training"):
         for data in train_dl:
             if step == 0:  # Set up the baseline loss
-                train_loss = loss_fn(model, *data, activation)
-                losses.append(train_loss)
-            else:
-                model, opt_state, train_loss = make_step(
-                    model, activation, opt_state, loss_fn, data
+                print(len(data))
+                train_loss = loss_hard_gumbel(
+                    loss_fn=loss_fn, model=model, data=data, activation=activation
                 )
                 losses.append(train_loss)
+            else:
+                train_loss_hard_gumbel = loss_hard_gumbel(
+                    loss_fn=loss_fn, model=model, data=data, activation=activation
+                )
+                model, opt_state, train_loss = make_step(
+                    model, activation, opt_state, loss_fn, data, gumbel_temp
+                )
+                losses.append(train_loss_hard_gumbel)
                 print("Loss: ", train_loss)
                 print("Weight: ", model.weights())
 
@@ -364,9 +436,13 @@ def train(
                     if USE_WANDB:
                         wandb.log(
                             data={
-                                "train_loss": jnp.mean(train_loss),
+                                "train_loss": train_loss,
+                                "train_loss_hard_gumbel": train_loss_hard_gumbel,
+                                "Gumbel temperature": gumbel_temp,
                             },
                         )
+                tot_step += 1
+                gumbel_temp = next_gumbel_temp(tot_step)
 
         train_loss = jnp.mean(jnp.array(losses))
         if train_loss < loss_best:
@@ -379,13 +455,16 @@ def train(
                 wandb.log(
                     data={
                         "train_loss": train_loss,
+                        "train_loss_hard_gumbel": train_loss,
                     },
                 )
         # For other datasets, traning info is updated per step
         else:
             losses = []
             for data in tqdm(test_dl, desc="testing"):
-                loss = loss_fn(model, *data, activation)
+                loss = loss_hard_gumbel(
+                    loss_fn=loss_fn, model=model, data=data, activation=activation
+                )
                 losses.append(loss)
             test_loss = jnp.mean(jnp.array(losses))
 
@@ -420,8 +499,16 @@ if __name__ == "__main__":
 
     if WEIGHT_INIT == "edge-detection":
         A_mat = np.array([[0.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 0.0]])
+        # A_mat = np.array([[-0.5, 1.0, -0.5], [1.0, 0.5, 1.0], [-0.5, 1.0, -0.5]])
+        # A_mat = np.array(
+        # [[-0.25, 0.75, -0.25], [0.75, 0.5, 0.75], [-0.25, 0.75, -0.25]]
+        # )
         B_mat = np.array([[-1.0, -1.0, -1.0], [-1.0, 8.0, -1.0], [-1.0, -1.0, -1.0]])
+        # B_mat = np.array([[-2.0, -0.5, -2.0], [-0.5, 8.0, -0.5], [-2.0, -0.5, -2.0]])
+        # B_mat = np.array([[-1.9, -0.5, -1.9], [-0.5, 8.0, -0.5], [-1.9, -0.5, -1.9]])
         bias = -0.5
+        # bias = 0.0
+        # bias = 0.19
     elif WEIGHT_INIT == "random":
         A_mat = args.weight_scale * (np.random.rand(3, 3) - 0.5)
         B_mat = args.weight_scale * (np.random.rand(3, 3) - 0.5)
@@ -432,11 +519,20 @@ if __name__ == "__main__":
     else:
         v_nt = IdealV
 
-    if MM_EDGE != 0:
-        flow_et = fEm_1p
+    if QUANTIZED_WEIGHT:
+        if not MM_EDGE or MM_NODE:
+            raise NotImplementedError(
+                "Quantized weight only supports mismatched edge and ideal node"
+            )
+        v_nt = V_qunatized
+        flow_et = fEm_1p_quantized
         flow_et.attr_def["g"].rstd = MM_EDGE
     else:
-        flow_et = FlowE
+        if MM_EDGE != 0:
+            flow_et = fEm_1p  # Use 1 percent for convenience, change the std dev according to the input
+            flow_et.attr_def["g"].rstd = MM_EDGE
+        else:
+            flow_et = FlowE
 
     if ACTIVATION == "ideal":
         activation_fn = saturation

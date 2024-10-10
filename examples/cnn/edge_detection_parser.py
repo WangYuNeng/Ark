@@ -30,6 +30,18 @@ parser.add_argument(
     choices=["ideal", "diffpair"],
     help="Activation function to use in the CNN",
 )
+parser.add_argument(
+    "--gumbel_temp_start",
+    type=float,
+    default=10,
+    help="Initial temperature for the gumbel softmax",
+)
+parser.add_argument(
+    "--gumbel_temp_end",
+    type=float,
+    default=1,
+    help="Final temperature for the gumbel softmax",
+)
 
 parser.add_argument(
     "--end_time", type=float, default=1.0, help="End time of simulation"
@@ -95,5 +107,8 @@ parser.add_argument(
     "--load_weight", type=str, default=None, help="Path to load weights"
 )
 parser.add_argument("--weight_scale", type=float, default=1.0, help="Scale the weights")
+parser.add_argument(
+    "--quantized_weight", action="store_true", help="Use quantized weights"
+)
 parser.add_argument("--test", action="store_true", help="Test the model")
 args = parser.parse_args()

@@ -246,42 +246,55 @@ def plot_evolution(
     title: str,
 ):
     x_init, args_seed, noise_seed = data[0], data[1], data[2]
+    # Half of the init is image, half is the 0 initial state.
+    image_dim = x_init.shape[1] // 2
     y_true = data[3]
     y_raw = jax.vmap(model, in_axes=(None, 0, None, 0, 0))(
         time_info, x_init, [], args_seed, noise_seed
     )
     plot_idx = [i for i in range(len(saveat))]
 
-    p_rows, p_cols = y_raw.shape[0], len(plot_idx) + 1
-    fig, ax = plt.subplots(
+    p_rows, p_cols = y_raw.shape[0], len(plot_idx) + 2
+    fig, axes = plt.subplots(
         ncols=p_cols,
         nrows=p_rows,
         figsize=(p_cols, p_rows * 1.75),
     )
     losses = []
     for i, y in enumerate(y_raw):
+        # Special case for single row
+        if p_rows == 1:
+            ax = axes
+        else:
+            ax = axes[i]
+
+        # Plot the input image
+        ax[0].axis("off")
+        ax[0].imshow(
+            x_init[i][image_dim:].reshape(N_ROW, N_COL), cmap="gray_r", vmin=-1, vmax=1
+        )
+
+        # Plot the image under ideal cnn (target)
+        ax[1].axis("off")
+        ax[1].imshow(y_true[i].reshape(N_ROW, N_COL), cmap="gray_r", vmin=-1, vmax=1)
         y_readout = activation(y)
 
         for j in plot_idx:
             y_readout_t = y_readout[j].reshape(N_ROW, N_COL)
-            ax[i, j].axis("off")
-            ax[i, j].imshow(y_readout_t, cmap="gray_r", vmin=-1, vmax=1)
+            ax[j + 2].axis("off")
+            ax[j + 2].imshow(y_readout_t, cmap="gray_r", vmin=-1, vmax=1)
 
-        # Plot the image under ideal cnn (target)
-        ax[i, -1].axis("off")
-        ax[i, -1].imshow(
-            y_true[i].reshape(N_ROW, N_COL), cmap="gray_r", vmin=-1, vmax=1
-        )
         di = [d[i : i + 1] for d in data]
         losses.append(loss_fn(model, *di))
     loss = jnp.mean(jnp.array(losses))
-    plt.suptitle(title + f", Loss: {loss:.4f}")
+    # plt.suptitle(title + f", Loss: {loss:.4f}")
     plt.subplots_adjust(wspace=0, hspace=0)
     plt.tight_layout()
     if USE_WANDB:
         wandb.log(data={f"{title}_evolution": plt}, commit=False)
         plt.close()
     else:
+        plt.savefig(f"{title}_loss={loss:.4f}.pdf", bbox_inches="tight", dpi=300)
         plt.show()
 
 

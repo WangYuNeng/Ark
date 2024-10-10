@@ -444,6 +444,8 @@ class SilhouettesDataLoader(DataLoader):
 
         data: dict = np.load(self.DATA_DIR / f"{dataset_type}.npz")
         images = data["images"]
+        # Map the images to [-1, 1]
+        images = np.where(images == 1, -1, 1)
         self.dataset_type = dataset_type
 
         super().__init__(images, batch_size, shuffle)

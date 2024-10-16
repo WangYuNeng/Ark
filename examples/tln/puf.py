@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from functools import partial
+from typing import Optional
 
 import numpy as np
 from spec import mm_tln_spec, pulse
@@ -14,10 +15,10 @@ from ark.specification.trainable import Trainable, TrainableMgr
 class PUFParams:
 
     mgr: TrainableMgr
-    middle_cap: Trainable
-    branch_caps: list[Trainable]
-    branch_inds: list[Trainable]
-    branch_gms: tuple[list[Trainable], list[Trainable]]
+    middle_cap: Trainable | float
+    branch_caps: list[Trainable | float]
+    branch_inds: list[Trainable | float]
+    branch_gms: tuple[list[Trainable | float], list[Trainable | float]]
 
 
 def create_branch(
@@ -72,6 +73,9 @@ def create_switchable_star_cdg(
     et: EdgeType,
     self_et: EdgeType,
     inp_nt: NodeType,
+    init_caps: Optional[list[float]] = None,
+    init_inds: Optional[list[float]] = None,
+    init_gms: Optional[tuple[list[float], list[float]]] = None,
 ) -> tuple[
     CDG,
     tuple[CDGNode, CDGNode],
@@ -91,6 +95,10 @@ def create_switchable_star_cdg(
         et (EdgeType): The edge type of connections.
         self_et (EdgeType): The edge type of self-connections.
         inp_nt (NodeType): The node type of the input current node.
+        init_caps (Optional[list[float]]): The initial values of the capacitors.
+        init_inds (Optional[list[float]]): The initial values of the inductors.
+        init_gms (Optional[tuple[list[float], list[float]]): The initial values of the
+            transconductances.
 
     Returns:
         CDG,
@@ -105,16 +113,41 @@ def create_switchable_star_cdg(
         symbolic PUF parameters.
     """
 
+    assert not init_caps or len(init_caps) == line_len + 1
+    assert not init_inds or len(init_inds) == line_len
+    assert not init_gms or (
+        len(init_gms[0]) == 2 * line_len and len(init_gms[1]) == 2 * line_len
+    )
+
+    if not init_caps:
+        init_caps = [None] * (line_len + 1)
+    if not init_inds:
+        init_inds = [None] * line_len
+    if not init_gms:
+        init_gms = ([None] * 2 * line_len, [None] * 2 * line_len)
+
     # Initialize all the trainable elements
     weight_mgr = TrainableMgr()
     puf_params = PUFParams(
         mgr=weight_mgr,
-        middle_cap=weight_mgr.new_analog(),
-        branch_caps=[weight_mgr.new_analog() for _ in range(line_len)],
-        branch_inds=[weight_mgr.new_analog() for _ in range(line_len)],
+        middle_cap=init_caps[0] if init_caps[0] else weight_mgr.new_analog(),
+        branch_caps=[
+            init_caps[i] if init_caps[i] else weight_mgr.new_analog()
+            for i in range(1, line_len + 1)
+        ],
+        branch_inds=[
+            init_inds[i] if init_inds[i] else weight_mgr.new_analog()
+            for i in range(line_len)
+        ],
         branch_gms=(
-            [weight_mgr.new_analog() for _ in range(2 * line_len)],
-            [weight_mgr.new_analog() for _ in range(2 * line_len)],
+            [
+                init_gms[0][i] if init_gms[0][i] else weight_mgr.new_analog()
+                for i in range(2 * line_len)
+            ],
+            [
+                init_gms[1][i] if init_gms[1][i] else weight_mgr.new_analog()
+                for i in range(2 * line_len)
+            ],
         ),
     )
 

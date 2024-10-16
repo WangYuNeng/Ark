@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import optax
 import wandb
-from diffrax import Tsit5
+from diffrax import Heun, Tsit5
 from jaxtyping import Array, PyTree
 from puf import PUFParams, create_switchable_star_cdg
 from spec import IdealE, InpI, MmE, MmI, MmV, lc_range, mm_tln_spec, w_range
@@ -19,6 +19,7 @@ from spec import IdealE, InpI, MmE, MmI, MmV, lc_range, mm_tln_spec, w_range
 from ark.cdg.cdg import CDG, CDGEdge
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
+from ark.specification.trainable import Trainable
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--seed", type=int, default=0)
@@ -43,6 +44,15 @@ parser.add_argument(
     "--load_weight", type=str, default=None, help="Path to load weights"
 )
 parser.add_argument("--test", action="store_true", help="Test the model")
+parser.add_argument(
+    "--fix_weight_exp",
+    type=str,
+    default=None,
+    choices=["high_lc", "low_lc"],
+    help="Experiment to test fixed LC, ws, wt values\n"
+    "`high_lc`: use large LC value for the first two LC, expected to result in high I2O\n"
+    "`low_lc`: use small LC value for the first two LC, expected to result in low I2O\n",
+)
 args = parser.parse_args()
 np.random.seed(args.seed)
 
@@ -78,6 +88,8 @@ LOGISTIC_K = args.logistic_k
 LOAD_WEIGHT = args.load_weight
 TESTING = args.test
 
+FIX_WEIGHT_EXP = args.fix_weight_exp
+
 print("Config:", train_config)
 
 optim = optax.adam(LEARNING_RATE)
@@ -100,12 +112,19 @@ def plot_single_star_rsp(model, init_vals, switch, mismatch):
         saveat=time_points,
     )
 
-    switch_val = switch[0][0][0]
-    trace = model(readout_trace_time_info, init_vals, switch_val, mismatch[0], 0)
-    trace = np.array(trace).squeeze()
+    # switch_val = switch[0][0][0]
+    switch_val = jnp.array([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+    for noise_seed in range(5):
+        trace = model(
+            readout_trace_time_info, init_vals, switch_val, mismatch[0], noise_seed
+        )
+        trace = np.array(trace).squeeze()
+        plt.plot(time_points, trace[:, 0] - trace[:, 1])
+        # plt.plot(time_points, trace[:, 0])
+        # plt.plot(time_points, trace[:, 1])
     plt.title(f"switch={switch_val}")
-    plt.plot(time_points, trace[:, 0])
-    plt.plot(time_points, trace[:, 1])
+    plt.savefig("tmp.png", bbox_inches="tight", dpi=150)
+    exit()
     plt.show()
     plt.close()
 
@@ -353,6 +372,29 @@ def train(
 if __name__ == "__main__":
 
     puf_params: PUFParams
+    if FIX_WEIGHT_EXP:
+        assert (
+            NORMALIZE_WEIGHT and N_BRANCH == 32 and LINE_LEN == 4
+        ), "Fix weight experiment should be conducted wtih 32 branches and "
+        "line length = 4 with normalized weight"
+        if FIX_WEIGHT_EXP == "high_lc":
+            c_val = 1.024749999832789e-09
+            l_val = 1.0247499998703339e-09
+            gm0 = gm1 = 0.996250000141801
+        elif FIX_WEIGHT_EXP == "low_lc":
+            c_val = 7.965261944203275e-10
+            l_val = 8.414712707369841e-10
+            gm0 = gm1 = 1.0265654825149246
+
+        init_caps = [c_val] + [None] * LINE_LEN
+        init_inds = [l_val] + [None] * (LINE_LEN - 1)
+        init_gms = [
+            [gm0] + [None] * (2 * LINE_LEN - 1),
+            [gm1] + [None] * (2 * LINE_LEN - 1),
+        ]
+    else:
+        init_caps = init_inds = init_gms = None
+
     puf_cdg, middle_caps, switch_pairs, branch_pairs, puf_params = (
         create_switchable_star_cdg(
             n_bits=N_BRANCH,
@@ -362,6 +404,9 @@ if __name__ == "__main__":
             et=MmE,
             self_et=IdealE,
             inp_nt=InpI,
+            init_caps=init_caps,
+            init_inds=init_inds,
+            init_gms=init_gms,
         )
     )
 
@@ -373,19 +418,24 @@ if __name__ == "__main__":
             # Normalize val to [-1, 1]
             return 2 * (val - low) / (high - low) - 1
 
+        def set_val_if_trainable(var: Trainable | float, val: float):
+            if isinstance(var, Trainable):
+                var.init_val = val
+
         lc_val = (
             normalize(1e-9, lc_range.min, lc_range.max) if NORMALIZE_WEIGHT else 1e-9
         )
         gm_val = normalize(1, w_range.min, w_range.max) if NORMALIZE_WEIGHT else 1
-        puf_params.middle_cap.init_val = (
-            normalize(1e-9, lc_range.min, lc_range.max) if NORMALIZE_WEIGHT else 1e-9
+        set_val_if_trainable(
+            puf_params.middle_cap,
+            (normalize(1e-9, lc_range.min, lc_range.max) if NORMALIZE_WEIGHT else 1e-9),
         )
         for cap, ind in zip(puf_params.branch_caps, puf_params.branch_inds):
-            cap.init_val = lc_val
-            ind.init_val = lc_val
+            set_val_if_trainable(cap, lc_val)
+            set_val_if_trainable(ind, lc_val)
         for gm0, gm1 in zip(puf_params.branch_gms[0], puf_params.branch_gms[1]):
-            gm0.init_val = gm_val
-            gm1.init_val = gm_val
+            set_val_if_trainable(gm0, gm_val)
+            set_val_if_trainable(gm1, gm_val)
 
     mgr = puf_params.mgr
     puf_ckt_class = OptCompiler().compile(
@@ -418,9 +468,8 @@ if __name__ == "__main__":
         init_trainable=trainable_init,
         is_stochastic=False,
         solver=Tsit5(),
-        # init_trainable=trainable_init,
-        # is_stochastic=False,
-        # solver=Tsit5(),
+        # is_stochastic=True,
+        # solver=Heun(),
     )
 
     # for init_vals, switches, mismatch in loader:

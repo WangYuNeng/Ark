@@ -239,6 +239,8 @@ def plot_evolution(
     gumbel_temp: float,
     hard_gumbel: bool = True,
 ):
+    # python pattern_recog_main.py --n_class 5 --diff_fn periodic_mse  --trans_noise_std 0.025 --steps 64   --bz 48 --seed 666  --num_plot 20 --plot_evolve 4  --no_noiseless_train --pattern_shape 10x6 --weight_init hebbian --weight_bit 1 --uniform_noise
+    # plot the 13th
     x_init, args_seed, noise_seed = data[0], data[1], data[2]
     y_raw = jax.vmap(model, in_axes=(None, 0, None, 0, 0, None, None))(
         time_info, x_init, [], args_seed, noise_seed, gumbel_temp, hard_gumbel
@@ -247,13 +249,19 @@ def plot_evolution(
 
     n_row, n_col = y_raw.shape[0], len(plot_time)
     fig, ax = plt.subplots(
-        ncols=len(plot_time), nrows=y_raw.shape[0], figsize=(n_col, n_row * 1.75)
+        ncols=len(plot_time), nrows=y_raw.shape[0], figsize=(n_col, n_row * 1.5)
     )
+    # fig, ax = plt.subplots(ncols=len(plot_time), nrows=1, figsize=(3, 1.75))
     losses = []
     for i, y in enumerate(y_raw):
         # phase is periodic over 2
         y_readout = y % 2
 
+        di = [d[i : i + 1] for d in data]
+        # if i != 13:
+        #     continue
+        loss = loss_fn(model, *di, gumbel_temp, hard_gumbel)
+        losses.append(loss)
         for j, time in enumerate(plot_time):
             y_readout_t = y_readout[time].reshape(N_ROW, N_COL)
             y_readout_t = jnp.abs(y_readout_t - y_readout_t[0, 0])
@@ -262,16 +270,25 @@ def plot_evolution(
             ax[i, j].axis("off")
             ax[i, j].imshow(phase_diff, cmap="gray_r", vmin=0, vmax=1)
 
-        di = [d[i : i + 1] for d in data]
-        losses.append(loss_fn(model, *di, gumbel_temp, hard_gumbel))
+            # ax[j].axis("off")
+            # ax[j].imshow(phase_diff, cmap="gray_r", vmin=0, vmax=1)
     loss = jnp.mean(jnp.array(losses))
     plt.suptitle(title + f", Loss: {loss:.4f}")
+
+    # Add x-axis to the bottom row
+    # plt.rcParams["text.usetex"] = True
+    # x_labels = [f"$t_{i}$" for i in plot_time]
+    # a: plt.Axes
+    # for a, x_label in zip(ax[-1], x_labels):
+    # for a, x_label in zip(ax, x_labels):
+    #     a.set_title(x_label, y=-0.4, fontsize=25)
     plt.subplots_adjust(wspace=0, hspace=0)
     plt.tight_layout()
     if USE_WANDB:
         wandb.log(data={f"{title}_evolution": plt}, commit=False)
         plt.close()
     else:
+        plt.savefig(f"{title}-loss_{loss:.4f}.pdf", bbox_inches="tight", dpi=300)
         plt.show()
 
 
@@ -329,6 +346,7 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: st
     hard_gumbel = USE_HARD_GUMBEL
 
     test_losses = []
+    val_loss_best = 1e9
 
     for step, data in zip(range(STEPS), dl(BZ)):
 

@@ -143,6 +143,43 @@ _v2i_mm = ProdRule(MmE, IdealV, IdealI, SRC, -EDGE.ws * VAR(DST) / SRC.c)
 v2_i_mm = ProdRule(MmE, IdealV, IdealI, DST, EDGE.wt * VAR(SRC) / DST.l)
 _i2v_mm = ProdRule(MmE, IdealI, IdealV, SRC, -EDGE.ws * VAR(DST) / SRC.l)
 i2_v_mm = ProdRule(MmE, IdealI, IdealV, DST, EDGE.wt * VAR(SRC) / DST.c)
+
+# If want to do noise simulation, uncomment the following lines
+# integrate 4kTrgm (k=1.38e-23, T=300K, r=2/3, g=1e-6) to 100GHz to get noise amplitude
+# noise amp = sqrt(4 * 1.38e-23 * 300 * 2/3 * 1e-5 * 100e9) ~= 1e-7
+# noise_amp = 1e-7
+# _v2i_mm = ProdRule(
+#     MmE,
+#     IdealV,
+#     IdealI,
+#     SRC,
+#     -EDGE.ws * VAR(DST) / SRC.c,
+#     noise_exp=EDGE.ws * noise_amp / SRC.c,
+# )
+# v2_i_mm = ProdRule(
+#     MmE,
+#     IdealV,
+#     IdealI,
+#     DST,
+#     EDGE.wt * VAR(SRC) / DST.l,
+#     noise_exp=EDGE.wt * noise_amp / DST.l,
+# )
+# _i2v_mm = ProdRule(
+#     MmE,
+#     IdealI,
+#     IdealV,
+#     SRC,
+#     -EDGE.ws * VAR(DST) / SRC.l,
+#     noise_exp=EDGE.ws * noise_amp / SRC.l,
+# )
+# i2_v_mm = ProdRule(
+#     MmE,
+#     IdealI,
+#     IdealV,
+#     DST,
+#     EDGE.wt * VAR(SRC) / DST.c,
+#     noise_exp=EDGE.wt * noise_amp / DST.c,
+# )
 inpv2_v_mm = ProdRule(
     MmE, InpV, IdealV, DST, EDGE.wt * (SRC.fn(TIME) - VAR(DST)) / DST.c / SRC.r
 )

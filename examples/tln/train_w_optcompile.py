@@ -21,6 +21,7 @@ from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
 from ark.specification.trainable import Trainable
 
+plt.rcParams["text.usetex"] = True
 parser = argparse.ArgumentParser()
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--learning_rate", type=float, default=5e-2)
@@ -127,6 +128,76 @@ def plot_single_star_rsp(model, init_vals, switch, mismatch):
     exit()
     plt.show()
     plt.close()
+
+
+def plot_puf_output_with_noise(puf_ckt_class, trainable_init, init_vals, mismatch):
+    """Plot the PUF response without noise and with noise."""
+
+    noiseless_model = puf_ckt_class(
+        init_trainable=trainable_init,
+        is_stochastic=False,
+        solver=Heun(),
+    )
+    noisy_model = puf_ckt_class(
+        init_trainable=trainable_init,
+        is_stochastic=True,
+        solver=Heun(),
+    )
+
+    readout_time = READOUT_TIME * 1.5
+    time_points = np.arange(0, readout_time, READOUT_TIME / N_TIME_POINTS)
+    readout_trace_time_info = TimeInfo(
+        t0=0.0,
+        t1=readout_time,
+        dt0=readout_time / N_TIME_POINTS,
+        saveat=time_points,
+    )
+    plt.figure(figsize=(5, 4))
+    plt.grid(True)
+    switch_val = jnp.array([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+    for mm_seed in [0, 1]:
+        for noise_seed in range(20):
+            trace = noisy_model(
+                readout_trace_time_info, init_vals, switch_val, mm_seed, noise_seed
+            )
+            trace = np.array(trace).squeeze()
+            plt.plot(
+                time_points * 1e9,
+                trace[:, 0] - trace[:, 1],
+                alpha=0.5,
+                color="red",
+                linewidth=2,
+            )
+        trace = noiseless_model(
+            readout_trace_time_info, init_vals, switch_val, mm_seed, 0
+        )
+        trace = np.array(trace).squeeze()
+        plt.plot(
+            time_points * 1e9, trace[:, 0] - trace[:, 1], color="blue", linewidth=2
+        )
+
+    plt.xlabel("Time (nanosecond)", fontsize=24)
+    plt.xticks(fontsize=22)
+    plt.ylabel("SS-PUF Readout", fontsize=24)
+    plt.yticks(fontsize=22)
+
+    plt.axvline(
+        x=10, color="green", linestyle="--", linewidth=2
+    )  # Vertical line at t=10ns
+    plt.text(
+        3,
+        -1.25,
+        "Readout time",
+        # rotation=90,
+        verticalalignment="center",
+        horizontalalignment="left",
+        fontsize=22,
+        color="green",
+    )
+
+    plt.savefig("tln-puf-w-noise.pdf", bbox_inches="tight", dpi=300)
+    plt.show()
+    exit()
 
 
 def step(x):
@@ -473,12 +544,18 @@ if __name__ == "__main__":
     )
 
     # for init_vals, switches, mismatch in loader:
-    #     plot_single_star_rsp(
-    #         model,
-    #         init_vals,
-    #         switches,
-    #         mismatch,
-    #     )
+    # plot_single_star_rsp(
+    #     model,
+    #     init_vals,
+    #     switches,
+    #     mismatch,
+    # )
+    # plot_puf_output_with_noise(
+    #     puf_ckt_class,
+    #     trainable_init,
+    #     init_vals,
+    #     mismatch,
+    # )
     best_loss, best_weight = train(
         model=model,
         loss=train_loss,

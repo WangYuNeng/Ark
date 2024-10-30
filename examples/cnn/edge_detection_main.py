@@ -40,6 +40,7 @@ from ark.optimization.opt_compiler import OptCompiler
 from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.trainable import TrainableMgr
 
+plt.rcParams["text.usetex"] = True
 mgr = TrainableMgr()
 
 SEED = args.seed
@@ -245,6 +246,8 @@ def plot_evolution(
     data: list[jax.Array],
     title: str,
 ):
+    # Plot in the paper
+    # python edge_detection_main.py --plot_evolve 4 --num_plot 1 --dataset silhouettes --mismatched_edge 0.1 --end_time 1.5 --load_weight weights/1010_symmetric_weight/0.npz --seed 2
     x_init, args_seed, noise_seed = data[0], data[1], data[2]
     # Half of the init is image, half is the 0 initial state.
     image_dim = x_init.shape[1] // 2
@@ -286,6 +289,13 @@ def plot_evolution(
 
         di = [d[i : i + 1] for d in data]
         losses.append(loss_fn(model, *di))
+
+        if i == len(y_raw) - 1:
+            # Add x-axis to the bottom row
+            x_labels = ["", ""] + [f"$t_{i+1}$" for i in plot_idx]
+            a: plt.Axes
+            for a, x_label in zip(ax, x_labels):
+                a.set_title(x_label, y=-0.4, fontsize=16)
     loss = jnp.mean(jnp.array(losses))
     # plt.suptitle(title + f", Loss: {loss:.4f}")
     plt.subplots_adjust(wspace=0, hspace=0)
@@ -294,8 +304,61 @@ def plot_evolution(
         wandb.log(data={f"{title}_evolution": plt}, commit=False)
         plt.close()
     else:
-        plt.savefig(f"{title}_loss={loss:.4f}.pdf", bbox_inches="tight", dpi=300)
+        plt.savefig(f"{title}_loss={loss:.4f}.png", bbox_inches="tight", dpi=300)
         plt.show()
+
+
+def plot_one_pixel_evolution(
+    model: BaseAnalogCkt,
+    activation: Callable,
+    data: list[jax.Array],
+):
+    x_init, args_seed, noise_seed = data[0], data[1], data[2]
+    # Half of the init is image, half is the 0 initial state.
+    end_time = 1.5
+    time_points = np.linspace(0, end_time, 100)
+    time_info_dense = TimeInfo(
+        t0=0,
+        t1=end_time,
+        dt0=end_time / 100,
+        saveat=time_points,
+    )
+    y_raw = jax.vmap(model, in_axes=(None, 0, None, 0, 0))(
+        time_info_dense, x_init, [], args_seed, noise_seed
+    )
+    y_output = activation(y_raw)
+
+    plt.figure(figsize=(5, 3))
+
+    plt.plot(time_points, y_output[0, :, :], linewidth=2)
+
+    plt.xlabel("Time", fontsize=14)
+    plt.ylabel(r"$f(x_{ij})$", fontsize=18)
+
+    for t, text in zip([0.5, 1.0, 1.5], ["$t_1$", "$t_2$", "$t_3$"]):
+        plt.axvline(
+            x=t, color="green", linestyle="--", linewidth=2
+        )  # Vertical line at t=10ns
+        plt.text(
+            t - 0.1,
+            0,
+            text,
+            verticalalignment="center",
+            fontsize=18,
+            color="green",
+        )
+    # plt.axhline(y=1, color="brown", linestyle="--", linewidth=2)  # Horizontal line at 1
+    # plt.axhline(
+    #     y=-1, color="brown", linestyle="--", linewidth=2
+    # )  # Horizontal line at 1
+    # plt.text(
+    #     0, 2.5, "clamping range", verticalalignment="center", fontsize=18, color="brown"
+    # )
+
+    plt.tick_params(axis="both", which="major", labelsize=12)  # Increase tick size
+    plt.grid(True)
+    plt.savefig("cnn-one-pixel-evol.pdf", bbox_inches="tight", dpi=300)
+    plt.show()
 
 
 def load_model_and_plot(
@@ -564,7 +627,8 @@ if __name__ == "__main__":
         plot_dl.load_edge_detected_data(test_idl_imgs)
 
     plot_data = next(iter(plot_dl))
-
+    # plot_one_pixel_evolution(model, activation_fn, plot_data)
+    # exit()
     load_model_and_plot(
         model_cls=cnn_ckt_class,
         activation=activation_fn,

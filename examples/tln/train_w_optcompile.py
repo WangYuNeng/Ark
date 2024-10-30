@@ -25,6 +25,9 @@ plt.rcParams["text.usetex"] = True
 parser = argparse.ArgumentParser()
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--learning_rate", type=float, default=5e-2)
+parser.add_argument("--pulse_rise_time", type=float, default=0.5e-9)
+parser.add_argument("--pulse_fall_time", type=float, default=0.5e-9)
+parser.add_argument("--pulse_width", type=float, default=1e-9)
 parser.add_argument("--n_branch", type=int, default=10)
 parser.add_argument("--line_len", type=int, default=4)
 parser.add_argument("--n_time_points", type=int, default=100)
@@ -74,6 +77,9 @@ if args.wandb:
         )
 
 LEARNING_RATE = args.learning_rate
+PULSE_RISE_TIME = args.pulse_rise_time
+PULSE_FALL_TIME = args.pulse_fall_time
+PULSE_WIDTH = args.pulse_width
 N_BRANCH = args.n_branch
 LINE_LEN = args.line_len
 N_TIME_POINTS = args.n_time_points
@@ -478,6 +484,7 @@ if __name__ == "__main__":
             init_caps=init_caps,
             init_inds=init_inds,
             init_gms=init_gms,
+            pulse_params=(PULSE_RISE_TIME, PULSE_FALL_TIME, PULSE_WIDTH),
         )
     )
 

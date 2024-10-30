@@ -76,6 +76,7 @@ def create_switchable_star_cdg(
     init_caps: Optional[list[float]] = None,
     init_inds: Optional[list[float]] = None,
     init_gms: Optional[tuple[list[float], list[float]]] = None,
+    pulse_params: tuple[float, float, float] = (0.5e-9, 0.5e-9, 1e-9),
 ) -> tuple[
     CDG,
     tuple[CDGNode, CDGNode],
@@ -173,7 +174,10 @@ def create_switchable_star_cdg(
         ]
         for _ in range(2)
     ]
-    short_pulse = partial(pulse, rise_time=0.5e-9, fall_time=0.5e-9, pulse_width=1e-9)
+    rise_time, fall_time, pulse_width = pulse_params
+    short_pulse = partial(
+        pulse, rise_time=rise_time, fall_time=fall_time, pulse_width=pulse_width
+    )
     for branches, cap, switches in zip(branch_pairs, middle_caps, switche_pairs):
         # Assume the input current input is ideal for simplicity
         puf.connect(self_et(), inp_nt(fn=short_pulse, g=0.0), cap)

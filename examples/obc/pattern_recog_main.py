@@ -10,7 +10,7 @@ import optax
 import wandb
 from diffrax import Heun
 from jaxtyping import PyTree
-from pattern_recog_dataloader import NUMBERS, dataloader, dataloader2
+from pattern_recog_dataloader import NUMBERS_5x3, NUMBERS_10x6, dataloader, dataloader2
 from pattern_recog_loss import (
     min_rand_reconstruction_loss,
     normalize_angular_diff,
@@ -36,7 +36,15 @@ from ark.specification.trainable import Trainable, TrainableMgr
 
 jax.config.update("jax_enable_x64", True)
 
-N_ROW, N_COL = 5, 3
+PATTERN_SHAPE = args.pattern_shape
+
+if PATTERN_SHAPE == "5x3":
+    N_ROW, N_COL = 5, 3
+    NUMBERS = NUMBERS_5x3
+elif PATTERN_SHAPE == "10x6":
+    N_ROW, N_COL = 10, 6
+    NUMBERS = NUMBERS_10x6
+
 N_NODE = N_ROW * N_COL
 N_EDGE = (N_ROW - 1) * N_COL + (N_COL - 1) * N_ROW
 
@@ -44,6 +52,11 @@ N_CLASS = args.n_class
 N_CYCLES = args.n_cycle
 
 SEED = args.seed
+TEST_SEED = args.test_seed
+TEST_BZ = args.test_bz
+assert (
+    SEED != TEST_SEED
+), f"Training seed {SEED} is the same as the testing seed {TEST_SEED}"
 np.random.seed(SEED)
 
 WEIGHT_INIT = args.weight_init
@@ -65,8 +78,10 @@ optim = getattr(optax, OPTIMIZER)(LEARNING_RATE)
 
 SNP_PROB, GAUSS_STD = args.snp_prob, args.gauss_std
 TRANS_NOISE_STD = args.trans_noise_std
+UNIFORM_NOISE = args.uniform_noise
 
 USE_WANDB = args.wandb
+TAG = args.tag
 TASK = args.task
 DIFF_FN = args.diff_fn
 
@@ -100,6 +115,13 @@ if PLOT_EVOLVE != 0:
 else:
     saveat = [T * N_CYCLES]
 
+LOAD_WEIGHT = args.load_weight
+if LOAD_WEIGHT and WEIGHT_INIT:
+    print("Ignoring the weight init argument since the weight is loaded")
+
+TESTING = args.test
+TEST_DATA = None
+
 time_info = TimeInfo(
     t0=0,
     t1=T * N_CYCLES,
@@ -113,7 +135,8 @@ obc_spec.production_rules()[3]._noise_exp = TRANS_NOISE_STD
 obc_spec.production_rules()[4]._noise_exp = TRANS_NOISE_STD
 
 if USE_WANDB:
-    wandb_run = wandb.init(project="obc", config=vars(args), tags=["digit_recognition"])
+    tags = ["digit_recognitio"] if not TAG else ["digit_recognition", TAG]
+    wandb_run = wandb.init(project="obc", config=vars(args), tags=tags)
 
 
 def pattern_to_edge_initialization(pattern: np.ndarray):
@@ -200,6 +223,14 @@ def make_step(
     return model, opt_state, train_loss, val_loss
 
 
+@eqx.filter_jit
+def test_model(
+    model: BaseAnalogCkt,
+    loss_fn: Callable,
+):
+    return loss_fn(model, *TEST_DATA, 1.0, True)
+
+
 def plot_evolution(
     model: BaseAnalogCkt,
     loss_fn: Callable,
@@ -208,6 +239,8 @@ def plot_evolution(
     gumbel_temp: float,
     hard_gumbel: bool = True,
 ):
+    # python pattern_recog_main.py --n_class 5 --diff_fn periodic_mse  --trans_noise_std 0.025 --steps 64   --bz 48 --seed 666  --num_plot 20 --plot_evolve 4  --no_noiseless_train --pattern_shape 10x6 --weight_init hebbian --weight_bit 1 --uniform_noise
+    # plot the 13th
     x_init, args_seed, noise_seed = data[0], data[1], data[2]
     y_raw = jax.vmap(model, in_axes=(None, 0, None, 0, 0, None, None))(
         time_info, x_init, [], args_seed, noise_seed, gumbel_temp, hard_gumbel
@@ -216,31 +249,46 @@ def plot_evolution(
 
     n_row, n_col = y_raw.shape[0], len(plot_time)
     fig, ax = plt.subplots(
-        ncols=len(plot_time), nrows=y_raw.shape[0], figsize=(n_col, n_row * 1.75)
+        ncols=len(plot_time), nrows=y_raw.shape[0], figsize=(n_col, n_row * 1.5)
     )
+    # fig, ax = plt.subplots(ncols=len(plot_time), nrows=1, figsize=(3, 1.75))
     losses = []
     for i, y in enumerate(y_raw):
         # phase is periodic over 2
         y_readout = y % 2
 
+        di = [d[i : i + 1] for d in data]
+        # if i != 13:
+        #     continue
+        loss = loss_fn(model, *di, gumbel_temp, hard_gumbel)
+        losses.append(loss)
         for j, time in enumerate(plot_time):
             y_readout_t = y_readout[time].reshape(N_ROW, N_COL)
             y_readout_t = jnp.abs(y_readout_t - y_readout_t[0, 0])
             # Calculate the phase difference
             phase_diff = jnp.where(y_readout_t > 1, 2 - y_readout_t, y_readout_t)
             ax[i, j].axis("off")
-            ax[i, j].imshow(phase_diff, cmap="gray", vmin=0, vmax=1)
+            ax[i, j].imshow(phase_diff, cmap="gray_r", vmin=0, vmax=1)
 
-        di = [d[i : i + 1] for d in data]
-        losses.append(loss_fn(model, *di, gumbel_temp, hard_gumbel))
+            # ax[j].axis("off")
+            # ax[j].imshow(phase_diff, cmap="gray_r", vmin=0, vmax=1)
     loss = jnp.mean(jnp.array(losses))
     plt.suptitle(title + f", Loss: {loss:.4f}")
+
+    # Add x-axis to the bottom row
+    # plt.rcParams["text.usetex"] = True
+    # x_labels = [f"$t_{i}$" for i in plot_time]
+    # a: plt.Axes
+    # for a, x_label in zip(ax[-1], x_labels):
+    # for a, x_label in zip(ax, x_labels):
+    #     a.set_title(x_label, y=-0.4, fontsize=25)
     plt.subplots_adjust(wspace=0, hspace=0)
     plt.tight_layout()
     if USE_WANDB:
         wandb.log(data={f"{title}_evolution": plt}, commit=False)
         plt.close()
     else:
+        plt.savefig(f"{title}-loss_{loss:.4f}.pdf", bbox_inches="tight", dpi=300)
         plt.show()
 
 
@@ -292,11 +340,40 @@ elif GUMBEL_SHEDULE == "exp":
 def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: str = ""):
     opt_state = optim.init(eqx.filter(model, eqx.is_array))
     val_loss_best = 1e9
+    best_weight = model.weights()
 
     gumbel_temp = GUMBEL_TEMP_START
     hard_gumbel = USE_HARD_GUMBEL
 
+    test_losses = []
+    val_loss_best = 1e9
+
     for step, data in zip(range(STEPS), dl(BZ)):
+
+        if TESTING:
+            # Test the model: Make sure the seed is different from the training seed
+            # so that the data contains different static and transient noise
+            # This is for testing more samples than the one tested with training steps.
+            test_loss = loss_fn(model, *data, gumbel_temp, hard_gumbel=True)
+            test_losses.append(test_loss)
+            print(f"Step {step}, Test loss: {test_loss}")
+
+            if USE_WANDB:
+                wandb.log(
+                    data={
+                        f"{log_prefix}_test_loss": test_loss,
+                    },
+                )
+
+            if step == STEPS - 1:
+                print(f"Average test loss: {np.mean(test_losses)}")
+                if USE_WANDB:
+                    wandb.log(
+                        data={
+                            f"{log_prefix}_average_test_loss": np.mean(test_losses),
+                        },
+                    )
+            continue
 
         if step == 0:  # Set up the baseline loss
             train_data = [d[:TRAIN_BZ] for d in data]
@@ -308,23 +385,32 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: st
             model, opt_state, train_loss, val_loss = make_step(
                 model, opt_state, loss_fn, data, gumbel_temp, hard_gumbel
             )
+        test_loss = test_model(model, loss_fn)
 
         print(
-            f"Step {step}, Train loss: {train_loss}, Val loss: {val_loss}, Gumbel temp: {gumbel_temp}"
+            f"Step {step}, Train loss: {train_loss}, Val loss: {val_loss}, Test loss: {test_loss}, Gumbel temp: {gumbel_temp}"
         )
         if val_loss < val_loss_best:
             val_loss_best = val_loss
-            best_weight = (model.a_trainable.copy(), model.d_trainable.copy())
+            test_loss_best = test_loss
+            best_weight = model.weights()
 
         if USE_WANDB:
             wandb.log(
                 data={
                     f"{log_prefix}_train_loss": train_loss,
                     f"{log_prefix}_val_loss": val_loss,
+                    f"{log_prefix}_test_loss": test_loss,
                     "gumbel_temp": gumbel_temp,
                 },
             )
         gumbel_temp = next_gumbel_temp(step + 1)
+
+    if USE_WANDB:
+        # Report the test loss on the iteration with the best validation loss
+        wandb.log(
+            data={f"{log_prefix}_test_loss_w_best_val": test_loss_best},
+        )
 
     return val_loss_best, best_weight
 
@@ -420,11 +506,13 @@ if __name__ == "__main__":
             mapping_fn=rec_circuit_class.cdg_to_initial_states,
             snp_prob=SNP_PROB,
             gauss_std=GAUSS_STD,
+            uniform_noise=UNIFORM_NOISE,
         )
         loss_fn = partial(
             pattern_reconstruction_loss, time_info=time_info, diff_fn=diff_fn
         )
     elif TASK == "rand-to-many":
+
         dl = partial(dataloader, n_node=N_NODE)
         loss_fn = partial(
             min_rand_reconstruction_loss,
@@ -432,6 +520,13 @@ if __name__ == "__main__":
             diff_fn=diff_fn,
             N_CLASS=N_CLASS,
         )
+    # Store the random state and restore later
+    random_state = np.random.get_state()
+
+    # Generate the testing data with fixed seed
+    np.random.seed(TEST_SEED)
+    TEST_DATA = next(dl(TEST_BZ))
+    np.random.set_state(random_state)
 
     if WEIGHT_INIT == "hebbian":
         row_init, col_init = pattern_to_edge_initialization(NUMBERS[0])
@@ -443,12 +538,16 @@ if __name__ == "__main__":
         row_init /= N_CLASS
         col_init /= N_CLASS
     elif WEIGHT_INIT == "random":
-        row_init = np.random.normal(size=(N_ROW, N_COL - 1))
-        col_init = np.random.normal(size=(N_ROW - 1, N_COL))
+        row_init = np.random.uniform(low=-1, high=1, size=(N_ROW, N_COL - 1))
+        col_init = np.random.uniform(low=-1, high=1, size=(N_ROW - 1, N_COL))
 
-    trainable_init = edge_init_to_trainable_init(
-        row_init, col_init, row_ks, col_ks, trainable_mgr
-    )
+    if not LOAD_WEIGHT:
+        trainable_init = edge_init_to_trainable_init(
+            row_init, col_init, row_ks, col_ks, trainable_mgr
+        )
+    else:
+        weights = jnp.load(LOAD_WEIGHT)
+        trainable_init = (weights["analog"], weights["digital"])
 
     plot_data = next(dl(PLOT_BZ))
 
@@ -503,6 +602,9 @@ if __name__ == "__main__":
     best_loss, best_weight = train(model, loss_fn, dl, "tran_noisy")
     print(f"\tFine-tune Best Loss: {best_loss}")
     print(f"Fine-tune Best Weights: {best_weight}")
+
+    if args.save_weight:
+        jnp.savez(args.save_weight, analog=best_weight[0], digital=best_weight[1])
 
     # Model after fine-tune
     load_model_and_plot(

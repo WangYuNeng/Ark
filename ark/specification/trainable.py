@@ -44,6 +44,11 @@ class TrainableMgr:
         self._analog: list[Trainable] = []
         self._digital: list[Trainable] = []
 
+    def reset(self) -> None:
+        """Reset the trainable parameters."""
+        self._analog = []
+        self._digital = []
+
     def new_analog(self, init_val=None) -> Trainable:
         """Add a trainable analog parameter."""
         return self._new_trainable(self.analog, init_val)

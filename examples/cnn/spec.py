@@ -102,7 +102,7 @@ SelfFeedback = ProdRule(MapE, IdealV, IdealV, SELF, -VAR(SRC) + SRC.z)
 Amat = ProdRule(FlowE, Out, IdealV, DST, EDGE.g * VAR(SRC))
 # Production rules for msimatch v
 Bmat_mm = ProdRule(FlowE, Inp, Vm, DST, DST.mm * EDGE.g * VAR(SRC))
-SelfFeedback_mm = ProdRule(MapE, Vm, Vm, SELF, SRC.mm * (-VAR(SRC) + SRC.z))
+SelfFeedback_mm = ProdRule(MapE, Vm, Vm, SELF, -VAR(SRC) + SRC.mm * SRC.z)
 Amat_mm = ProdRule(FlowE, Out, Vm, DST, DST.mm * EDGE.g * VAR(SRC))
 prod_rules = [Bmat, Dummy, ReadOut, SelfFeedback, Amat, Bmat_mm]
 mm_prod_rules = [SelfFeedback_mm, Amat_mm]

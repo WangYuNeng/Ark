@@ -12,7 +12,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import config
 from puf import create_switchable_star_cdg
-from spec import mm_tln_spec
+from spec import mm_tln_spec, pulse
 
 from ark.cdg.cdg import CDG
 from ark.compiler import ArkCompiler
@@ -386,26 +386,6 @@ MmE = mm_tln_spec.edge_type("MmE")
 IdealE = mm_tln_spec.edge_type("IdealE")
 
 
-def pulse_jax(
-    t, amplitude=1, delay=0, rise_time=5e-9, fall_time=5e-9, pulse_width=10e-9
-):
-    """Trapezoidal pulse function that is compatible with JAX"""
-    t_offset = t - delay
-    return jnp.where(
-        t_offset < rise_time,
-        amplitude * t_offset / rise_time,
-        jnp.where(
-            t_offset < pulse_width + rise_time,
-            amplitude,
-            jnp.where(
-                t_offset < pulse_width + rise_time + fall_time,
-                amplitude * (1 - (t_offset - pulse_width - rise_time) / fall_time),
-                0,
-            ),
-        ),
-    )
-
-
 class SSPUF_ODE(SwitchableStarPUF):
     """SwitchableStar PUF in transmission lines implemented with ODEs.
 
@@ -520,7 +500,7 @@ class SSPUF_ODE(SwitchableStarPUF):
         return sol[self.read_out_idx[0]] - sol[self.read_out_idx[1]]
 
     def _create_and_compile_cdg(self) -> CDG:
-        puf, middle_caps, switch_pairs, branch_pairs = create_switchable_star_cdg(
+        puf, middle_caps, switch_pairs, branch_pairs, _ = create_switchable_star_cdg(
             n_bits=self.n_branch,
             line_len=self.line_len,
             v_nt=MmV,
@@ -531,7 +511,7 @@ class SSPUF_ODE(SwitchableStarPUF):
         )
 
         (
-            ode_fn,
+            (ode_fn, _),
             node_mapping,
             switch_mapping,
             num_attr_mapping,
@@ -539,7 +519,7 @@ class SSPUF_ODE(SwitchableStarPUF):
         ) = compiler.compile_odeterm(cdg=puf, cdg_spec=mm_tln_spec)
 
         pulse_input = partial(
-            pulse_jax,
+            pulse,
             amplitude=1,
             delay=0,
             rise_time=self.pulse_t1,

@@ -18,12 +18,8 @@ class BaseAnalogCkt(eqx.Module):
     """Base class for differentiable analog circuit simulation.
 
     Attributes:
-        trainable: The trainable parameters of the circuit.
-        t0: The start time of the simulation.
-        t1: The end time of the simulation.
-        dt0: The time step.
-        y0: The initial values of the state variables.
-        saveat: The time points to save the simulation results.
+        a_trainable: Analog trainable parameters of the circuit.
+        d_trainable: Discrete trainable parameters of the circuit.
         is_stochastic: Whether the simulation is stochastic (consider noise).
         solver: The ODE solver to use.
     """
@@ -62,6 +58,9 @@ class BaseAnalogCkt(eqx.Module):
         """The differentiable forward pass of the circuit simulation.
 
         Args:
+            time_info: The time information for the simulation, including the start time,
+                end time, time step, and time points to save the solution.
+            initial_state: The initial state of the state variables in the diffeq.
             switch: The switch values for the circuit if any.
             args_seed: The seed for the static randomness when intialization the arguments.
                 incluing the guassian for mismatch and gumbel distribution for gumbel softmax.
@@ -110,6 +109,8 @@ class BaseAnalogCkt(eqx.Module):
         self,
         switch: jax.Array,
         mismatch_seed: jax.typing.DTypeLike,
+        gumbel_temp: jax.typing.DTypeLike,
+        hard_gumbel: bool,
     ) -> jax.Array:
         """Make the arguments for the ODE function."""
 
@@ -145,3 +146,8 @@ class BaseAnalogCkt(eqx.Module):
         """Extract the switch values from a CDG."""
 
         raise NotImplementedError
+
+    def weights(self) -> tuple[jax.Array, list[jax.Array]]:
+        """Return a copy of the trainable parameters of the circuit."""
+
+        return (self.a_trainable.copy(), self.d_trainable.copy())

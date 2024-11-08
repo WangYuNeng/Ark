@@ -2,7 +2,6 @@ from typing import Callable
 
 import jax
 import jax.numpy as jnp
-from pattern_recog_dataloader import NODE_PATTERNS
 
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 
@@ -46,13 +45,15 @@ def min_rand_reconstruction_loss(
     diff_fn: Callable,
     N_CLASS: int,
 ):
+    raise NotImplementedError("This function is no longer supported")
     y_raw = jax.vmap(model, in_axes=(None, 0, None, 0, 0, None, None))(
         time_info, x, [], args_seed, noise_seed, gumbel_temp, hard_gumbel
     )
     y_end_readout = y_raw[:, -1, :]
     losses = []
     for i in range(N_CLASS):
-        losses.append(jnp.mean(diff_fn(y_end_readout, NODE_PATTERNS[i])))
+        # losses.append(jnp.mean(diff_fn(y_end_readout, NODE_PATTERNS[i])))
+        losses.append(None)
     losses = jnp.array(losses)
     # Return the minimum average loss
     return jnp.min(losses)

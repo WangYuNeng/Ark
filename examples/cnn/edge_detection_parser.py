@@ -2,7 +2,7 @@ from argparse import ArgumentParser
 
 parser = ArgumentParser()
 
-# Example command: python pattern_recog_digit.py --gauss_std 0.1 --trans_noise_std 0.1
+# Example command: python edge_detection_main.py --plot_evolve 5 --dataset random --mismatched_edge 0.1
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--task", type=str, default="one-to-one")
 parser.add_argument(
@@ -70,16 +70,31 @@ parser.add_argument(
 )
 parser.add_argument("--num_plot", type=int, default=4, help="Number of samples to plot")
 parser.add_argument("--wandb", action="store_true", help="Log to wandb")
+parser.add_argument("--tag", type=str, default=None, help="Tag for the wandb run")
 parser.add_argument(
     "--dataset",
     type=str,
     default="simple",
-    choices=["simple", "mnist"],
+    choices=["simple", "mnist", "random", "silhouettes"],
     help="Dataset to use",
+)
+parser.add_argument(
+    "--rand_img_size",
+    type=int,
+    default=3,
+    help="Size of the random images to generate",
 )
 parser.add_argument(
     "--long_compile_demo",
     action="store_true",
     help="A special setup to demonstrate the long compile time when trying to train on 28x28 images",
 )
+parser.add_argument(
+    "--save_weight", type=str, default=None, help="Path to save weights"
+)
+parser.add_argument(
+    "--load_weight", type=str, default=None, help="Path to load weights"
+)
+parser.add_argument("--weight_scale", type=float, default=1.0, help="Scale the weights")
+parser.add_argument("--test", action="store_true", help="Test the model")
 args = parser.parse_args()

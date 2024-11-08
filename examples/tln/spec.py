@@ -6,10 +6,12 @@ Provide specification for
 - LC mismatched ladder
 - Gain mismatched ladder
 """
-from types import FunctionType
+
+import jax.numpy as jnp
 
 from ark.reduction import SUM
 from ark.specification.attribute_def import AttrDef, AttrDefMismatch
+from ark.specification.attribute_type import AnalogAttr, FunctionAttr
 from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule
 from ark.specification.range import Range
@@ -22,18 +24,22 @@ mm_tln_spec = CDGSpec("mm-tln", inherit=tln_spec)
 
 
 # Example input function
-def pulse(
-    t, amplitude=1, delay=0, rise_time=5e-9, fall_time=5e-9, pulse_width=10e-9, period=1
-):
+def pulse(t, amplitude=1, delay=0, rise_time=5e-9, fall_time=5e-9, pulse_width=10e-9):
     """Trapezoidal pulse function"""
-    t = (t - delay) % period
-    if rise_time <= t and pulse_width + rise_time >= t:
-        return amplitude
-    elif t < rise_time:
-        return amplitude * t / rise_time
-    elif pulse_width + rise_time < t and pulse_width + rise_time + fall_time >= t:
-        return amplitude * (1 - (t - pulse_width - rise_time) / fall_time)
-    return 0
+    t_offset = t - delay
+    return jnp.where(
+        t_offset < rise_time,
+        amplitude * t_offset / rise_time,
+        jnp.where(
+            t_offset < pulse_width + rise_time,
+            amplitude,
+            jnp.where(
+                t_offset < pulse_width + rise_time + fall_time,
+                amplitude * (1 - (t_offset - pulse_width - rise_time) / fall_time),
+                0,
+            ),
+        ),
+    )
 
 
 lc_range, gr_range = Range(min=0.1e-9, max=10e-9), Range(min=0.0)
@@ -48,8 +54,8 @@ IdealV = NodeType(
         "order": 1,
         "reduction": SUM,
         "attr_def": {
-            "c": AttrDef(attr_type=float, attr_range=lc_range),
-            "g": AttrDef(attr_type=float, attr_range=gr_range),
+            "c": AttrDef(attr_type=AnalogAttr(lc_range)),
+            "g": AttrDef(attr_type=AnalogAttr(gr_range)),
         },
     },
 )
@@ -60,8 +66,8 @@ IdealI = NodeType(
         "order": 1,
         "reduction": SUM,
         "attr_def": {
-            "l": AttrDef(attr_type=float, attr_range=lc_range),
-            "r": AttrDef(attr_type=float, attr_range=gr_range),
+            "l": AttrDef(attr_type=AnalogAttr(lc_range)),
+            "r": AttrDef(attr_type=AnalogAttr(gr_range)),
         },
     },
 )
@@ -73,8 +79,8 @@ InpV = NodeType(
     attrs={
         "order": 0,
         "attr_def": {
-            "fn": AttrDef(attr_type=FunctionType, nargs=1),
-            "r": AttrDef(attr_type=float, attr_range=gr_range),
+            "fn": AttrDef(attr_type=FunctionAttr(nargs=1)),
+            "r": AttrDef(attr_type=AnalogAttr(gr_range)),
         },
     },
 )
@@ -84,8 +90,8 @@ InpI = NodeType(
     attrs={
         "order": 0,
         "attr_def": {
-            "fn": AttrDef(attr_type=FunctionType, nargs=1),
-            "g": AttrDef(attr_type=float, attr_range=gr_range),
+            "fn": AttrDef(attr_type=FunctionAttr(nargs=1)),
+            "g": AttrDef(attr_type=AnalogAttr(gr_range)),
         },
     },
 )
@@ -94,18 +100,14 @@ MmV = NodeType(
     name="MmV",
     bases=IdealV,
     attrs={
-        "attr_def": {
-            "c": AttrDefMismatch(attr_type=float, attr_range=lc_range, rstd=0.1)
-        }
+        "attr_def": {"c": AttrDefMismatch(attr_type=AnalogAttr(lc_range), rstd=0.1)}
     },
 )
 MmI = NodeType(
     name="MmI",
     bases=IdealI,
     attrs={
-        "attr_def": {
-            "l": AttrDefMismatch(attr_type=float, attr_range=lc_range, rstd=0.1)
-        }
+        "attr_def": {"l": AttrDefMismatch(attr_type=AnalogAttr(lc_range), rstd=0.1)}
     },
 )
 MmE = EdgeType(
@@ -113,8 +115,8 @@ MmE = EdgeType(
     bases=IdealE,
     attrs={
         "attr_def": {
-            "ws": AttrDefMismatch(attr_type=float, attr_range=w_range, rstd=0.1),
-            "wt": AttrDefMismatch(attr_type=float, attr_range=w_range, rstd=0.1),
+            "ws": AttrDefMismatch(attr_type=AnalogAttr(w_range), rstd=0.1),
+            "wt": AttrDefMismatch(attr_type=AnalogAttr(w_range), rstd=0.1),
         }
     },
 )
@@ -141,6 +143,43 @@ _v2i_mm = ProdRule(MmE, IdealV, IdealI, SRC, -EDGE.ws * VAR(DST) / SRC.c)
 v2_i_mm = ProdRule(MmE, IdealV, IdealI, DST, EDGE.wt * VAR(SRC) / DST.l)
 _i2v_mm = ProdRule(MmE, IdealI, IdealV, SRC, -EDGE.ws * VAR(DST) / SRC.l)
 i2_v_mm = ProdRule(MmE, IdealI, IdealV, DST, EDGE.wt * VAR(SRC) / DST.c)
+
+# If want to do noise simulation, uncomment the following lines
+# integrate 4kTrgm (k=1.38e-23, T=300K, r=2/3, g=1e-6) to 100GHz to get noise amplitude
+# noise amp = sqrt(4 * 1.38e-23 * 300 * 2/3 * 1e-5 * 100e9) ~= 1e-7
+# noise_amp = 1e-7
+# _v2i_mm = ProdRule(
+#     MmE,
+#     IdealV,
+#     IdealI,
+#     SRC,
+#     -EDGE.ws * VAR(DST) / SRC.c,
+#     noise_exp=EDGE.ws * noise_amp / SRC.c,
+# )
+# v2_i_mm = ProdRule(
+#     MmE,
+#     IdealV,
+#     IdealI,
+#     DST,
+#     EDGE.wt * VAR(SRC) / DST.l,
+#     noise_exp=EDGE.wt * noise_amp / DST.l,
+# )
+# _i2v_mm = ProdRule(
+#     MmE,
+#     IdealI,
+#     IdealV,
+#     SRC,
+#     -EDGE.ws * VAR(DST) / SRC.l,
+#     noise_exp=EDGE.ws * noise_amp / SRC.l,
+# )
+# i2_v_mm = ProdRule(
+#     MmE,
+#     IdealI,
+#     IdealV,
+#     DST,
+#     EDGE.wt * VAR(SRC) / DST.c,
+#     noise_exp=EDGE.wt * noise_amp / DST.c,
+# )
 inpv2_v_mm = ProdRule(
     MmE, InpV, IdealV, DST, EDGE.wt * (SRC.fn(TIME) - VAR(DST)) / DST.c / SRC.r
 )

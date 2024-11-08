@@ -2,9 +2,16 @@ from argparse import ArgumentParser
 
 parser = ArgumentParser()
 
-# Example command: python pattern_recog_digit.py --gauss_std 0.1 --trans_noise_std 0.1
+# Example command: python pattern_recog_main.py --gauss_std 0.1 --trans_noise_std 0.1
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--task", type=str, default="one-to-one")
+parser.add_argument(
+    "--pattern_shape",
+    type=str,
+    default="5x3",
+    choices=["5x3", "10x6"],
+    help="Shape of the digit patterns, currently support 5x3 and 10x6",
+)
 parser.add_argument(
     "--n_cycle",
     type=int,
@@ -80,8 +87,23 @@ parser.add_argument(
 parser.add_argument(
     "--point_per_cycle", type=int, default=50, help="Number of time points per cycle"
 )
-parser.add_argument("--snp_prob", type=float, default=0.0, help="Salt-and-pepper noise")
-parser.add_argument("--gauss_std", type=float, default=0.0, help="Gaussian noise std")
+parser.add_argument(
+    "--snp_prob",
+    type=float,
+    default=0.0,
+    help="Salt-and-pepper noise of the initial image",
+)
+parser.add_argument(
+    "--gauss_std",
+    type=float,
+    default=0.0,
+    help="Gaussian noise std of the initial image",
+)
+parser.add_argument(
+    "--uniform_noise",
+    action="store_true",
+    help="Add uniform noise to the initial image",
+)
 parser.add_argument(
     "--trans_noise_std", type=float, default=0.0, help="Transition noise std"
 )
@@ -108,5 +130,17 @@ parser.add_argument(
     "--no_noiseless_train", action="store_true", help="Skip noiseless training"
 )
 parser.add_argument("--wandb", action="store_true", help="Log to wandb")
+parser.add_argument("--tag", type=str, default=None, help="Tag for the wandb run")
+parser.add_argument(
+    "--save_weight", type=str, default=None, help="Path to save weights"
+)
+parser.add_argument(
+    "--load_weight", type=str, default=None, help="Path to load weights"
+)
+parser.add_argument("--test", action="store_true", help="Test the model")
+parser.add_argument("--test_bz", type=int, default=1024, help="Size of the test batch")
+parser.add_argument(
+    "--test_seed", type=int, default=428, help="Random seed for testing"
+)
 
 args = parser.parse_args()

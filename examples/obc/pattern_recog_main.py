@@ -7,7 +7,6 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
-import wandb
 from diffrax import Heun
 from jaxtyping import PyTree
 from pattern_recog_dataloader import NUMBERS_5x3, NUMBERS_10x6, dataloader, dataloader2
@@ -29,6 +28,7 @@ from spec_optimization import (
     obc_spec,
 )
 
+import wandb
 from ark.cdg.cdg import CDG
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
@@ -50,6 +50,9 @@ N_EDGE = (N_ROW - 1) * N_COL + (N_COL - 1) * N_ROW
 
 N_CLASS = args.n_class
 N_CYCLES = args.n_cycle
+
+CONNECTION = args.connection
+TRAINALBE_CONNECTION = args.trainable_connection
 
 SEED = args.seed
 TEST_SEED = args.test_seed
@@ -139,6 +142,24 @@ if USE_WANDB:
     wandb_run = wandb.init(project="obc", config=vars(args), tags=tags)
 
 
+def enumerate_node_pairs(
+    n_row=N_ROW, n_col=N_COL
+) -> Generator[tuple[int, int, int, int], None, None]:
+    """Enumerate all unique node pairs in the network
+
+    Return row, col, row_, col_.
+    (row, col) is the axis for the first node and (row_, col_) is for the second.
+    row <= row_ and (col < col_ if row == row_).
+    """
+    for row in range(n_row):
+        for col in range(n_col):
+            for row_ in range(row, n_row):
+                for col_ in range(col, n_col):
+                    if row_ == row and col_ <= col:
+                        continue
+                    yield row, col, row_, col_
+
+
 def pattern_to_edge_initialization(pattern: np.ndarray):
     """Map the pattern to the edge initialization
 
@@ -146,27 +167,23 @@ def pattern_to_edge_initialization(pattern: np.ndarray):
     Otherwise, the edge is initialized with 1.0
     """
 
-    row_init = [[None for _ in range(N_COL - 1)] for _ in range(N_ROW)]
-    col_init = [[None for _ in range(N_COL)] for _ in range(N_ROW - 1)]
+    weight_init = [
+        [[[0 for _ in range(N_COL)] for _ in range(N_ROW)] for _ in range(N_COL)]
+        for _ in range(N_ROW)
+    ]
 
-    for row in range(N_ROW):
-        for col in range(N_COL - 1):
-            diff = pattern[row, col] - pattern[row, col + 1]
-            row_init[row][col] = -1.0 if diff else 1.0
+    for row, col, row_, col_ in enumerate_node_pairs():
+        diff = pattern[row, col] - pattern[row_, col_]
+        weight_init[row][col][row_][col_] = weight_init[row_][col_][row][col] = (
+            -1.0 if diff else 1.0
+        )
 
-    for row in range(N_ROW - 1):
-        for col in range(N_COL):
-            diff = pattern[row, col] - pattern[row + 1, col]
-            col_init[row][col] = -1.0 if diff else 1.0
-
-    return np.array(row_init), np.array(col_init)
+    return np.array(weight_init)
 
 
 def edge_init_to_trainable_init(
-    row_init: np.ndarray,
-    col_init: np.ndarray,
-    k_rows: list[list[Trainable]],
-    k_cols: list[list[Trainable]],
+    weight_init: np.ndarray,
+    oscillator_ks: list[list[Trainable]],
     trainable_mgr: TrainableMgr,
 ) -> tuple[jax.Array, list[jax.Array]]:
     """Convert the edge initialization to trainable initialization"""
@@ -178,24 +195,18 @@ def edge_init_to_trainable_init(
         one_hot = jax.nn.one_hot(nearest_bins, bins.shape[0])
         return one_hot
 
-    row_init_quantized, col_init_quantized = row_init, col_init
-
     if WEIGHT_BITS is not None:
         weight_choices: list = Cpl_digital.attr_def["k"].attr_type.val_choices
 
         # normalize the weight choices to between -1 and 1
         weight_choices = np.array(weight_choices)
+        weight_init = one_hot_digitize(weight_init, weight_choices)
 
-        row_init_quantized = one_hot_digitize(row_init, weight_choices)
-        col_init_quantized = one_hot_digitize(col_init, weight_choices)
-
-    for row in range(N_ROW):
-        for col in range(N_COL - 1):
-            k_rows[row][col].init_val = row_init_quantized[row, col]
-
-    for row in range(N_ROW - 1):
-        for col in range(N_COL):
-            k_cols[row][col].init_val = col_init_quantized[row, col]
+    for row, col, row_, col_ in enumerate_node_pairs():
+        if isinstance(oscillator_ks[row][col][row_][col_], Trainable):
+            oscillator_ks[row][col][row_][col_].init_val = weight_init[
+                row, col, row_, col_
+            ]
 
     a_trainable = trainable_mgr.get_initial_vals("analog")
     d_trainable = trainable_mgr.get_initial_vals("digital")
@@ -415,12 +426,16 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: st
     return val_loss_best, best_weight
 
 
+def new_coupling_weight():
+    return (
+        trainable_mgr.new_analog() if not WEIGHT_BITS else trainable_mgr.new_digital()
+    )
+
+
 if __name__ == "__main__":
 
     graph = CDG()
     nodes = [[None for _ in range(N_COL)] for _ in range(N_ROW)]
-    row_edges = [[None for _ in range(N_COL - 1)] for _ in range(N_ROW)]
-    col_edges = [[None for _ in range(N_COL)] for _ in range(N_ROW - 1)]
 
     if not WEIGHT_BITS:
         cpl_type = Coupling
@@ -428,27 +443,9 @@ if __name__ == "__main__":
         cpl_type = Cpl_digital
 
     # Store all the trainable parameters
-    row_ks = [
-        [
-            (
-                trainable_mgr.new_analog()
-                if not WEIGHT_BITS
-                else trainable_mgr.new_digital()
-            )
-            for _ in range(N_COL - 1)
-        ]
+    oscillator_ks = [
+        [[[None for _ in range(N_COL)] for _ in range(N_ROW)] for _ in range(N_COL)]
         for _ in range(N_ROW)
-    ]
-    col_ks = [
-        [
-            (
-                trainable_mgr.new_analog()
-                if not WEIGHT_BITS
-                else trainable_mgr.new_digital()
-            )
-            for _ in range(N_COL)
-        ]
-        for _ in range(N_ROW - 1)
     ]
 
     # Initialze nodes
@@ -464,18 +461,17 @@ if __name__ == "__main__":
             graph.connect(self_edge, node, node)
             nodes[row][col] = node
 
-    # Connect neighboring nodes
-    for row in range(N_ROW):
-        for col in range(N_COL - 1):
-            edge = cpl_type(k=row_ks[row][col])
-            graph.connect(edge, nodes[row][col], nodes[row][col + 1])
-            row_edges[row][col] = edge
-
-    for row in range(N_ROW - 1):
-        for col in range(N_COL):
-            edge = cpl_type(k=col_ks[row][col])
-            graph.connect(edge, nodes[row][col], nodes[row + 1][col])
-            col_edges[row][col] = edge
+    for row, col, row_, col_ in enumerate_node_pairs():
+        if CONNECTION == "all" or (
+            CONNECTION == "neighbor"
+            and ((row_ == row + 1 and col_ == col) or (row_ == row and col_ == col + 1))
+        ):
+            new_k = new_coupling_weight()
+            edge = cpl_type(k=new_k)
+            graph.connect(edge, nodes[row][col], nodes[row_][col_])
+            oscillator_ks[row][col][row_][col_] = oscillator_ks[row_][col_][row][
+                col
+            ] = new_k
 
     # flatten the nodes for readout
     nodes_flat = [node for row in nodes for node in row]
@@ -529,21 +525,20 @@ if __name__ == "__main__":
     np.random.set_state(random_state)
 
     if WEIGHT_INIT == "hebbian":
-        row_init, col_init = pattern_to_edge_initialization(NUMBERS[0])
+        weight_init = pattern_to_edge_initialization(NUMBERS[0])
         for i in range(1, N_CLASS):
-            r, c = pattern_to_edge_initialization(NUMBERS[i])
-            row_init += r
-            col_init += c
+            w = pattern_to_edge_initialization(NUMBERS[i])
+            weight_init += w
 
-        row_init /= N_CLASS
-        col_init /= N_CLASS
+        weight_init /= N_CLASS
     elif WEIGHT_INIT == "random":
-        row_init = np.random.uniform(low=-1, high=1, size=(N_ROW, N_COL - 1))
-        col_init = np.random.uniform(low=-1, high=1, size=(N_ROW - 1, N_COL))
+        weight_init = np.random.uniform(
+            low=-1, high=1, size=(N_ROW, N_COL, N_ROW, N_COL)
+        )
 
     if not LOAD_WEIGHT:
         trainable_init = edge_init_to_trainable_init(
-            row_init, col_init, row_ks, col_ks, trainable_mgr
+            weight_init, oscillator_ks, trainable_mgr
         )
     else:
         weights = jnp.load(LOAD_WEIGHT)

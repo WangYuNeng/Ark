@@ -13,6 +13,18 @@ parser.add_argument(
     help="Shape of the digit patterns, currently support 5x3 and 10x6",
 )
 parser.add_argument(
+    "--connection",
+    type=str,
+    default="neighbor",
+    choices=["neighbor", "all"],
+    help="Connection pattern between the oscillators",
+)
+parser.add_argument(
+    "--trainable_connection",
+    action="store_true",
+    help="Whether the connections (ON/OFF) between oscillators are trainable",
+)
+parser.add_argument(
     "--n_cycle",
     type=int,
     default=1,

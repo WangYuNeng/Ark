@@ -220,9 +220,10 @@ def make_step(
     opt_state: PyTree,
     loss_fn: Callable,
     data: list[jax.Array],
-    gumbel_temp: float,
+    gumbel_temp_: jax.Array,  # Somehow causing recompilation if it is float
     hard_gumbel: bool = False,
 ):
+    gumbel_temp = gumbel_temp_[0]
     train_data, val_data = [d[:TRAIN_BZ] for d in data], [d[TRAIN_BZ:] for d in data]
     train_loss, grads = eqx.filter_value_and_grad(loss_fn)(
         model, *train_data, gumbel_temp, hard_gumbel
@@ -394,7 +395,7 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: st
 
         else:
             model, opt_state, train_loss, val_loss = make_step(
-                model, opt_state, loss_fn, data, gumbel_temp, hard_gumbel
+                model, opt_state, loss_fn, data, jnp.array([gumbel_temp]), hard_gumbel
             )
         test_loss = test_model(model, loss_fn)
 

@@ -6,6 +6,11 @@ parser = ArgumentParser()
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--task", type=str, default="one-to-one")
 parser.add_argument(
+    "--matrix_solve",
+    action="store_true",
+    help="Use matrix form of the OBC to solve the ODEs instead of the Ark compiled version",
+)
+parser.add_argument(
     "--pattern_shape",
     type=str,
     default="5x3",

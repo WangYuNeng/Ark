@@ -17,6 +17,7 @@ from pattern_recog_loss import (
     periodic_mean_max_se,
     periodic_mse,
 )
+from pattern_recog_matrix_solve import OscillatorNetworkMatrixSolve
 from pattern_recog_parser import args
 from spec_optimization import (
     Coupling,
@@ -36,6 +37,7 @@ from ark.specification.trainable import Trainable, TrainableMgr
 
 jax.config.update("jax_enable_x64", True)
 
+MATRIX_SOLVE = args.matrix_solve
 PATTERN_SHAPE = args.pattern_shape
 
 if PATTERN_SHAPE == "5x3":
@@ -280,7 +282,8 @@ def plot_evolution(
             # Calculate the phase difference
             phase_diff = jnp.where(y_readout_t > 1, 2 - y_readout_t, y_readout_t)
             ax[i, j].axis("off")
-            ax[i, j].imshow(phase_diff, cmap="gray_r", vmin=0, vmax=1)
+            cmap = "gray_r" if PATTERN_SHAPE == "10x6" else "gray"
+            ax[i, j].imshow(phase_diff, cmap=cmap, vmin=0, vmax=1)
 
             # ax[j].axis("off")
             # ax[j].imshow(phase_diff, cmap="gray_r", vmin=0, vmax=1)
@@ -304,6 +307,27 @@ def plot_evolution(
         plt.show()
 
 
+def initialize_model(
+    model_cls: type, weight: tuple[jax.Array, list[jax.Array]], is_stochastic: bool
+) -> BaseAnalogCkt | OscillatorNetworkMatrixSolve:
+    if MATRIX_SOLVE:
+        model: OscillatorNetworkMatrixSolve = model_cls(
+            init_coupling=weight[0],
+            init_locking=weight[1],
+            neighbor_connection=True if CONNECTION == "neighbor" else False,
+            is_stochastic=is_stochastic,
+            noise_amp=TRANS_NOISE_STD,
+            solver=Heun(),
+        )
+    else:
+        model: BaseAnalogCkt = model_cls(
+            init_trainable=best_weight,
+            is_stochastic=is_stochastic,
+            solver=Heun(),
+        )
+    return model
+
+
 def load_model_and_plot(
     model_cls: type,
     best_weight: tuple[jax.Array, list[jax.Array]],
@@ -322,11 +346,7 @@ def load_model_and_plot(
         hard_gumbel = False
     else:
         gumbel_temp = 1  # Set to a value to avoid divide by None
-    model: BaseAnalogCkt = model_cls(
-        init_trainable=best_weight,
-        is_stochastic=is_stochastic,
-        solver=Heun(),
-    )
+    model = initialize_model(model_cls, best_weight, is_stochastic)
 
     plot_evolution(model, loss_fn, data, title, gumbel_temp, hard_gumbel)
 
@@ -477,14 +497,18 @@ if __name__ == "__main__":
     # flatten the nodes for readout
     nodes_flat = [node for row in nodes for node in row]
 
-    rec_circuit_class = OptCompiler().compile(
-        "rec",
-        graph,
-        obc_spec,
-        trainable_mgr=trainable_mgr,
-        readout_nodes=nodes_flat,
-        normalize_weight=False,
-        do_clipping=False,
+    rec_circuit_class = (
+        OptCompiler().compile(
+            "rec",
+            graph,
+            obc_spec,
+            trainable_mgr=trainable_mgr,
+            readout_nodes=nodes_flat,
+            normalize_weight=False,
+            do_clipping=False,
+        )
+        if not MATRIX_SOLVE
+        else OscillatorNetworkMatrixSolve
     )
 
     if DIFF_FN == "periodic_mse":
@@ -500,7 +524,9 @@ if __name__ == "__main__":
             n_class=N_CLASS,
             graph=graph,
             osc_array=nodes,
-            mapping_fn=rec_circuit_class.cdg_to_initial_states,
+            mapping_fn=(
+                None if MATRIX_SOLVE else rec_circuit_class.cdg_to_initial_states
+            ),
             snp_prob=SNP_PROB,
             gauss_std=GAUSS_STD,
             uniform_noise=UNIFORM_NOISE,
@@ -537,13 +563,28 @@ if __name__ == "__main__":
             low=-1, high=1, size=(N_ROW, N_COL, N_ROW, N_COL)
         )
 
-    if not LOAD_WEIGHT:
-        trainable_init = edge_init_to_trainable_init(
-            weight_init, oscillator_ks, trainable_mgr
+    if MATRIX_SOLVE:
+        if WEIGHT_BITS:
+            raise NotImplementedError(
+                "Digital weight is not supported for matrix solve"
+            )
+        if not TRAINABLE_LOCKING:
+            raise NotImplementedError(
+                "Locking strength must be trainable for matrix solve"
+            )
+        n_node = N_ROW * N_COL
+        trainable_init = (
+            jnp.array(weight_init),
+            INIT_LOCK_STRENGTH,
         )
     else:
-        weights = jnp.load(LOAD_WEIGHT)
-        trainable_init = (weights["analog"], weights["digital"])
+        if not LOAD_WEIGHT:
+            trainable_init = edge_init_to_trainable_init(
+                weight_init, oscillator_ks, trainable_mgr
+            )
+        else:
+            weights = jnp.load(LOAD_WEIGHT)
+            trainable_init = (weights["analog"], weights["digital"])
 
     plot_data = next(dl(PLOT_BZ))
 
@@ -558,11 +599,7 @@ if __name__ == "__main__":
 
     if not NO_NOISELESS_TRAIN:
 
-        model: BaseAnalogCkt = rec_circuit_class(
-            init_trainable=trainable_init,
-            is_stochastic=False,
-            solver=Heun(),
-        )
+        model = initialize_model(rec_circuit_class, trainable_init, False)
         best_loss, best_weight = train(model, loss_fn, dl, "tran_noiseless")
 
         print(f"Best Loss: {best_loss}")
@@ -589,11 +626,7 @@ if __name__ == "__main__":
     )
 
     # Fine-tune the best model w/ noise
-    model: BaseAnalogCkt = rec_circuit_class(
-        init_trainable=best_weight,
-        is_stochastic=True,
-        solver=Heun(),
-    )
+    model = initialize_model(rec_circuit_class, best_weight, True)
 
     best_loss, best_weight = train(model, loss_fn, dl, "tran_noisy")
     print(f"\tFine-tune Best Loss: {best_loss}")

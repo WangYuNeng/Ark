@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Optional
 
 import jax.numpy as jnp
 import numpy as np
@@ -121,7 +121,7 @@ def dataloader2(
     n_class: int,
     graph: CDG,
     osc_array: list[list[CDGNode]],
-    mapping_fn: Callable,
+    mapping_fn: Optional[Callable],
     snp_prob: float,
     gauss_std: float,
     uniform_noise: bool = False,
@@ -173,12 +173,15 @@ def dataloader2(
             if uniform_noise:
                 node_init += np.random.rand(*node_init.shape) - 0.5
 
-            # Assign the initial state to the nodes
-            for row in range(n_row):
-                for col in range(n_col):
-                    osc_array[row][col].set_init_val(node_init[row, col], 0)
+            if mapping_fn:
+                # Assign the initial state to the nodes
+                for row in range(n_row):
+                    for col in range(n_col):
+                        osc_array[row][col].set_init_val(node_init[row, col], 0)
 
-            x.append(mapping_fn(graph))
+                x.append(mapping_fn(graph))
+            else:
+                x.append(node_init.flatten())
             y.append(ideal_pattern)
 
         x, y = jnp.array(x), jnp.array(y)

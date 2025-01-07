@@ -156,7 +156,7 @@ def enumerate_node_pairs(
     for row in range(n_row):
         for col in range(n_col):
             for row_ in range(row, n_row):
-                for col_ in range(col, n_col):
+                for col_ in range(n_col):
                     if row_ == row and col_ <= col:
                         continue
                     yield row, col, row_, col_
@@ -330,7 +330,7 @@ def initialize_model(
 
 def load_model_and_plot(
     model_cls: type,
-    best_weight: tuple[jax.Array, list[jax.Array]],
+    best_weight: tuple,
     is_stochastic: bool,
     loss_fn: Callable,
     data: list[jax.Array],
@@ -573,10 +573,15 @@ if __name__ == "__main__":
                 "Locking strength must be trainable for matrix solve"
             )
         n_node = N_ROW * N_COL
-        trainable_init = (
-            jnp.array(weight_init),
-            INIT_LOCK_STRENGTH,
-        )
+        if LOAD_WEIGHT:
+            weights = jnp.load(LOAD_WEIGHT)
+            trainable_init = (weights["new_coupling_weight"], weights["locking_weight"])
+            print(trainable_init)
+        else:
+            trainable_init = (
+                jnp.array(weight_init),
+                INIT_LOCK_STRENGTH,
+            )
     else:
         if not LOAD_WEIGHT:
             trainable_init = edge_init_to_trainable_init(
@@ -633,7 +638,14 @@ if __name__ == "__main__":
     print(f"Fine-tune Best Weights: {best_weight}")
 
     if args.save_weight:
-        jnp.savez(args.save_weight, analog=best_weight[0], digital=best_weight[1])
+        if MATRIX_SOLVE:
+            jnp.savez(
+                args.save_weight,
+                coupling_weight=best_weight[0],
+                locking_weight=best_weight[1],
+            )
+        else:
+            jnp.savez(args.save_weight, analog=best_weight[0], digital=best_weight[1])
 
     # Model after fine-tune
     load_model_and_plot(

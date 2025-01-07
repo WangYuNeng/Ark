@@ -14,8 +14,10 @@ from ark.optimization.base_module import TimeInfo
 
 class OBCStateFunc(eqx.Module):
     coupling_aux: jax.Array  # A + A^T = coupling
-    locking: jax.typing.DTypeLike
-    coupling_mask: np.ndarray
+    locking: (
+        jax.Array
+    )  # 1-D array of locking strength (Can't be dtype; otherwise, the parameter won't be updated)
+    coupling_mask: list
     n_row: int
     n_col: int
 
@@ -39,7 +41,7 @@ class OBCStateFunc(eqx.Module):
         assert (init_coupling == init_coupling.T).all()
         super().__init__(**kwargs)
         self.coupling_aux = init_coupling / 2
-        self.locking = init_locking
+        self.locking = jnp.array([init_locking])
         if not neighbor_connection:
             # All-to-all connection, no self-connection (considered in the injection locking term)
             self.coupling_mask = np.ones_like(init_coupling) - np.eye(
@@ -56,6 +58,7 @@ class OBCStateFunc(eqx.Module):
                     if abs(row - row_) + abs(col - col_) == 1:
                         self.coupling_mask[node_id, node_id_] = 1
                         self.coupling_mask[node_id_, node_id] = 1
+        self.coupling_mask = self.coupling_mask.tolist()
 
     def __call__(self, t, y: jax.Array, args):
         """The derivative function for the OBC state update."""
@@ -82,7 +85,7 @@ class OBCStateFunc(eqx.Module):
 
     @property
     def locking_weight(self):
-        return self.locking
+        return self.locking[0]
 
 
 class OscillatorNetworkMatrixSolve(eqx.Module):

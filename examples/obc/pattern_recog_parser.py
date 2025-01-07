@@ -102,6 +102,9 @@ parser.add_argument(
     help="The function to evaluate the difference between the readout and the target",
 )
 parser.add_argument(
+    "--l1_norm_weight", type=float, default=0.0, help="L1 norm weight for the loss"
+)
+parser.add_argument(
     "--point_per_cycle", type=int, default=50, help="Number of time points per cycle"
 )
 parser.add_argument(

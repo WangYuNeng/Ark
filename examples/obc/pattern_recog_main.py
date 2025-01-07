@@ -7,6 +7,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
+import wandb
 from diffrax import Heun
 from jaxtyping import PyTree
 from pattern_recog_dataloader import NUMBERS_5x3, NUMBERS_10x6, dataloader, dataloader2
@@ -29,7 +30,6 @@ from spec_optimization import (
     obc_spec,
 )
 
-import wandb
 from ark.cdg.cdg import CDG
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
@@ -89,6 +89,10 @@ USE_WANDB = args.wandb
 TAG = args.tag
 TASK = args.task
 DIFF_FN = args.diff_fn
+L1_NORM_WEIGHT = args.l1_norm_weight
+assert (
+    not L1_NORM_WEIGHT or MATRIX_SOLVE
+), "L1 norm weight is only supported for matrix solve"
 
 NO_NOISELESS_TRAIN = args.no_noiseless_train
 
@@ -228,12 +232,14 @@ def make_step(
     gumbel_temp = gumbel_temp_[0]
     train_data, val_data = [d[:TRAIN_BZ] for d in data], [d[TRAIN_BZ:] for d in data]
     train_loss, grads = eqx.filter_value_and_grad(loss_fn)(
-        model, *train_data, gumbel_temp, hard_gumbel
+        model, *train_data, gumbel_temp, hard_gumbel, L1_NORM_WEIGHT
     )
     updates, opt_state = optim.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
     # When validating, always use hard gumbel to force the param to be physical
-    val_loss = loss_fn(model, *val_data, gumbel_temp, hard_gumbel=True)
+    val_loss = loss_fn(
+        model, *val_data, gumbel_temp, hard_gumbel=True, l1_norm_weight=0
+    )
     return model, opt_state, train_loss, val_loss
 
 
@@ -242,7 +248,7 @@ def test_model(
     model: BaseAnalogCkt,
     loss_fn: Callable,
 ):
-    return loss_fn(model, *TEST_DATA, 1.0, True)
+    return loss_fn(model, *TEST_DATA, 1.0, True, 0.0)
 
 
 def plot_evolution(
@@ -274,7 +280,7 @@ def plot_evolution(
         di = [d[i : i + 1] for d in data]
         # if i != 13:
         #     continue
-        loss = loss_fn(model, *di, gumbel_temp, hard_gumbel)
+        loss = loss_fn(model, *di, gumbel_temp, hard_gumbel, 0)
         losses.append(loss)
         for j, time in enumerate(plot_time):
             y_readout_t = y_readout[time].reshape(N_ROW, N_COL)
@@ -386,7 +392,9 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: st
             # Test the model: Make sure the seed is different from the training seed
             # so that the data contains different static and transient noise
             # This is for testing more samples than the one tested with training steps.
-            test_loss = loss_fn(model, *data, gumbel_temp, hard_gumbel=True)
+            test_loss = loss_fn(
+                model, *data, gumbel_temp, hard_gumbel=True, l1_norm_weight=0
+            )
             test_losses.append(test_loss)
             print(f"Step {step}, Test loss: {test_loss}")
 
@@ -410,8 +418,16 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: st
         if step == 0:  # Set up the baseline loss
             train_data = [d[:TRAIN_BZ] for d in data]
             val_data = [d[TRAIN_BZ:] for d in data]
-            train_loss = loss_fn(model, *train_data, gumbel_temp, hard_gumbel=True)
-            val_loss = loss_fn(model, *val_data, gumbel_temp, hard_gumbel=True)
+            train_loss = loss_fn(
+                model,
+                *train_data,
+                gumbel_temp,
+                hard_gumbel=True,
+                l1_norm_weight=L1_NORM_WEIGHT,
+            )
+            val_loss = loss_fn(
+                model, *val_data, gumbel_temp, hard_gumbel=True, l1_norm_weight=0
+            )
 
         else:
             model, opt_state, train_loss, val_loss = make_step(
@@ -656,4 +672,14 @@ if __name__ == "__main__":
         data=plot_data,
         title="Noisy (after fine-tune)",
     )
+
+    # Save the histogram of the coupling strength
+    if MATRIX_SOLVE:
+        coupling_weight = best_weight[0]
+        plt.hist(coupling_weight.flatten(), bins=20)
+        plt.title("Coupling strength histogram")
+        if USE_WANDB:
+            wandb.log(data={"coupling_strength_hist": wandb.Image(plt)})
+        else:
+            plt.show()
     wandb.finish()

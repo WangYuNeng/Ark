@@ -18,6 +18,7 @@ from pattern_recog_loss import (
     periodic_mean_max_se,
     periodic_mse,
 )
+from pattern_recog_matrix_solve import OscillatorNetworkMatrixSolve
 from pattern_recog_parser import args
 from spec_optimization import (
     Coupling,
@@ -36,6 +37,7 @@ from ark.specification.trainable import Trainable, TrainableMgr
 
 jax.config.update("jax_enable_x64", True)
 
+MATRIX_SOLVE = args.matrix_solve
 PATTERN_SHAPE = args.pattern_shape
 
 if PATTERN_SHAPE == "5x3":
@@ -50,6 +52,9 @@ N_EDGE = (N_ROW - 1) * N_COL + (N_COL - 1) * N_ROW
 
 N_CLASS = args.n_class
 N_CYCLES = args.n_cycle
+
+CONNECTION = args.connection
+TRAINALBE_CONNECTION = args.trainable_connection
 
 SEED = args.seed
 TEST_SEED = args.test_seed
@@ -84,6 +89,10 @@ USE_WANDB = args.wandb
 TAG = args.tag
 TASK = args.task
 DIFF_FN = args.diff_fn
+L1_NORM_WEIGHT = args.l1_norm_weight
+assert (
+    not L1_NORM_WEIGHT or MATRIX_SOLVE
+), "L1 norm weight is only supported for matrix solve"
 
 NO_NOISELESS_TRAIN = args.no_noiseless_train
 
@@ -139,6 +148,24 @@ if USE_WANDB:
     wandb_run = wandb.init(project="obc", config=vars(args), tags=tags)
 
 
+def enumerate_node_pairs(
+    n_row=N_ROW, n_col=N_COL
+) -> Generator[tuple[int, int, int, int], None, None]:
+    """Enumerate all unique node pairs in the network
+
+    Return row, col, row_, col_.
+    (row, col) is the axis for the first node and (row_, col_) is for the second.
+    row <= row_ and (col < col_ if row == row_).
+    """
+    for row in range(n_row):
+        for col in range(n_col):
+            for row_ in range(row, n_row):
+                for col_ in range(n_col):
+                    if row_ == row and col_ <= col:
+                        continue
+                    yield row, col, row_, col_
+
+
 def pattern_to_edge_initialization(pattern: np.ndarray):
     """Map the pattern to the edge initialization
 
@@ -146,27 +173,23 @@ def pattern_to_edge_initialization(pattern: np.ndarray):
     Otherwise, the edge is initialized with 1.0
     """
 
-    row_init = [[None for _ in range(N_COL - 1)] for _ in range(N_ROW)]
-    col_init = [[None for _ in range(N_COL)] for _ in range(N_ROW - 1)]
+    weight_init = [
+        [[[0 for _ in range(N_COL)] for _ in range(N_ROW)] for _ in range(N_COL)]
+        for _ in range(N_ROW)
+    ]
 
-    for row in range(N_ROW):
-        for col in range(N_COL - 1):
-            diff = pattern[row, col] - pattern[row, col + 1]
-            row_init[row][col] = -1.0 if diff else 1.0
+    for row, col, row_, col_ in enumerate_node_pairs():
+        diff = pattern[row, col] - pattern[row_, col_]
+        weight_init[row][col][row_][col_] = weight_init[row_][col_][row][col] = (
+            -1.0 if diff else 1.0
+        )
 
-    for row in range(N_ROW - 1):
-        for col in range(N_COL):
-            diff = pattern[row, col] - pattern[row + 1, col]
-            col_init[row][col] = -1.0 if diff else 1.0
-
-    return np.array(row_init), np.array(col_init)
+    return np.array(weight_init)
 
 
 def edge_init_to_trainable_init(
-    row_init: np.ndarray,
-    col_init: np.ndarray,
-    k_rows: list[list[Trainable]],
-    k_cols: list[list[Trainable]],
+    weight_init: np.ndarray,
+    oscillator_ks: list[list[Trainable]],
     trainable_mgr: TrainableMgr,
 ) -> tuple[jax.Array, list[jax.Array]]:
     """Convert the edge initialization to trainable initialization"""
@@ -178,24 +201,18 @@ def edge_init_to_trainable_init(
         one_hot = jax.nn.one_hot(nearest_bins, bins.shape[0])
         return one_hot
 
-    row_init_quantized, col_init_quantized = row_init, col_init
-
     if WEIGHT_BITS is not None:
         weight_choices: list = Cpl_digital.attr_def["k"].attr_type.val_choices
 
         # normalize the weight choices to between -1 and 1
         weight_choices = np.array(weight_choices)
+        weight_init = one_hot_digitize(weight_init, weight_choices)
 
-        row_init_quantized = one_hot_digitize(row_init, weight_choices)
-        col_init_quantized = one_hot_digitize(col_init, weight_choices)
-
-    for row in range(N_ROW):
-        for col in range(N_COL - 1):
-            k_rows[row][col].init_val = row_init_quantized[row, col]
-
-    for row in range(N_ROW - 1):
-        for col in range(N_COL):
-            k_cols[row][col].init_val = col_init_quantized[row, col]
+    for row, col, row_, col_ in enumerate_node_pairs():
+        if isinstance(oscillator_ks[row][col][row_][col_], Trainable):
+            oscillator_ks[row][col][row_][col_].init_val = weight_init[
+                row, col, row_, col_
+            ]
 
     a_trainable = trainable_mgr.get_initial_vals("analog")
     d_trainable = trainable_mgr.get_initial_vals("digital")
@@ -209,17 +226,20 @@ def make_step(
     opt_state: PyTree,
     loss_fn: Callable,
     data: list[jax.Array],
-    gumbel_temp: float,
+    gumbel_temp_: jax.Array,  # Somehow causing recompilation if it is float
     hard_gumbel: bool = False,
 ):
+    gumbel_temp = gumbel_temp_[0]
     train_data, val_data = [d[:TRAIN_BZ] for d in data], [d[TRAIN_BZ:] for d in data]
     train_loss, grads = eqx.filter_value_and_grad(loss_fn)(
-        model, *train_data, gumbel_temp, hard_gumbel
+        model, *train_data, gumbel_temp, hard_gumbel, L1_NORM_WEIGHT
     )
     updates, opt_state = optim.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
     # When validating, always use hard gumbel to force the param to be physical
-    val_loss = loss_fn(model, *val_data, gumbel_temp, hard_gumbel=True)
+    val_loss = loss_fn(
+        model, *val_data, gumbel_temp, hard_gumbel=True, l1_norm_weight=0
+    )
     return model, opt_state, train_loss, val_loss
 
 
@@ -228,7 +248,7 @@ def test_model(
     model: BaseAnalogCkt,
     loss_fn: Callable,
 ):
-    return loss_fn(model, *TEST_DATA, 1.0, True)
+    return loss_fn(model, *TEST_DATA, 1.0, True, 0.0)
 
 
 def plot_evolution(
@@ -260,7 +280,7 @@ def plot_evolution(
         di = [d[i : i + 1] for d in data]
         # if i != 13:
         #     continue
-        loss = loss_fn(model, *di, gumbel_temp, hard_gumbel)
+        loss = loss_fn(model, *di, gumbel_temp, hard_gumbel, 0)
         losses.append(loss)
         for j, time in enumerate(plot_time):
             y_readout_t = y_readout[time].reshape(N_ROW, N_COL)
@@ -268,7 +288,8 @@ def plot_evolution(
             # Calculate the phase difference
             phase_diff = jnp.where(y_readout_t > 1, 2 - y_readout_t, y_readout_t)
             ax[i, j].axis("off")
-            ax[i, j].imshow(phase_diff, cmap="gray_r", vmin=0, vmax=1)
+            cmap = "gray_r" if PATTERN_SHAPE == "10x6" else "gray"
+            ax[i, j].imshow(phase_diff, cmap=cmap, vmin=0, vmax=1)
 
             # ax[j].axis("off")
             # ax[j].imshow(phase_diff, cmap="gray_r", vmin=0, vmax=1)
@@ -292,9 +313,30 @@ def plot_evolution(
         plt.show()
 
 
+def initialize_model(
+    model_cls: type, weight: tuple[jax.Array, list[jax.Array]], is_stochastic: bool
+) -> BaseAnalogCkt | OscillatorNetworkMatrixSolve:
+    if MATRIX_SOLVE:
+        model: OscillatorNetworkMatrixSolve = model_cls(
+            init_coupling=weight[0],
+            init_locking=weight[1],
+            neighbor_connection=True if CONNECTION == "neighbor" else False,
+            is_stochastic=is_stochastic,
+            noise_amp=TRANS_NOISE_STD,
+            solver=Heun(),
+        )
+    else:
+        model: BaseAnalogCkt = model_cls(
+            init_trainable=best_weight,
+            is_stochastic=is_stochastic,
+            solver=Heun(),
+        )
+    return model
+
+
 def load_model_and_plot(
     model_cls: type,
-    best_weight: tuple[jax.Array, list[jax.Array]],
+    best_weight: tuple,
     is_stochastic: bool,
     loss_fn: Callable,
     data: list[jax.Array],
@@ -310,11 +352,7 @@ def load_model_and_plot(
         hard_gumbel = False
     else:
         gumbel_temp = 1  # Set to a value to avoid divide by None
-    model: BaseAnalogCkt = model_cls(
-        init_trainable=best_weight,
-        is_stochastic=is_stochastic,
-        solver=Heun(),
-    )
+    model = initialize_model(model_cls, best_weight, is_stochastic)
 
     plot_evolution(model, loss_fn, data, title, gumbel_temp, hard_gumbel)
 
@@ -354,7 +392,9 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: st
             # Test the model: Make sure the seed is different from the training seed
             # so that the data contains different static and transient noise
             # This is for testing more samples than the one tested with training steps.
-            test_loss = loss_fn(model, *data, gumbel_temp, hard_gumbel=True)
+            test_loss = loss_fn(
+                model, *data, gumbel_temp, hard_gumbel=True, l1_norm_weight=0
+            )
             test_losses.append(test_loss)
             print(f"Step {step}, Test loss: {test_loss}")
 
@@ -378,12 +418,20 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: st
         if step == 0:  # Set up the baseline loss
             train_data = [d[:TRAIN_BZ] for d in data]
             val_data = [d[TRAIN_BZ:] for d in data]
-            train_loss = loss_fn(model, *train_data, gumbel_temp, hard_gumbel=True)
-            val_loss = loss_fn(model, *val_data, gumbel_temp, hard_gumbel=True)
+            train_loss = loss_fn(
+                model,
+                *train_data,
+                gumbel_temp,
+                hard_gumbel=True,
+                l1_norm_weight=L1_NORM_WEIGHT,
+            )
+            val_loss = loss_fn(
+                model, *val_data, gumbel_temp, hard_gumbel=True, l1_norm_weight=0
+            )
 
         else:
             model, opt_state, train_loss, val_loss = make_step(
-                model, opt_state, loss_fn, data, gumbel_temp, hard_gumbel
+                model, opt_state, loss_fn, data, jnp.array([gumbel_temp]), hard_gumbel
             )
         test_loss = test_model(model, loss_fn)
 
@@ -415,12 +463,16 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: st
     return val_loss_best, best_weight
 
 
+def new_coupling_weight():
+    return (
+        trainable_mgr.new_analog() if not WEIGHT_BITS else trainable_mgr.new_digital()
+    )
+
+
 if __name__ == "__main__":
 
     graph = CDG()
     nodes = [[None for _ in range(N_COL)] for _ in range(N_ROW)]
-    row_edges = [[None for _ in range(N_COL - 1)] for _ in range(N_ROW)]
-    col_edges = [[None for _ in range(N_COL)] for _ in range(N_ROW - 1)]
 
     if not WEIGHT_BITS:
         cpl_type = Coupling
@@ -428,27 +480,9 @@ if __name__ == "__main__":
         cpl_type = Cpl_digital
 
     # Store all the trainable parameters
-    row_ks = [
-        [
-            (
-                trainable_mgr.new_analog()
-                if not WEIGHT_BITS
-                else trainable_mgr.new_digital()
-            )
-            for _ in range(N_COL - 1)
-        ]
+    oscillator_ks = [
+        [[[None for _ in range(N_COL)] for _ in range(N_ROW)] for _ in range(N_COL)]
         for _ in range(N_ROW)
-    ]
-    col_ks = [
-        [
-            (
-                trainable_mgr.new_analog()
-                if not WEIGHT_BITS
-                else trainable_mgr.new_digital()
-            )
-            for _ in range(N_COL)
-        ]
-        for _ in range(N_ROW - 1)
     ]
 
     # Initialze nodes
@@ -464,30 +498,33 @@ if __name__ == "__main__":
             graph.connect(self_edge, node, node)
             nodes[row][col] = node
 
-    # Connect neighboring nodes
-    for row in range(N_ROW):
-        for col in range(N_COL - 1):
-            edge = cpl_type(k=row_ks[row][col])
-            graph.connect(edge, nodes[row][col], nodes[row][col + 1])
-            row_edges[row][col] = edge
-
-    for row in range(N_ROW - 1):
-        for col in range(N_COL):
-            edge = cpl_type(k=col_ks[row][col])
-            graph.connect(edge, nodes[row][col], nodes[row + 1][col])
-            col_edges[row][col] = edge
+    for row, col, row_, col_ in enumerate_node_pairs():
+        if CONNECTION == "all" or (
+            CONNECTION == "neighbor"
+            and ((row_ == row + 1 and col_ == col) or (row_ == row and col_ == col + 1))
+        ):
+            new_k = new_coupling_weight()
+            edge = cpl_type(k=new_k)
+            graph.connect(edge, nodes[row][col], nodes[row_][col_])
+            oscillator_ks[row][col][row_][col_] = oscillator_ks[row_][col_][row][
+                col
+            ] = new_k
 
     # flatten the nodes for readout
     nodes_flat = [node for row in nodes for node in row]
 
-    rec_circuit_class = OptCompiler().compile(
-        "rec",
-        graph,
-        obc_spec,
-        trainable_mgr=trainable_mgr,
-        readout_nodes=nodes_flat,
-        normalize_weight=False,
-        do_clipping=False,
+    rec_circuit_class = (
+        OptCompiler().compile(
+            "rec",
+            graph,
+            obc_spec,
+            trainable_mgr=trainable_mgr,
+            readout_nodes=nodes_flat,
+            normalize_weight=False,
+            do_clipping=False,
+        )
+        if not MATRIX_SOLVE
+        else OscillatorNetworkMatrixSolve
     )
 
     if DIFF_FN == "periodic_mse":
@@ -503,7 +540,9 @@ if __name__ == "__main__":
             n_class=N_CLASS,
             graph=graph,
             osc_array=nodes,
-            mapping_fn=rec_circuit_class.cdg_to_initial_states,
+            mapping_fn=(
+                None if MATRIX_SOLVE else rec_circuit_class.cdg_to_initial_states
+            ),
             snp_prob=SNP_PROB,
             gauss_std=GAUSS_STD,
             uniform_noise=UNIFORM_NOISE,
@@ -529,25 +568,44 @@ if __name__ == "__main__":
     np.random.set_state(random_state)
 
     if WEIGHT_INIT == "hebbian":
-        row_init, col_init = pattern_to_edge_initialization(NUMBERS[0])
+        weight_init = pattern_to_edge_initialization(NUMBERS[0])
         for i in range(1, N_CLASS):
-            r, c = pattern_to_edge_initialization(NUMBERS[i])
-            row_init += r
-            col_init += c
+            w = pattern_to_edge_initialization(NUMBERS[i])
+            weight_init += w
 
-        row_init /= N_CLASS
-        col_init /= N_CLASS
+        weight_init /= N_CLASS
     elif WEIGHT_INIT == "random":
-        row_init = np.random.uniform(low=-1, high=1, size=(N_ROW, N_COL - 1))
-        col_init = np.random.uniform(low=-1, high=1, size=(N_ROW - 1, N_COL))
-
-    if not LOAD_WEIGHT:
-        trainable_init = edge_init_to_trainable_init(
-            row_init, col_init, row_ks, col_ks, trainable_mgr
+        weight_init = np.random.uniform(
+            low=-1, high=1, size=(N_ROW, N_COL, N_ROW, N_COL)
         )
+
+    if MATRIX_SOLVE:
+        if WEIGHT_BITS:
+            raise NotImplementedError(
+                "Digital weight is not supported for matrix solve"
+            )
+        if not TRAINABLE_LOCKING:
+            raise NotImplementedError(
+                "Locking strength must be trainable for matrix solve"
+            )
+        n_node = N_ROW * N_COL
+        if LOAD_WEIGHT:
+            weights = jnp.load(LOAD_WEIGHT)
+            trainable_init = (weights["new_coupling_weight"], weights["locking_weight"])
+            print(trainable_init)
+        else:
+            trainable_init = (
+                jnp.array(weight_init),
+                INIT_LOCK_STRENGTH,
+            )
     else:
-        weights = jnp.load(LOAD_WEIGHT)
-        trainable_init = (weights["analog"], weights["digital"])
+        if not LOAD_WEIGHT:
+            trainable_init = edge_init_to_trainable_init(
+                weight_init, oscillator_ks, trainable_mgr
+            )
+        else:
+            weights = jnp.load(LOAD_WEIGHT)
+            trainable_init = (weights["analog"], weights["digital"])
 
     plot_data = next(dl(PLOT_BZ))
 
@@ -562,11 +620,7 @@ if __name__ == "__main__":
 
     if not NO_NOISELESS_TRAIN:
 
-        model: BaseAnalogCkt = rec_circuit_class(
-            init_trainable=trainable_init,
-            is_stochastic=False,
-            solver=Heun(),
-        )
+        model = initialize_model(rec_circuit_class, trainable_init, False)
         best_loss, best_weight = train(model, loss_fn, dl, "tran_noiseless")
 
         print(f"Best Loss: {best_loss}")
@@ -593,18 +647,21 @@ if __name__ == "__main__":
     )
 
     # Fine-tune the best model w/ noise
-    model: BaseAnalogCkt = rec_circuit_class(
-        init_trainable=best_weight,
-        is_stochastic=True,
-        solver=Heun(),
-    )
+    model = initialize_model(rec_circuit_class, best_weight, True)
 
     best_loss, best_weight = train(model, loss_fn, dl, "tran_noisy")
     print(f"\tFine-tune Best Loss: {best_loss}")
     print(f"Fine-tune Best Weights: {best_weight}")
 
     if args.save_weight:
-        jnp.savez(args.save_weight, analog=best_weight[0], digital=best_weight[1])
+        if MATRIX_SOLVE:
+            jnp.savez(
+                args.save_weight,
+                coupling_weight=best_weight[0],
+                locking_weight=best_weight[1],
+            )
+        else:
+            jnp.savez(args.save_weight, analog=best_weight[0], digital=best_weight[1])
 
     # Model after fine-tune
     load_model_and_plot(
@@ -615,4 +672,14 @@ if __name__ == "__main__":
         data=plot_data,
         title="Noisy (after fine-tune)",
     )
+
+    # Save the histogram of the coupling strength
+    if MATRIX_SOLVE:
+        coupling_weight = best_weight[0]
+        plt.hist(coupling_weight.flatten(), bins=20)
+        plt.title("Coupling strength histogram")
+        if USE_WANDB:
+            wandb.log(data={"coupling_strength_hist": wandb.Image(plt)})
+        else:
+            plt.show()
     wandb.finish()

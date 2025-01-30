@@ -6,11 +6,28 @@ parser = ArgumentParser()
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--task", type=str, default="one-to-one")
 parser.add_argument(
+    "--matrix_solve",
+    action="store_true",
+    help="Use matrix form of the OBC to solve the ODEs instead of the Ark compiled version",
+)
+parser.add_argument(
     "--pattern_shape",
     type=str,
     default="5x3",
     choices=["5x3", "10x6"],
     help="Shape of the digit patterns, currently support 5x3 and 10x6",
+)
+parser.add_argument(
+    "--connection",
+    type=str,
+    default="neighbor",
+    choices=["neighbor", "all"],
+    help="Connection pattern between the oscillators",
+)
+parser.add_argument(
+    "--trainable_connection",
+    action="store_true",
+    help="Whether the connections (ON/OFF) between oscillators are trainable",
 )
 parser.add_argument(
     "--n_cycle",
@@ -83,6 +100,9 @@ parser.add_argument(
     choices=["periodic_mse", "periodic_mean_max_se", "normalize_angular_diff"],
     default="periodic_mean_max_se",
     help="The function to evaluate the difference between the readout and the target",
+)
+parser.add_argument(
+    "--l1_norm_weight", type=float, default=0.0, help="L1 norm weight for the loss"
 )
 parser.add_argument(
     "--point_per_cycle", type=int, default=50, help="Number of time points per cycle"

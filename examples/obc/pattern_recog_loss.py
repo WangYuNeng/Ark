@@ -2,6 +2,7 @@ from typing import Callable
 
 import jax
 import jax.numpy as jnp
+from pattern_recog_matrix_solve import OscillatorNetworkMatrixSolve
 
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 
@@ -60,17 +61,20 @@ def min_rand_reconstruction_loss(
 
 
 def pattern_reconstruction_loss(
-    model: BaseAnalogCkt,
+    model: BaseAnalogCkt | OscillatorNetworkMatrixSolve,
     x: jax.Array,
     args_seed: jax.Array,
     noise_seed: jax.Array,
     y: jax.Array,
     gumbel_temp: float,
     hard_gumbel: bool,
+    l1_norm_weight: float,
     time_info: TimeInfo,
     diff_fn: Callable,
 ):
     y_raw = jax.vmap(model, in_axes=(None, 0, None, 0, 0, None, None))(
         time_info, x, [], args_seed, noise_seed, gumbel_temp, hard_gumbel
     )
-    return diff_fn(y_raw[:, -1, :], y)
+    return diff_fn(y_raw[:, -1, :], y) + l1_norm_weight * jnp.sum(
+        jnp.abs(model.weights()[0])
+    )

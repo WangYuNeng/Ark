@@ -234,8 +234,8 @@ def var(rule_keyword: RuleKeyword) -> Variable:
 
 
 SRC, DST = (
-    Target("s"),
-    Target("t"),
+    Target("src"),
+    Target("dst"),
 )
 EDGE, SELF = RuleKeyword("e"), Target("SELF")
 TIME = Variable("time")

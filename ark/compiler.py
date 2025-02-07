@@ -3,6 +3,7 @@
 import ast
 import copy
 import inspect
+from dataclasses import dataclass
 from functools import partial
 from itertools import product
 from typing import Callable
@@ -14,12 +15,12 @@ import sympy
 import sympy.codegen
 from scipy import integrate
 
-from ark.cdg.cdg import CDG, CDGEdge, CDGNode
+from ark.cdg.cdg import CDG, CDGEdge, CDGElement, CDGNode
 from ark.reduction import Reduction
-from ark.rewrite import BaseRewriteGen, SympyRewriteGen
+from ark.rewrite import BaseRewriteGen, SympyRewriteGen, VectorizeRewriteGen
 from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule, ProdRuleId
-from ark.specification.rule_keyword import SRC, TIME, Target, kw_name
+from ark.specification.rule_keyword import DST, SRC, TIME, Target, kw_name
 from ark.specification.specification import CDGSpec
 
 
@@ -189,6 +190,24 @@ def match_prod_rule(
     return None
 
 
+@dataclass
+class ProdRuleCDGInfo:
+    """Coordinates and implented edge of a production rule in the CDG
+
+    Each `coordinate` of the connection is represented by the nodes' state variable
+    indices. E.g., if we have [da/dt, db/dt, d^2b/dt^2] as the state variables of
+    the nodes, a connection between node a and b that targets a will have coordinate
+    (0, 1), a connection between node a and b that targets a will have coordinate
+    (2, 0).
+
+    If the y node is not stateful, the index is -1.
+    """
+
+    x: int
+    y: int
+    edge: CDGEdge
+
+
 class ArkCompiler:
     """Ark compiler for CDG to dynamical system simulation
 
@@ -285,14 +304,14 @@ class ArkCompiler:
         self._verbose = verbose
 
         (
-            node_mapping,
-            ode_fn_io_names,
-            switch_mapping,
+            self._node_to_state_var,
+            self._ode_fn_io_names,
+            self._switch_mapping,
             attr_mapping,
         ) = self._collect_ode_fn_io(cdg)
 
-        attr_var_def = self._compile_attribute_var(switch_mapping, attr_mapping)
-        ode_fn, _ = self._compile_ode_fn(cdg, cdg_spec, ode_fn_io_names)
+        attr_var_def = self._compile_attribute_var(self._switch_mapping, attr_mapping)
+        ode_fn, _ = self._compile_ode_fn(cdg, cdg_spec, self._ode_fn_io_names)
         solv_ivp_stmts = self._compile_solve_ivp()
 
         stmts = attr_var_def + [ode_fn] + solv_ivp_stmts
@@ -312,8 +331,8 @@ class ArkCompiler:
 
         return (
             self._namespace[self.prog_name],
-            node_mapping,
-            switch_mapping,
+            self._node_to_state_var,
+            self._switch_mapping,
             attr_mapping,
         )
 
@@ -362,15 +381,15 @@ class ArkCompiler:
         stmts = []
 
         (
-            node_mapping,
-            ode_fn_io_names,
-            switch_mapping,
+            self._node_to_state_var,
+            self._ode_fn_io_names,
+            self._switch_mapping,
             attr_mapping,
         ) = self._collect_ode_fn_io(cdg, separate_fn_attr=True)
 
         # Count the numerical value attributes index from the switch mapping
         # Isolate the function attributes mapping
-        num_attr_mapping, num_attr_idx = {}, len(switch_mapping)
+        num_attr_mapping, num_attr_idx = {}, len(self._switch_mapping)
         fn_attr_mapping, fn_attr_idx = {}, 0
         for ele_name, attrs in attr_mapping.items():
             num_attr_mapping[ele_name], fn_attr_mapping[ele_name] = {}, {}
@@ -386,7 +405,7 @@ class ArkCompiler:
         args_names = [
             None
             for _ in range(
-                len(switch_mapping)
+                len(self._switch_mapping)
                 + sum(len(attrs) for attrs in num_attr_mapping.values())
             )
         ]
@@ -394,7 +413,7 @@ class ArkCompiler:
             None for _ in range(sum(len(attrs) for attrs in fn_attr_mapping.values()))
         ]
 
-        for name, idx in switch_mapping.items():
+        for name, idx in self._switch_mapping.items():
             args_names[idx] = mk_var(switch_attr(name))
         for ele_name, attrs in num_attr_mapping.items():
             for attr_name, idx in attrs.items():
@@ -419,10 +438,10 @@ class ArkCompiler:
                 )
             )
         _, ode_stmts = self._compile_ode_fn(
-            cdg, cdg_spec, ode_fn_io_names, return_jax=True
+            cdg, cdg_spec, self._ode_fn_io_names, return_jax=True
         )
         _, noise_ode_stmts = self._compile_ode_fn(
-            cdg, cdg_spec, ode_fn_io_names, return_jax=True, noise_ode=True
+            cdg, cdg_spec, self._ode_fn_io_names, return_jax=True, noise_ode=True
         )
         for fn_name, ode_stmt in zip(
             [self.ODE_FN_NAME, self.NOISE_FN_NAME], [ode_stmts, noise_ode_stmts]
@@ -454,8 +473,8 @@ class ArkCompiler:
 
         return (
             (self._namespace[self.ODE_FN_NAME], self._namespace[self.NOISE_FN_NAME]),
-            node_mapping,
-            switch_mapping,
+            self._node_to_state_var,
+            self._switch_mapping,
             num_attr_mapping,
             fn_attr_mapping,
         )
@@ -550,6 +569,49 @@ class ArkCompiler:
                         )
                     )
         return equations
+
+    def compile_vectorized_diffeqs(
+        self, cdg: CDG, cdg_spec: CDGSpec, noise_ode: bool = False
+    ) -> ast.Assign:
+        """Compile the cdg to the ode function into a vectorized assignment statement
+        dx/dt = ... describing the dynamical system.
+
+        Args:
+            cdg (CDG): The input CDG
+            cdg_spec (CDGSpec): Specification
+            noise_ode (bool): whether the ode function is for noise term.
+
+        Returns:
+            equations (ast.Assign): system equation
+        """
+
+        def enumerate_attr(cdg_element: CDGElement):
+            """Enumerate the attributes of the CDGElement"""
+            for attr_name in cdg_element.attrs.keys():
+                raise NotImplementedError
+
+        rule_dict = cdg_spec.prod_rule_dict()
+        rewrite = VectorizeRewriteGen()
+        rewrite.set_attr_rn_fn(rn_attr)
+
+        prodrule_to_info = self._get_prodrule_info(cdg, cdg_spec)
+        for prod_rule_id, info_list in prodrule_to_info.items():
+            # Collect src/dst/self variable and attribute mapping and
+            # edge attribute mapping
+            # variable -> Matrix @ x
+            # attribute -> Matrix @ args
+            # TODO: Function attribute cannot be vectorized. In reality,
+            # the function attribute for the same production rule are usually
+            # the same thought. Need to figure out how to handle this.
+            Tx_coord, Ty_coord = [], []
+            Attr_to_coord = {}
+
+            for info in info_list:
+                x, y, edge, switchable = info.x, info.y, info.edge, info.edge.switchable
+                Tx_coord.append(x)
+                if y != -1:
+                    Ty_coord.append(y)
+                raise NotImplementedError
 
     def _compile_user_def_fn(self, funcs: list[Callable]) -> list[ast.FunctionDef]:
         """Compile user defined functions to ast.FunctionDef"""
@@ -657,6 +719,7 @@ class ArkCompiler:
         io_names: list[str],
         return_jax: bool = False,
         noise_ode: bool = False,
+        vectorized: bool = False,
     ) -> tuple[ast.FunctionDef, list[ast.stmt]]:
         """Compile the cdg to the ode function for scipy.integrate.solve_ivp simulation
 
@@ -687,54 +750,58 @@ class ArkCompiler:
                 value=set_ctx(mk_var(input_vec), ast.Load),
             )
         )
+        if not vectorized:
+            # Generate the ddt_var = f(var) statements
+            equations = self.compile_sympy_diffeqs(cdg, cdg_spec, noise_ode)
 
-        # Generate the ddt_var = f(var) statements
-        equations = self.compile_sympy_diffeqs(cdg, cdg_spec, noise_ode)
+            # Convert sympy equations to ast statements
+            for eq in equations:
+                eq_str = sympy.pycode(eq)
+                stmts.append(ast.parse(eq_str).body[0])
 
-        # Convert sympy equations to ast statements
-        for eq in equations:
-            eq_str = sympy.pycode(eq)
-            stmts.append(ast.parse(eq_str).body[0])
-
-        # Return statement of the ode function
-        if not return_jax:
-            stmts.append(
-                set_ctx(
-                    ast.Return(
-                        ast.List(
-                            [
-                                mk_var(n_state(ddt(name, order=1)))
-                                for name in input_return_names
-                            ]
-                        )
-                    ),
-                    ast.Load,
+            # Return statement of the ode function
+            if not return_jax:
+                stmts.append(
+                    set_ctx(
+                        ast.Return(
+                            ast.List(
+                                [
+                                    mk_var(n_state(ddt(name, order=1)))
+                                    for name in input_return_names
+                                ]
+                            )
+                        ),
+                        ast.Load,
+                    )
                 )
-            )
+            else:
+                stmts.append(
+                    set_ctx(
+                        ast.Return(
+                            ast.Call(
+                                ast.Attribute(
+                                    value=mk_var("jnp"),
+                                    attr="array",
+                                    ctx=ast.Load(),
+                                ),
+                                args=[
+                                    ast.List(
+                                        [
+                                            mk_var(n_state(ddt(name, order=1)))
+                                            for name in input_return_names
+                                        ]
+                                    )
+                                ],
+                                keywords=[],
+                            )
+                        ),
+                        ast.Load,
+                    )
+                )
+
         else:
-            stmts.append(
-                set_ctx(
-                    ast.Return(
-                        ast.Call(
-                            ast.Attribute(
-                                value=mk_var("jnp"),
-                                attr="array",
-                                ctx=ast.Load(),
-                            ),
-                            args=[
-                                ast.List(
-                                    [
-                                        mk_var(n_state(ddt(name, order=1)))
-                                        for name in input_return_names
-                                    ]
-                                )
-                            ],
-                            keywords=[],
-                        )
-                    ),
-                    ast.Load,
-                )
-            )
+            dxdt_assignment = self.compile_vectorized_diffeqs(cdg, cdg_spec, noise_ode)
+            raise NotImplementedError
 
         arguments = ast.arguments(
             posonlyargs=[],
@@ -811,3 +878,50 @@ class ArkCompiler:
             body=stmts,
             decorator_list=[],
         )
+
+    def _get_prodrule_info(
+        self, cdg: CDG, cdg_spec: CDGSpec
+    ) -> dict[ProdRuleId, list[ProdRuleCDGInfo]]:
+        """Return coordinate information of production rule in the graph.
+
+        Each `connection` is identified by the production rule id, i.e., the edge type,
+        source node type, destination node type, and the target of the production rule.
+
+        Returns:
+            dict[ProdRuleId, list[ProdRuleCDGInfo]]: the coordinates of connections
+        """
+
+        rule_dict = cdg_spec.prod_rule_dict()
+        prod_id_to_info = {}
+
+        # Iterate all stateful nodes and their edges
+        for node in cdg.stateful_nodes:
+            for edge in node.edges:
+                # Find the production rule that matches the edge
+                src, dst = edge.src, edge.dst
+                gen_rule = match_prod_rule(
+                    rule_dict=rule_dict,
+                    edge=edge,
+                    src=src,
+                    dst=dst,
+                    tgt=node.which_tgt(edge),
+                )
+                if gen_rule is not None:
+                    if node.which_tgt(edge) == SRC:
+                        x_node, y_node = src, dst
+                    else:
+                        x_node, y_node = dst, src
+                    # prod rule applies to the highest order derivative
+                    x = self._node_to_state_var[x_node.name] + x_node.order - 1
+                    # If the destination node is not statefule, set the dst_id to -1
+                    if y_node.order == 0:
+                        y = -1
+                    else:
+                        y = self._node_to_state_var[y_node.name]
+                    if gen_rule.identifier not in prod_id_to_info:
+                        prod_id_to_info[gen_rule.identifier] = []
+                    prod_id_to_info[gen_rule.identifier].append(
+                        ProdRuleCDGInfo(x, y, edge)
+                    )
+
+        return prod_id_to_info

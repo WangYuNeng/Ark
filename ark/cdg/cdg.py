@@ -1,4 +1,4 @@
-from typing import Mapping, NewType, Optional
+from typing import Generator, Iterable, Mapping, NewType, Optional
 
 import numpy as np
 
@@ -149,12 +149,14 @@ class CDGNode(CDGElement):
     _init_vals: list[float]
     _traces: list[np.ndarray]
     order: int
+    _state_var_id_start: int
 
     def __init__(self, cdg_type: "NodeType", name: str, **attrs) -> None:
         super().__init__(cdg_type, name, **attrs)
         self.edges = set()
         self._init_vals = [None for _ in range(cdg_type.order)]
         self._trace = [None for _ in range(cdg_type.order)]
+        self._state_var_id_start = None
 
     @property
     def init_vals(self) -> list[float]:
@@ -204,13 +206,13 @@ class CDGNode(CDGElement):
         """Return the degree of the node."""
         return len(self.edges)
 
-    def get_non_switchable(self) -> set["CDGEdge"]:
+    def get_non_switchable(self) -> Generator["CDGEdge", None, None]:
         """return all the non-switchable edges"""
         for edge in self.edges:
             if not edge.switchable:
                 yield edge
 
-    def get_switchable(self) -> set["CDGEdge"]:
+    def get_switchable(self) -> Generator["CDGEdge", None, None]:
         """return all the switchable edges"""
         for edge in self.edges:
             if edge.switchable:
@@ -290,6 +292,25 @@ class CDGNode(CDGElement):
             trace (np.ndarray): the trace of the n-th order state
         """
         self._trace[n] = trace
+
+    def state_var_id(self, order: int) -> int:
+        """Return the state variable id of the n-th order state variable.
+
+        Args:
+            order (int): the order of the state variable to access
+        Returns:
+            int: the state variable id
+        """
+        node_order = self.cdg_type.order
+        if self._state_var_id_start is None:
+            raise RuntimeError(f"State variable id of node {self} not set.")
+        elif order < 1:
+            raise RuntimeError(f"1 <= order <= node order ({node_order}). Got {order}.")
+        elif order > node_order:
+            raise RuntimeError(
+                f"Specified order {order} exceeds the node order {node_order}."
+            )
+        return self._state_var_id_start + order - 1
 
 
 class CDGEdge(CDGElement):
@@ -478,6 +499,28 @@ class CDG:
                 for order in range(1, self.ds_order + 1)
             ]
         )
+
+    def get_states_adjacency_matrix(self) -> Iterable[Iterable]:
+        """Return the adjacency matrix for all state variables in the system of
+        1st order differential equations represented by the graph.
+
+        The rows/columns are ordered by the self.nodes_in_order with higher order
+        nodes expanded into multiple rows/columns.
+        E.g., if the nodes are [a, b, c] with orders [1, 2, 1], the adjacency matrix
+        will have rows denoting the connection of [da/dt, db/dt, d^2b/dt^2, dc/dt] with
+        [a, b, db/dt, c] columns.
+
+        The elements are
+        - 0 if the corresponding state variables are not connected
+        - 1 for a high (>=2) order node's lower order state variable dependence
+          to higher order state variable  (e.g., db/dt = db/dt)
+        - A CDGEdge object for connections between nodes in the graph
+
+        Returns:
+            Iterable[Iterable]: the adjacency matrix for all state variables
+        """
+
+        raise NotImplementedError
 
     def execution_data(
         self,

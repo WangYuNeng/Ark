@@ -102,3 +102,21 @@ class SympyRewriteGen(BaseRewriteGen):
             new_fn_name = self._attr_rn_fn(self.mapping[ele_name], attr_name)
             sympy_mapping.add((sympy.Function(fn_name), sympy.Function(new_fn_name)))
         return expr.subs(list(sympy_mapping))
+
+
+class VectorizeRewriteGen(BaseRewriteGen):
+    def __init__(self) -> None:
+        super().__init__()
+        self._mapping = None
+
+    @property
+    def mapping(self) -> dict[str, str]:
+        """mapping between names"""
+        return self._mapping
+
+    @mapping.setter
+    def mapping(self, val: dict[str, str]) -> None:
+        self._mapping = val
+
+    def visit(self, expr: str):
+        raise NotImplementedError

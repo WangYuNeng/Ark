@@ -40,6 +40,9 @@ class ProdRuleId:
             [self.et.name, self.src_nt.name, self.dst_nt.name, kw_name(self.gen_tgt)]
         )
 
+    def __repr__(self) -> str:
+        return self.__str__()
+
 
 class ProdRule:
     """Production Rule Class"""

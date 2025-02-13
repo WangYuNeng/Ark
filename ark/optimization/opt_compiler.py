@@ -31,8 +31,8 @@ def mk_var_generator(name: str):
 def mk_assign(target: ast.expr, value: ast.expr):
     """target = value"""
     return ast.Assign(
-        targets=[set_ctx(target, ast.Store)],
-        value=set_ctx(value, ast.Load),
+        targets=[set_ctx(target, ast.Store())],
+        value=set_ctx(value, ast.Load()),
     )
 
 
@@ -285,6 +285,7 @@ class OptCompiler:
         normalize_weight: bool = True,
         do_clipping: bool = True,
         aggregate_args_lines: bool = False,
+        vectorized: bool = False,
     ) -> type:
         """Compile the cdg to an equinox.Module.
 
@@ -314,7 +315,7 @@ class OptCompiler:
         )
 
         (ode_term, noise_term), node_mapping, switch_map, num_attr_map, fn_attr_map = (
-            ark_compiler.compile_odeterm(cdg, cdg_spec)
+            ark_compiler.compile_odeterm(cdg, cdg_spec, vectorized=vectorized)
         )
 
         self.mm_used_idx = 0
@@ -531,7 +532,7 @@ class OptCompiler:
             )
 
         # Return the args
-        stmts.append(set_ctx(ast.Return(value=args_expr_gen()), ast.Load))
+        stmts.append(set_ctx(ast.Return(value=args_expr_gen()), ast.Load()))
 
         # Compile the statements to make_args(self, switch, rand_seed) function
         make_args_fn = ast.FunctionDef(
@@ -556,7 +557,6 @@ class OptCompiler:
         )
         module = ast.Module([make_args_fn], type_ignores=[])
         module = ast.fix_missing_locations(module)
-        print(ast.unparse(module))
         exec(
             compile(source=module, filename="tmp.py", mode="exec"),
             namespace,

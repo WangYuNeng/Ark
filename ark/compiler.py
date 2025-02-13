@@ -17,7 +17,7 @@ import sympy.codegen
 from scipy import integrate
 
 from ark.cdg.cdg import CDG, CDGEdge, CDGElement, CDGNode
-from ark.reduction import Reduction
+from ark.reduction import PRODUCT, Reduction
 from ark.rewrite import BaseRewriteGen, SympyRewriteGen, VectorizeRewriteGen
 from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule, ProdRuleId
@@ -586,6 +586,12 @@ class ArkCompiler:
                     vname = n_state(vname)
                 reduction = node.reduction
                 rhs = []
+
+                # Indicate whether all productive edges (edge produces expression)
+                # are switchable for this node for the PRODUCT reduction with all switchable edge case.
+                product_and_all_edge_switchable = reduction == PRODUCT
+                switchable_edge_names = []
+
                 for edge in node.edges:
                     src, dst = edge.src, edge.dst
                     gen_rule = match_prod_rule(
@@ -607,8 +613,23 @@ class ArkCompiler:
                             rhs_expr = reduction.sympy_switch(
                                 rhs_expr, mk_var(switch_attr(edge.name), to_sympy=True)
                             )
+                            switchable_edge_names.append(edge.name)
+                        else:
+                            product_and_all_edge_switchable = False
                         rhs.append(rhs_expr)
                 if rhs:
+                    # Edge case -- when a node has all swithable edges with a PRODUCT reduction,
+                    # current implementation will resolve to 1 when all switches are off but it should be 0.
+                    if product_and_all_edge_switchable:
+                        # Guard the edge case with a (1-\Pi(1-switches)) term
+                        switch_guard_expr = 1 - concat_expr(
+                            [
+                                1 - mk_var(switch_attr(name), to_sympy=True)
+                                for name in switchable_edge_names
+                            ],
+                            sympy.Mul,
+                        )
+                        rhs.append(switch_guard_expr)
                     equations.append(
                         sympy.codegen.Assignment(
                             lhs=mk_var(vname, to_sympy=True),

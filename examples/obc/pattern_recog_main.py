@@ -7,7 +7,6 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
-import wandb
 from diffrax import Heun
 from jaxtyping import PyTree
 from pattern_recog_dataloader import NUMBERS_5x3, NUMBERS_10x6, dataloader, dataloader2
@@ -30,6 +29,7 @@ from spec_optimization import (
     obc_spec,
 )
 
+import wandb
 from ark.cdg.cdg import CDG
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
@@ -146,6 +146,8 @@ obc_spec.production_rules()[4]._noise_exp = TRANS_NOISE_STD
 if USE_WANDB:
     tags = ["digit_recognitio"] if not TAG else ["digit_recognition", TAG]
     wandb_run = wandb.init(project="obc", config=vars(args), tags=tags)
+
+VECTORIZE_ODETERM = args.vectorize_odeterm
 
 
 def enumerate_node_pairs(
@@ -327,7 +329,7 @@ def initialize_model(
         )
     else:
         model: BaseAnalogCkt = model_cls(
-            init_trainable=best_weight,
+            init_trainable=weight,
             is_stochastic=is_stochastic,
             solver=Heun(),
         )
@@ -522,6 +524,7 @@ if __name__ == "__main__":
             readout_nodes=nodes_flat,
             normalize_weight=False,
             do_clipping=False,
+            vectorize=VECTORIZE_ODETERM,
         )
         if not MATRIX_SOLVE
         else OscillatorNetworkMatrixSolve

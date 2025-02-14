@@ -9,12 +9,24 @@ import jax
 import jax.numpy as jnp
 
 from ark.cdg.cdg import CDG, CDGElement, CDGNode
-from ark.compiler import ArkCompiler, mk_arg, set_ctx
+from ark.compiler import ArkCompiler, mk_arg
 from ark.optimization.base_module import BaseAnalogCkt
 from ark.specification.attribute_def import AttrDefMismatch, Trainable
 from ark.specification.attribute_type import AnalogAttr, DigitalAttr
 from ark.specification.specification import CDGSpec
 from ark.specification.trainable import TrainableMgr
+from ark.util import (
+    mk_arr_access,
+    mk_assign,
+    mk_call,
+    mk_jax_random_call,
+    mk_jnp_assign,
+    mk_jnp_call,
+    mk_list,
+    mk_list_val_expr,
+    mk_var_generator,
+    set_ctx,
+)
 
 jax.config.update("jax_enable_x64", True)
 jax.config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
@@ -22,101 +34,6 @@ jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
 jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 
 ark_compiler = ArkCompiler()
-
-
-def mk_var_generator(name: str):
-    return lambda: ast.Name(id=name)
-
-
-def mk_assign(target: ast.expr, value: ast.expr):
-    """target = value"""
-    return ast.Assign(
-        targets=[set_ctx(target, ast.Store())],
-        value=set_ctx(value, ast.Load()),
-    )
-
-
-def mk_call(fn: ast.expr, args: list[ast.expr]):
-    """fn(*args)"""
-    return ast.Call(
-        func=fn,
-        args=args,
-        keywords=[],
-    )
-
-
-def mk_tuple(elts: list[ast.Name | ast.Constant]):
-    return ast.Tuple(elts=elts)
-
-
-def mk_list(lst: list[ast.Name | ast.Constant]):
-    return ast.List(elts=lst)
-
-
-def mk_arr_access(lst: ast.Name, idx: ast.expr):
-    return ast.Subscript(
-        value=lst,
-        slice=idx,
-    )
-
-
-def mk_list_val_expr(lst: Iterable):
-    """make the list value to be expressions"""
-    lst_expr = []
-    for val in lst:
-        if isinstance(val, ast.expr):
-            lst_expr.append(val)
-        elif isinstance(val, (int, float)) or val is None:
-            lst_expr.append(ast.Constant(value=val))
-        else:
-            raise ValueError(f"Unknown type {type(val)} to be converted in the list")
-    return lst_expr
-
-
-def mk_jnp_call(args: list, call_fn: str):
-    """jnp.call_fn(*args)"""
-
-    return ast.Call(
-        func=ast.Attribute(value=ast.Name(id="jnp"), attr=call_fn),
-        args=mk_list_val_expr(args),
-        keywords=[],
-    )
-
-
-def mk_jax_random_call(args: list, call_fn: str):
-    """jax.random.call_fn(*args)"""
-    return ast.Call(
-        func=ast.Attribute(
-            value=ast.Attribute(value=ast.Name(id="jax"), attr="random"), attr=call_fn
-        ),
-        args=mk_list_val_expr(args),
-        keywords=[],
-    )
-
-
-def mk_jnp_arr_access(arr: ast.Name, idx: ast.expr):
-    """arr.at[idx]"""
-    return ast.Subscript(
-        value=ast.Attribute(value=arr, attr="at"),
-        slice=idx,
-    )
-
-
-def mk_jnp_assign(arr: ast.Name, idx: ast.expr, val: ast.Name | ast.Constant):
-    """
-    arr = arr.at[idx].set(val)
-    """
-    return mk_assign(
-        target=arr,
-        value=ast.Call(
-            func=ast.Attribute(
-                value=mk_jnp_arr_access(copy(arr), idx),
-                attr="set",
-            ),
-            args=[val],
-            keywords=[],
-        ),
-    )
 
 
 def cnt_n_mismatch_attr(cdg: CDG) -> int:
@@ -285,7 +202,7 @@ class OptCompiler:
         normalize_weight: bool = True,
         do_clipping: bool = True,
         aggregate_args_lines: bool = False,
-        vectorized: bool = False,
+        vectorize: bool = False,
     ) -> type:
         """Compile the cdg to an equinox.Module.
 
@@ -315,7 +232,7 @@ class OptCompiler:
         )
 
         (ode_term, noise_term), node_mapping, switch_map, num_attr_map, fn_attr_map = (
-            ark_compiler.compile_odeterm(cdg, cdg_spec, vectorized=vectorized)
+            ark_compiler.compile_odeterm(cdg, cdg_spec, vectorize=vectorize)
         )
 
         self.mm_used_idx = 0

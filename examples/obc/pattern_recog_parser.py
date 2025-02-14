@@ -162,5 +162,9 @@ parser.add_argument("--test_bz", type=int, default=1024, help="Size of the test 
 parser.add_argument(
     "--test_seed", type=int, default=428, help="Random seed for testing"
 )
-
+parser.add_argument(
+    "--vectorize_odeterm",
+    action="store_true",
+    help="Whether to compile the ODE term in vectorized form",
+)
 args = parser.parse_args()

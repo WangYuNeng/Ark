@@ -1,6 +1,7 @@
 import ast
+from copy import copy
 from functools import partial
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 import sympy
 
@@ -45,3 +46,98 @@ def concat_expr(
         )
     else:
         return operator(*exprs)
+
+
+def mk_var_generator(name: str):
+    return lambda: ast.Name(id=name)
+
+
+def mk_assign(target: ast.expr, value: ast.expr):
+    """target = value"""
+    return ast.Assign(
+        targets=[set_ctx(target, ast.Store())],
+        value=set_ctx(value, ast.Load()),
+    )
+
+
+def mk_call(fn: ast.expr, args: list[ast.expr]):
+    """fn(*args)"""
+    return ast.Call(
+        func=fn,
+        args=args,
+        keywords=[],
+    )
+
+
+def mk_tuple(elts: list[ast.Name | ast.Constant]):
+    return ast.Tuple(elts=elts)
+
+
+def mk_list(lst: list[ast.Name | ast.Constant]):
+    return ast.List(elts=lst)
+
+
+def mk_arr_access(lst: ast.Name, idx: ast.expr):
+    return ast.Subscript(
+        value=lst,
+        slice=idx,
+    )
+
+
+def mk_list_val_expr(lst: Iterable):
+    """make the list value to be expressions"""
+    lst_expr = []
+    for val in lst:
+        if isinstance(val, ast.expr):
+            lst_expr.append(val)
+        elif isinstance(val, (int, float)) or val is None:
+            lst_expr.append(ast.Constant(value=val))
+        else:
+            raise ValueError(f"Unknown type {type(val)} to be converted in the list")
+    return lst_expr
+
+
+def mk_jnp_call(args: list, call_fn: str):
+    """jnp.call_fn(*args)"""
+
+    return ast.Call(
+        func=ast.Attribute(value=ast.Name(id="jnp"), attr=call_fn),
+        args=mk_list_val_expr(args),
+        keywords=[],
+    )
+
+
+def mk_jax_random_call(args: list, call_fn: str):
+    """jax.random.call_fn(*args)"""
+    return ast.Call(
+        func=ast.Attribute(
+            value=ast.Attribute(value=ast.Name(id="jax"), attr="random"), attr=call_fn
+        ),
+        args=mk_list_val_expr(args),
+        keywords=[],
+    )
+
+
+def mk_jnp_arr_access(arr: ast.Name, idx: ast.expr):
+    """arr.at[idx]"""
+    return ast.Subscript(
+        value=ast.Attribute(value=arr, attr="at"),
+        slice=idx,
+    )
+
+
+def mk_jnp_assign(arr: ast.Name, idx: ast.expr, val: ast.Name | ast.Constant):
+    """
+    arr = arr.at[idx].set(val)
+    """
+    return mk_assign(
+        target=arr,
+        value=ast.Call(
+            func=ast.Attribute(
+                value=mk_jnp_arr_access(copy(arr), idx),
+                attr="set",
+            ),
+            args=[val],
+            keywords=[],
+        ),
+    )

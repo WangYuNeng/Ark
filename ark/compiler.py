@@ -23,7 +23,7 @@ from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule, ProdRuleId
 from ark.specification.rule_keyword import DST, SRC, TIME, Target, kw_name
 from ark.specification.specification import CDGSpec
-from ark.util import concat_expr, set_ctx
+from ark.util import concat_expr, mk_jnp_call, mk_list, set_ctx
 
 
 def ddt(name: str, order: int) -> str:
@@ -184,6 +184,23 @@ class ProdRuleCDGInfo:
     edge: CDGEdge
 
 
+def multi_hot_vectors(
+    dim: int, indices: list[list[int]], row_one_hot: bool
+) -> jax.Array:
+    """Convert indices to multi-hot vectors.
+
+    Args:
+        dim (int): dimension of the multi-hot vectors
+        indices (list[int]): indices to convert to multi-hot vectors
+        row_one_hot (bool): whether to multi-hot vectors as rows or columns
+    Returns:
+        jax.Array: multi-hot vectors
+    """
+    if row_one_hot:
+        return jnp.array([np.sum(np.eye(dim)[idx], axis=0) for idx in indices])
+    return jnp.array([np.sum(np.eye(dim)[idx], axis=0) for idx in indices]).T
+
+
 def one_hot_vectors(dim: int, indices: list[int], row_one_hot: bool) -> jax.Array:
     """Convert indices to one-hot vectors.
 
@@ -224,6 +241,20 @@ def mk_one_hot_vector_call(dim: int, indices: list[int], row_one_hot: bool) -> a
     )
 
 
+def mk_binop(expr1: ast.expr, op: ast.operator, expr2: ast.expr) -> ast.BinOp:
+    """Create a binary operation expression.
+
+    Args:
+        expr1 (ast.expr): left operand of the binary operation
+        op (ast.operator): binary operation
+        expr2 (ast.expr): right operand of the binary operation
+
+    Returns:
+        ast.BinOp: binary operation expression
+    """
+    return ast.BinOp(left=expr1, op=op, right=expr2)
+
+
 def mk_matmul(expr1: ast.expr, expr2: ast.expr) -> ast.BinOp:
     """Create a matrix multiplication expression.
 
@@ -234,7 +265,20 @@ def mk_matmul(expr1: ast.expr, expr2: ast.expr) -> ast.BinOp:
     Returns:
         ast.BinOp: matrix multiplication expression
     """
-    return ast.BinOp(left=expr1, op=ast.MatMult(), right=expr2)
+    return mk_binop(expr1, ast.MatMult(), expr2)
+
+
+def mk_add(expr1: ast.expr, expr2: ast.expr) -> ast.BinOp:
+    """Create an addition expression.
+
+    Args:
+        expr1 (ast.expr): left operand of the addition
+        expr2 (ast.expr): right operand of the addition
+
+    Returns:
+        ast.BinOp: addition expression
+    """
+    return mk_binop(expr1, ast.Add(), expr2)
 
 
 class ArkCompiler:
@@ -465,7 +509,7 @@ class ArkCompiler:
                 fn_args_names[idx] = mk_var(rn_attr(ele_name, attr_name))
 
         # Generate the Assignment statements
-        if args_names:
+        if args_names and not vectorize:
             stmts.append(
                 mk_list_assign(
                     targets=args_names,
@@ -488,7 +532,7 @@ class ArkCompiler:
             self._ode_fn_io_names,
             return_jax=True,
             noise_ode=True,
-            vectorized=vectorize,
+            vectorize=vectorize,
         )
         for fn_name, ode_stmt in zip(
             [self.ODE_FN_NAME, self.NOISE_FN_NAME], [ode_stmts, noise_ode_stmts]
@@ -695,17 +739,24 @@ class ArkCompiler:
             # [edge_attr_to_coord, src_attr_to_coord, dst_attr_to_coord]
             attr_to_coord_list = [None, None, None]
 
+            # Store the location and of the switch in the current vector
+            # and the index of the switch in the args
+            switch_vec_idx_args_idx = []
+
             # Some variables might be confusing:
             # Tx_coord/Ty_coord: the coordinates of the target/used state variables
             # src/dst: the source/destination node of the edge
             # It could be source is the target or destination is the target
 
-            for info in info_list:
+            for i, info in enumerate(info_list):
                 # FIXME: Handle switches
                 x, y, edge, switchable = info.x, info.y, info.edge, info.edge.switchable
                 Tx_coord.append(x)
                 if y != -1:
                     Ty_coord.append(y)
+
+                if switchable:
+                    switch_vec_idx_args_idx.append([i, self._switch_mapping[edge.name]])
 
                 # Enumerate all the attributes of the edge and nodes and record the
                 # attribute to index (in `args`) mapping
@@ -718,7 +769,7 @@ class ArkCompiler:
                         if attr_to_coord_list[i].keys() != ele_a2c.keys():
                             raise RuntimeError(
                                 "Element attributes mismatch, previous nodes have"
-                                f"{attr_to_coord_list[i].keys} and current node have {ele_a2c.keys}"
+                                f"{attr_to_coord_list[i].keys()} and current node have {ele_a2c.keys()}"
                             )
                         # Merge the attribute mapping
                         for k, v in ele_a2c.items():
@@ -750,6 +801,7 @@ class ArkCompiler:
                 if dst_stateful
                 else (n_0th_order_var, mk_var(self.ODE_0TH_ORDER_VAR))
             )
+            x_dim = src_dim if x_is_src else dst_dim
 
             # FIXME: Function attribute cannot be vectorized. In reality,
             # the function attribute for the same production rule are usually
@@ -797,19 +849,71 @@ class ArkCompiler:
                 src_attr_mapping=attr_to_mat_ast_list[1],
                 dst_attr_mapping=attr_to_mat_ast_list[2],
             )
-            rhs_expr = apply_gen_rule(
+            rewritten_prod_rule_expr = apply_gen_rule(
                 rule=rule_dict[prod_rule_id],
                 transformer=rewrite,
                 to_sympy=False,
                 from_noise=noise_ode,
             )
 
+            if switch_vec_idx_args_idx:
+                # switch expression is Tvecidx @ Tswitchargsidx @ args + col vec w/
+                # 0 at Tvecidx and 1 otherwise (non-switchables are considered
+                # as always-on switches)
+                n_produced_expr = len(info_list)
+                vec_idx, sw_args_idx = [i[0] for i in switch_vec_idx_args_idx], [
+                    i[1] for i in switch_vec_idx_args_idx
+                ]
+                # Tswitchargs @ args
+                # [n_node_switch, n_args] @ [n_args, 1] = [n_node_switch, 1]
+                switch_args_expr = mk_matmul(
+                    mk_one_hot_vector_call(
+                        dim=n_args,
+                        indices=sw_args_idx,
+                        row_one_hot=True,
+                    ),
+                    mk_var(self.ARGS),
+                )
+                # Tvec [n_produced_expr, n_node_switch]
+                switch_Tvec_expr = mk_one_hot_vector_call(
+                    dim=n_produced_expr,
+                    indices=vec_idx,
+                    row_one_hot=False,
+                )
+
+                col_vec = 1 - np.sum(np.eye(n_produced_expr)[vec_idx], axis=0)
+                col_vec_list_expr = mk_list(
+                    [ast.Constant(value=int(i)) for i in col_vec]
+                )
+                switch_col_vec_expr = mk_jnp_call(
+                    args=[col_vec_list_expr],
+                    call_fn="array",
+                )
+
+                # switch expression
+                switch_expr = mk_add(
+                    mk_matmul(switch_Tvec_expr, switch_args_expr),
+                    switch_col_vec_expr,
+                )
+                tgt_node = edge.src if x_is_src else edge.dst
+                if tgt_node.reduction == PRODUCT:
+                    # FIXME: Add the leading term for special case of PRODUCT reduction
+                    raise NotImplementedError(
+                        "PRODUCT reduction with switchable edges is not supported in the vectorized mode yet. "
+                        "Please use the non-vectorized mode."
+                    )
+                rewritten_prod_rule_expr = ast.BinOp(
+                    left=rewritten_prod_rule_expr,
+                    op=tgt_node.reduction.ast_switch,
+                    right=switch_expr,
+                )
+
             Txmat_T_ast = mk_one_hot_vector_call(
-                dim=src_dim if x_is_src else dst_dim,
+                dim=x_dim,
                 indices=Tx_coord,
                 row_one_hot=False,
             )
-            rhs_expr = mk_matmul(Txmat_T_ast, rhs_expr)
+            rhs_expr = mk_matmul(Txmat_T_ast, rewritten_prod_rule_expr)
 
             tgt_reduction = (
                 info.edge.src.reduction if x_is_src else info.edge.dst.reduction
@@ -982,13 +1086,14 @@ class ArkCompiler:
         ode_fn_name = self.ODE_FN_NAME
         input_return_names = io_names
 
-        stmts.append(
-            mk_list_assign(
-                targets=[mk_var(name) for name in input_return_names],
-                value=set_ctx(mk_var(input_vec), ast.Load()),
-            )
-        )
         if not vectorize:
+            # Unpack the state variables
+            stmts.append(
+                mk_list_assign(
+                    targets=[mk_var(name) for name in input_return_names],
+                    value=set_ctx(mk_var(input_vec), ast.Load()),
+                )
+            )
             # Generate the ddt_var = f(var) statements
             equations = self.compile_sympy_diffeqs(cdg, cdg_spec, noise_ode)
 

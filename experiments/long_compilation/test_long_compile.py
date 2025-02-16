@@ -13,10 +13,10 @@ import jax.numpy as jnp
 import optax
 from diffrax import Heun
 from jaxtyping import PyTree
+from make_args import make_args
 from ode_fn import ode_fn
 
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
-from make_args import make_args
 
 # ode function input dimension
 N_STATE_VAR = 60
@@ -81,10 +81,17 @@ def test_backward_pass(
 
     cur_time = time.time()
     test_ckt, opt_state, loss = make_step(test_obj, opt_state, loss_fn, data)
-    run_time = time.time() - cur_time
+    compile_time = time.time() - cur_time
     if printing:
-        print("Backward pass compilation + execution time: ", run_time)
-    return run_time
+        print("Backward pass compilation + 1 execution time: ", compile_time)
+
+    cur_time = time.time()
+    for _ in range(10):
+        test_ckt, opt_state, loss = make_step(test_ckt, opt_state, loss_fn, data)
+    exec_time = time.time() - cur_time
+    if printing:
+        print("Backward pass execution time for 10 steps: ", exec_time)
+    return compile_time, exec_time
 
 
 if __name__ == "__main__":

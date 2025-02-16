@@ -15,15 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from test_long_compile import test_backward_pass, test_forward_pass
 
-from ark.compiler import (
-    concat_expr,
-    ddt,
-    mk_arg,
-    mk_list_assign,
-    mk_var,
-    n_state,
-    set_ctx,
-)
+from ark.compiler import ddt, mk_arg, mk_list_assign, mk_var, n_state, set_ctx
 from ark.optimization.base_module import TimeInfo
 
 # Functions to be called in ode_fn
@@ -65,7 +57,7 @@ def adj_mat_to_ode_stmts(adj_mat: np.ndarray, printing: bool = False) -> Callabl
     stmts.append(
         mk_list_assign(
             targets=[mk_var(name) for name in input_return_names],
-            value=set_ctx(mk_var(ODE_INPUT_VAR), ast.Load),
+            value=set_ctx(mk_var(ODE_INPUT_VAR), ast.Load()),
         )
     )
 
@@ -73,7 +65,7 @@ def adj_mat_to_ode_stmts(adj_mat: np.ndarray, printing: bool = False) -> Callabl
     stmts.append(
         mk_list_assign(
             targets=[mk_var(name) for name in args_name],
-            value=set_ctx(mk_var(ODE_ARGS), ast.Load),
+            value=set_ctx(mk_var(ODE_ARGS), ast.Load()),
         )
     )
 
@@ -81,7 +73,7 @@ def adj_mat_to_ode_stmts(adj_mat: np.ndarray, printing: bool = False) -> Callabl
     stmts.append(
         mk_list_assign(
             targets=[mk_var(name) for name in fn_args_names],
-            value=set_ctx(mk_var(ODE_FN_ARGS), ast.Load),
+            value=set_ctx(mk_var(ODE_FN_ARGS), ast.Load()),
         )
     )
 
@@ -112,11 +104,11 @@ def adj_mat_to_ode_stmts(adj_mat: np.ndarray, printing: bool = False) -> Callabl
                         targets=[mk_var(n_state(ddt(input_return_names[i], order=1)))],
                         value=concat_call_expr(sub_stmts, ast.Add()),
                     ),
-                    ast.Store,
+                    ast.Store(),
                 )
             )
             for call in sub_stmts:
-                set_ctx(call, ast.Load)
+                set_ctx(call, ast.Load())
         else:
             # If there is no edge, ddt_xi = 0
             stmts.append(
@@ -125,7 +117,7 @@ def adj_mat_to_ode_stmts(adj_mat: np.ndarray, printing: bool = False) -> Callabl
                         targets=[mk_var(n_state(ddt(input_return_names[i], order=1)))],
                         value=ast.Constant(value=0),
                     ),
-                    ast.Store,
+                    ast.Store(),
                 )
             )
 
@@ -150,7 +142,7 @@ def adj_mat_to_ode_stmts(adj_mat: np.ndarray, printing: bool = False) -> Callabl
                     keywords=[],
                 )
             ),
-            ast.Load,
+            ast.Load(),
         )
     )
 
@@ -182,7 +174,7 @@ def adj_mat_to_ode_stmts_vectorized(
                 ],
                 keywords=[],
             ),
-            ast.Load,
+            ast.Load(),
         )
 
     stmts = []
@@ -194,7 +186,7 @@ def adj_mat_to_ode_stmts_vectorized(
     stmts.append(
         mk_list_assign(
             targets=[mk_var(name) for name in fn_args_names],
-            value=set_ctx(mk_var(ODE_FN_ARGS), ast.Load),
+            value=set_ctx(mk_var(ODE_FN_ARGS), ast.Load()),
         )
     )
 
@@ -245,7 +237,7 @@ def adj_mat_to_ode_stmts_vectorized(
                             keywords=[],
                         ),
                     ),
-                    ast.Load,
+                    ast.Load(),
                 )
             )
     if ddt_rhs_exprs:
@@ -255,11 +247,11 @@ def adj_mat_to_ode_stmts_vectorized(
                     targets=[mk_var(n_state(ddt(ODE_INPUT_VAR, order=1)))],
                     value=concat_call_expr(ddt_rhs_exprs, ast.Add()),
                 ),
-                ast.Store,
+                ast.Store(),
             )
         )
         for call in ddt_rhs_exprs:
-            set_ctx(call, ast.Load)
+            set_ctx(call, ast.Load())
     else:
         stmts.append(
             set_ctx(
@@ -267,7 +259,7 @@ def adj_mat_to_ode_stmts_vectorized(
                     targets=[mk_var(n_state(ddt(ODE_INPUT_VAR, order=1)))],
                     value=ast.Constant(value=0),
                 ),
-                ast.Store,
+                ast.Store(),
             )
         )
 
@@ -276,7 +268,7 @@ def adj_mat_to_ode_stmts_vectorized(
             ast.Return(
                 value=mk_var(n_state(ddt(ODE_INPUT_VAR, order=1))),
             ),
-            ast.Load,
+            ast.Load(),
         )
     )
     return wrap_ode_fn(stmts, printing=printing)
@@ -391,9 +383,9 @@ for i, n_state_var in enumerate(n_state_vars):
         )
 
     print(
-        f"n_state_var: {n_state_var},"
-        f"orig_fw_time: {np.mean(orig_fw_times[i]):.4f}, origbw_time: {np.mean(orig_bw_times[i]):.4f}"
-        f"vect_fw_time: {np.mean(vect_fw_times[i]):.4f}, vect_bw_time: {np.mean(vect_bw_times[i]):.4f}"
+        f"n_state_var: {n_state_var},\n"
+        f"\torig_fw_time: {np.mean(orig_fw_times[i]):.4f}, orig_bw_time (compile, exec): {np.mean(orig_bw_times[i], axis=0)}\n"
+        f"\tvect_fw_time: {np.mean(vect_fw_times[i]):.4f}, vect_bw_time (compile, exec): {np.mean(vect_bw_times[i], axis=0)}"
     )
 
 # Save the results
@@ -412,14 +404,31 @@ mean_orig, mean_vectorized = np.mean(orig_bw_times, axis=1), np.mean(
 )
 std_orig, std_vectorized = np.std(orig_bw_times, axis=1), np.std(vect_bw_times, axis=1)
 print(mean_orig)
+
 # Create figure and plot mean and error bars
-plt.plot(n_state_vars, mean_orig, label="Original")
-plt.errorbar(n_state_vars, mean_orig, yerr=std_orig, fmt="o", capsize=5)
-plt.plot(n_state_vars, mean_vectorized, label="Vectorized")
-plt.errorbar(n_state_vars, mean_vectorized, yerr=std_vectorized, fmt="o", capsize=5)
+plt.plot(n_state_vars, mean_orig[:, 0], label="Original")
+plt.errorbar(n_state_vars, mean_orig[:, 0], yerr=std_orig[:, 0], fmt="o", capsize=5)
+plt.plot(n_state_vars, mean_vectorized[:, 0], label="Vectorized")
+plt.errorbar(
+    n_state_vars, mean_vectorized[:, 0], yerr=std_vectorized[:, 0], fmt="o", capsize=5
+)
 plt.xlabel("Number of state variables")
 plt.ylabel("Time (s)")
 plt.title("Time to compile the backward pass")
+plt.legend()
+plt.grid()
+plt.show()
+
+# Create figure and plot mean and error bars
+plt.plot(n_state_vars, mean_orig[:, 1], label="Original")
+plt.errorbar(n_state_vars, mean_orig[:, 1], yerr=std_orig[:, 1], fmt="o", capsize=5)
+plt.plot(n_state_vars, mean_vectorized[:, 1], label="Vectorized")
+plt.errorbar(
+    n_state_vars, mean_vectorized[:, 1], yerr=std_vectorized[:, 1], fmt="o", capsize=5
+)
+plt.xlabel("Number of state variables")
+plt.ylabel("Time (s)")
+plt.title("Time to execute the 10 backward pass")
 plt.legend()
 plt.grid()
 plt.show()

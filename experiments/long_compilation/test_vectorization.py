@@ -355,58 +355,6 @@ class TestModule(eqx.Module):
         raise NotImplementedError
 
 
-n_inner_loop = 4
-n_state_vars = [i for i in range(2, 35, 4)]
-orig_fw_times, orig_bw_times = [[] for _ in n_state_vars], [[] for _ in n_state_vars]
-vect_fw_times, vect_bw_times = [[] for _ in n_state_vars], [[] for _ in n_state_vars]
-for i, n_state_var in enumerate(n_state_vars):
-    for _ in range(n_inner_loop):
-        mat = rand_adjacency_matrix(n_state_var)
-        ode_fn = adj_mat_to_ode_stmts(mat, printing=False)
-        ode_fn_vectorized = adj_mat_to_ode_stmts_vectorized(mat, printing=False)
-        TestModule.ode_fn = lambda self, t, y, args: ode_fn(t, y, args, edge_fn)
-
-        test_obj = TestModule(init_trainable=jnp.zeros(n_state_var))
-        orig_compile_time, orig_exec_time, orig_trace = test_forward_pass(
-            test_obj, n_state_var=n_state_var, printing=False
-        )
-
-        TestModule.ode_fn = lambda self, t, y, args: ode_fn_vectorized(
-            t, y, args, edge_fn
-        )
-        test_obj = TestModule(init_trainable=jnp.zeros(n_state_var))
-        vect_compile_time, vec_exec_time, vect_trace = test_forward_pass(
-            test_obj, n_state_var=n_state_var, printing=False
-        )
-        assert jnp.allclose(orig_trace, vect_trace)
-
-        orig_fw_times[i].append([orig_compile_time, orig_exec_time])
-        vect_fw_times[i].append([vect_compile_time, vec_exec_time])
-        orig_bw_times[i].append(
-            test_backward_pass(test_obj, n_state_var=n_state_var, printing=False)
-        )
-        vect_bw_times[i].append(
-            test_backward_pass(test_obj, n_state_var=n_state_var, printing=False)
-        )
-
-    print(
-        f"n_state_var: {n_state_var},\n"
-        f"\torig_fw_time (compile, exec): {np.mean(orig_fw_times[i], axis=0)}, orig_bw_time (compile, exec): {np.mean(orig_bw_times[i], axis=0)}\n"
-        f"\tvect_fw_time (compile, exec): {np.mean(vect_fw_times[i], axis=0)}, vect_bw_time (compile, exec): {np.mean(vect_bw_times[i], axis=0)}"
-    )
-
-# Save the results
-with open("compile_time.npz", "wb") as f:
-    np.savez(
-        f,
-        n_state_vars=n_state_vars,
-        orig_fw_times=orig_fw_times,
-        orig_bw_times=orig_bw_times,
-        vect_fw_times=vect_fw_times,
-        vect_bw_times=vect_bw_times,
-    )
-
-
 def plot_cmp_trace(
     n_state_vars: int, orig_data: np.ndarray, vect_data: np.ndarray, forward: bool
 ):
@@ -450,5 +398,61 @@ def plot_cmp_trace(
     plt.show()
 
 
-plot_cmp_trace(n_state_vars, orig_fw_times, vect_fw_times, forward=True)
-plot_cmp_trace(n_state_vars, orig_bw_times, vect_bw_times, forward=False)
+if __name__ == "__main__":
+    n_inner_loop = 4
+    n_state_vars = [i for i in range(2, 35, 4)]
+    orig_fw_times, orig_bw_times = [[] for _ in n_state_vars], [
+        [] for _ in n_state_vars
+    ]
+    vect_fw_times, vect_bw_times = [[] for _ in n_state_vars], [
+        [] for _ in n_state_vars
+    ]
+    for i, n_state_var in enumerate(n_state_vars):
+        for _ in range(n_inner_loop):
+            mat = rand_adjacency_matrix(n_state_var)
+            ode_fn = adj_mat_to_ode_stmts(mat, printing=False)
+            ode_fn_vectorized = adj_mat_to_ode_stmts_vectorized(mat, printing=False)
+            TestModule.ode_fn = lambda self, t, y, args: ode_fn(t, y, args, edge_fn)
+
+            test_obj = TestModule(init_trainable=jnp.zeros(n_state_var))
+            orig_compile_time, orig_exec_time, orig_trace = test_forward_pass(
+                test_obj, n_state_var=n_state_var, printing=False
+            )
+
+            TestModule.ode_fn = lambda self, t, y, args: ode_fn_vectorized(
+                t, y, args, edge_fn
+            )
+            test_obj = TestModule(init_trainable=jnp.zeros(n_state_var))
+            vect_compile_time, vec_exec_time, vect_trace = test_forward_pass(
+                test_obj, n_state_var=n_state_var, printing=False
+            )
+            assert jnp.allclose(orig_trace, vect_trace)
+
+            orig_fw_times[i].append([orig_compile_time, orig_exec_time])
+            vect_fw_times[i].append([vect_compile_time, vec_exec_time])
+            orig_bw_times[i].append(
+                test_backward_pass(test_obj, n_state_var=n_state_var, printing=False)
+            )
+            vect_bw_times[i].append(
+                test_backward_pass(test_obj, n_state_var=n_state_var, printing=False)
+            )
+
+        print(
+            f"n_state_var: {n_state_var},\n"
+            f"\torig_fw_time (compile, exec): {np.mean(orig_fw_times[i], axis=0)}, orig_bw_time (compile, exec): {np.mean(orig_bw_times[i], axis=0)}\n"
+            f"\tvect_fw_time (compile, exec): {np.mean(vect_fw_times[i], axis=0)}, vect_bw_time (compile, exec): {np.mean(vect_bw_times[i], axis=0)}"
+        )
+
+    # Save the results
+    with open("compile_time.npz", "wb") as f:
+        np.savez(
+            f,
+            n_state_vars=n_state_vars,
+            orig_fw_times=orig_fw_times,
+            orig_bw_times=orig_bw_times,
+            vect_fw_times=vect_fw_times,
+            vect_bw_times=vect_bw_times,
+        )
+
+    plot_cmp_trace(n_state_vars, orig_fw_times, vect_fw_times, forward=True)
+    plot_cmp_trace(n_state_vars, orig_bw_times, vect_bw_times, forward=False)

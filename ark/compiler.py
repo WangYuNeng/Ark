@@ -759,7 +759,6 @@ class ArkCompiler:
             # It could be source is the target or destination is the target
 
             for i, info in enumerate(info_list):
-                # FIXME: Handle switches
                 x, y, edge, switchable = info.x, info.y, info.edge, info.edge.switchable
                 Tx_coord.append(x)
                 if y != -1:
@@ -866,11 +865,21 @@ class ArkCompiler:
                 from_noise=noise_ode,
             )
 
+            # Multiply by an unit column matrix in case the production rule
+            # is a scalar
+            n_produced_expr = len(info_list)
+            rewritten_prod_rule_expr = ast.BinOp(
+                left=rewritten_prod_rule_expr,
+                op=ast.Mult(),
+                right=mk_jnp_call(
+                    args=[ast.Constant(value=n_produced_expr)], call_fn="ones"
+                ),
+            )
+
             if switch_vec_idx_args_idx:
                 # switch expression is Tvecidx @ Tswitchargsidx @ args + col vec w/
                 # 0 at Tvecidx and 1 otherwise (non-switchables are considered
                 # as always-on switches)
-                n_produced_expr = len(info_list)
                 vec_idx, sw_args_idx = [i[0] for i in switch_vec_idx_args_idx], [
                     i[1] for i in switch_vec_idx_args_idx
                 ]

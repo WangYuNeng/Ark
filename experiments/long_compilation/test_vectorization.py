@@ -15,7 +15,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 from test_long_compile import test_backward_pass, test_forward_pass
 
-from ark.compiler import ddt, mk_arg, mk_list_assign, mk_var, n_state, set_ctx
+from ark.compiler import (  # mk_one_hot_vector_call,
+    ddt,
+    mk_arg,
+    mk_list_assign,
+    mk_var,
+    n_state,
+    set_ctx,
+)
 from ark.optimization.base_module import TimeInfo
 
 # Functions to be called in ode_fn
@@ -348,7 +355,7 @@ class TestModule(eqx.Module):
         raise NotImplementedError
 
 
-n_inner_loop = 20
+n_inner_loop = 4
 n_state_vars = [i for i in range(2, 35, 4)]
 orig_fw_times, orig_bw_times = [[] for _ in n_state_vars], [[] for _ in n_state_vars]
 vect_fw_times, vect_bw_times = [[] for _ in n_state_vars], [[] for _ in n_state_vars]
@@ -360,7 +367,7 @@ for i, n_state_var in enumerate(n_state_vars):
         TestModule.ode_fn = lambda self, t, y, args: ode_fn(t, y, args, edge_fn)
 
         test_obj = TestModule(init_trainable=jnp.zeros(n_state_var))
-        orig_runtime, orig_trace = test_forward_pass(
+        orig_compile_time, orig_exec_time, orig_trace = test_forward_pass(
             test_obj, n_state_var=n_state_var, printing=False
         )
 
@@ -368,13 +375,13 @@ for i, n_state_var in enumerate(n_state_vars):
             t, y, args, edge_fn
         )
         test_obj = TestModule(init_trainable=jnp.zeros(n_state_var))
-        vect_runtime, vect_trace = test_forward_pass(
+        vect_compile_time, vec_exec_time, vect_trace = test_forward_pass(
             test_obj, n_state_var=n_state_var, printing=False
         )
         assert jnp.allclose(orig_trace, vect_trace)
 
-        orig_fw_times[i].append(orig_runtime)
-        vect_fw_times[i].append(vect_runtime)
+        orig_fw_times[i].append([orig_compile_time, orig_exec_time])
+        vect_fw_times[i].append([vect_compile_time, vec_exec_time])
         orig_bw_times[i].append(
             test_backward_pass(test_obj, n_state_var=n_state_var, printing=False)
         )
@@ -384,8 +391,8 @@ for i, n_state_var in enumerate(n_state_vars):
 
     print(
         f"n_state_var: {n_state_var},\n"
-        f"\torig_fw_time: {np.mean(orig_fw_times[i]):.4f}, orig_bw_time (compile, exec): {np.mean(orig_bw_times[i], axis=0)}\n"
-        f"\tvect_fw_time: {np.mean(vect_fw_times[i]):.4f}, vect_bw_time (compile, exec): {np.mean(vect_bw_times[i], axis=0)}"
+        f"\torig_fw_time (compile, exec): {np.mean(orig_fw_times[i], axis=0)}, orig_bw_time (compile, exec): {np.mean(orig_bw_times[i], axis=0)}\n"
+        f"\tvect_fw_time (compile, exec): {np.mean(vect_fw_times[i], axis=0)}, vect_bw_time (compile, exec): {np.mean(vect_bw_times[i], axis=0)}"
     )
 
 # Save the results
@@ -399,36 +406,49 @@ with open("compile_time.npz", "wb") as f:
         vect_bw_times=vect_bw_times,
     )
 
-mean_orig, mean_vectorized = np.mean(orig_bw_times, axis=1), np.mean(
-    vect_bw_times, axis=1
-)
-std_orig, std_vectorized = np.std(orig_bw_times, axis=1), np.std(vect_bw_times, axis=1)
-print(mean_orig)
 
-# Create figure and plot mean and error bars
-plt.plot(n_state_vars, mean_orig[:, 0], label="Original")
-plt.errorbar(n_state_vars, mean_orig[:, 0], yerr=std_orig[:, 0], fmt="o", capsize=5)
-plt.plot(n_state_vars, mean_vectorized[:, 0], label="Vectorized")
-plt.errorbar(
-    n_state_vars, mean_vectorized[:, 0], yerr=std_vectorized[:, 0], fmt="o", capsize=5
-)
-plt.xlabel("Number of state variables")
-plt.ylabel("Time (s)")
-plt.title("Time to compile the backward pass")
-plt.legend()
-plt.grid()
-plt.show()
+def plot_cmp_trace(
+    n_state_vars: int, orig_data: np.ndarray, vect_data: np.ndarray, forward: bool
+):
+    mean_orig, mean_vectorized = np.mean(orig_data, axis=1), np.mean(vect_data, axis=1)
+    std_orig, std_vectorized = np.std(orig_data, axis=1), np.std(vect_data, axis=1)
+    # Create figure and plot mean and error bars
+    pass_type = "forward" if forward else "backward"
+    plt.plot(n_state_vars, mean_orig[:, 0], label="Original")
+    plt.errorbar(n_state_vars, mean_orig[:, 0], yerr=std_orig[:, 0], fmt="o", capsize=5)
+    plt.plot(n_state_vars, mean_vectorized[:, 0], label="Vectorized")
+    plt.errorbar(
+        n_state_vars,
+        mean_vectorized[:, 0],
+        yerr=std_vectorized[:, 0],
+        fmt="o",
+        capsize=5,
+    )
+    plt.xlabel("Number of state variables")
+    plt.ylabel("Time (s)")
+    plt.title(f"Time to compile the {pass_type} pass")
+    plt.legend()
+    plt.grid()
+    plt.show()
 
-# Create figure and plot mean and error bars
-plt.plot(n_state_vars, mean_orig[:, 1], label="Original")
-plt.errorbar(n_state_vars, mean_orig[:, 1], yerr=std_orig[:, 1], fmt="o", capsize=5)
-plt.plot(n_state_vars, mean_vectorized[:, 1], label="Vectorized")
-plt.errorbar(
-    n_state_vars, mean_vectorized[:, 1], yerr=std_vectorized[:, 1], fmt="o", capsize=5
-)
-plt.xlabel("Number of state variables")
-plt.ylabel("Time (s)")
-plt.title("Time to execute the 10 backward pass")
-plt.legend()
-plt.grid()
-plt.show()
+    # Create figure and plot mean and error bars
+    plt.plot(n_state_vars, mean_orig[:, 1], label="Original")
+    plt.errorbar(n_state_vars, mean_orig[:, 1], yerr=std_orig[:, 1], fmt="o", capsize=5)
+    plt.plot(n_state_vars, mean_vectorized[:, 1], label="Vectorized")
+    plt.errorbar(
+        n_state_vars,
+        mean_vectorized[:, 1],
+        yerr=std_vectorized[:, 1],
+        fmt="o",
+        capsize=5,
+    )
+    plt.xlabel("Number of state variables")
+    plt.ylabel("Time (s)")
+    plt.title(f"Time to execute the 10 {pass_type} pass")
+    plt.legend()
+    plt.grid()
+    plt.show()
+
+
+plot_cmp_trace(n_state_vars, orig_fw_times, vect_fw_times, forward=True)
+plot_cmp_trace(n_state_vars, orig_bw_times, vect_bw_times, forward=False)

@@ -239,6 +239,16 @@ def mk_one_hot_vector_call(dim: int, indices: list[int], row_one_hot: bool) -> a
         ),
         ast.Load(),
     )
+    """Tried the following but it doesn't improve the performance.
+    dim_expr = ast.Constant(value=dim)
+    indices_expr = ast.List(elts=[ast.Constant(value=idx) for idx in indices])
+    jnp_indices = mk_jnp_call(args=[indices_expr], call_fn="array")
+    eye_expr = mk_jnp_call(args=[dim_expr], call_fn="eye")
+    one_hot_vec_expr = ast.Subscript(value=eye_expr, slice=jnp_indices)
+    if not row_one_hot:
+        one_hot_vec_expr = ast.Attribute(value=one_hot_vec_expr, attr="T")
+    return one_hot_vec_expr
+    """
 
 
 def mk_binop(expr1: ast.expr, op: ast.operator, expr2: ast.expr) -> ast.BinOp:

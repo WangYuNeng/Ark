@@ -45,10 +45,17 @@ def test_forward_pass(
     eqx.filter_jit(test_obj)
     initial_states = jnp.zeros(n_state_var)
     trace = test_obj(time_info, initial_states, [], 0, 0)
-    run_time = time.time() - cur_time
+    compile_time = time.time() - cur_time
     if printing:
-        print("Forward pass compilation + execution time: ", run_time)
-    return run_time, trace
+        print("Forward pass compilation + execution time: ", compile_time)
+
+    cur_time = time.time()
+    for _ in range(10):
+        trace = test_obj(time_info, initial_states, [], 0, 0)
+    exec_time = time.time() - cur_time
+    if printing:
+        print("Forward pass execution time for 10 steps: ", exec_time)
+    return compile_time, exec_time, trace
 
 
 # Test compilation time with forward pass and backward pass

@@ -302,6 +302,7 @@ class ArkCompiler:
     SIM_RAND_EXPT = parse_expr(f"np.random.rand({SIM_SEED})")
     ODE_FN_NAME, ODE_INPUT_VAR = "__ode_fn", "__variables"
     ODE_0TH_ORDER_VAR = "__0th_order_variables"
+    ONE_HOT_VAR = "__one_hot_vectors"
     NOISE_FN_NAME = "__noise_fn"
     INIT_STATE, TIME_RANGE = "init_states", "time_range"
     SWITCH_VAL = "switch_vals"
@@ -333,6 +334,7 @@ class ArkCompiler:
         self._ode_term_ast = None
         self._gen_rule_dict = {}
         self._verbose = 0
+        self._one_hot_var_id = 0
 
     @property
     def prog_name(self):
@@ -738,6 +740,13 @@ class ArkCompiler:
             {rt: [] for rt in reduction_types} for _ in range(2)
         ]
 
+        # FIXME: Add assignment for all the lower-order terms
+        # for high order state variables
+        if cdg.ds_order > 1:
+            raise NotImplementedError(
+                "Vectorized mode does not support high order state variables yet."
+            )
+
         prodrule_to_info = self._get_prodrule_info(cdg, cdg_spec)
         for prod_rule_id, info_list in prodrule_to_info.items():
             # Collect src/dst/self variable and attribute mapping and
@@ -821,13 +830,13 @@ class ArkCompiler:
             # Convert the collected coordinates to ast of one-hot vectors and
             # multiplied by the state variables or arguments
             src_mat_ast = mk_matmul(
-                mk_one_hot_vector_call(
+                self._mk_one_hot_jnp_array_variable(
                     dim=src_dim, indices=src_coord, row_one_hot=True
                 ),
                 src_var,
             )
             dst_mat_ast = mk_matmul(
-                mk_one_hot_vector_call(
+                self._mk_one_hot_jnp_array_variable(
                     dim=dst_dim, indices=dst_coord, row_one_hot=True
                 ),
                 dst_var,
@@ -838,7 +847,7 @@ class ArkCompiler:
             for i, a2c in enumerate(attr_to_coord_list):
                 for attr, coord in a2c.items():
                     attr_to_mat_ast_list[i][attr] = mk_matmul(
-                        mk_one_hot_vector_call(
+                        self._mk_one_hot_jnp_array_variable(
                             dim=n_args, indices=coord, row_one_hot=True
                         ),
                         mk_var(self.ARGS),
@@ -886,7 +895,7 @@ class ArkCompiler:
                 # Tswitchargs @ args
                 # [n_node_switch, n_args] @ [n_args, 1] = [n_node_switch, 1]
                 switch_args_expr = mk_matmul(
-                    mk_one_hot_vector_call(
+                    self._mk_one_hot_jnp_array_variable(
                         dim=n_args,
                         indices=sw_args_idx,
                         row_one_hot=True,
@@ -894,7 +903,7 @@ class ArkCompiler:
                     mk_var(self.ARGS),
                 )
                 # Tvec [n_produced_expr, n_node_switch]
-                switch_Tvec_expr = mk_one_hot_vector_call(
+                switch_Tvec_expr = self._mk_one_hot_jnp_array_variable(
                     dim=n_produced_expr,
                     indices=vec_idx,
                     row_one_hot=False,
@@ -927,7 +936,7 @@ class ArkCompiler:
                     right=switch_expr,
                 )
 
-            Txmat_T_ast = mk_one_hot_vector_call(
+            Txmat_T_ast = self._mk_one_hot_jnp_array_variable(
                 dim=x_dim,
                 indices=Tx_coord,
                 row_one_hot=False,
@@ -946,9 +955,6 @@ class ArkCompiler:
 
         # Generate the assignment statement
         stmts = []
-
-        # FIXME: Add assignment for all the lower-order terms
-        # for high order state variables
 
         # Sum up the rhs expressions for the 0th order and higher order terms separately
         for is_stateful, lhs in zip(
@@ -1297,3 +1303,24 @@ class ArkCompiler:
                     )
 
         return prod_id_to_info
+
+    def _mk_one_hot_jnp_array_variable(
+        self, indices: list[int], dim: int, row_one_hot: bool
+    ) -> ast.Name:
+        """Initialize a jax array variable of one-hot vectors and return the variable name
+
+        The name will be f"{self.ONE_HOT_VAR}_{self._one_hot_var_id}".
+
+        Args:
+            indices (list[int]): indices to set to 1
+            dim (int): dimension of the one-hot vector
+            row_one_hot (bool): whether the one-hot vector is row-wise or column-wise
+
+        Returns:
+            ast.Name: Namee of the one-hot-jax array
+        """
+        one_hot_arr = one_hot_vectors(dim, indices, row_one_hot)
+        var_name = f"{self.ONE_HOT_VAR}_{self._one_hot_var_id}"
+        self._one_hot_var_id += 1
+        self._namespace[var_name] = one_hot_arr
+        return mk_var(var_name)

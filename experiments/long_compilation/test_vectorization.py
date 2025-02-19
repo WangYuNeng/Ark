@@ -5,7 +5,7 @@ the arguments only takes the node state.
 """
 
 import ast
-from typing import Callable
+from typing import Any, Callable
 
 import diffrax
 import equinox as eqx
@@ -13,6 +13,7 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
+from jax.experimental import sparse
 from test_long_compile import test_backward_pass, test_forward_pass
 
 from ark.compiler import (  # mk_one_hot_vector_call,
@@ -24,6 +25,7 @@ from ark.compiler import (  # mk_one_hot_vector_call,
     set_ctx,
 )
 from ark.optimization.base_module import TimeInfo
+from ark.util import mk_arr_access, mk_jnp_call, mk_jnp_scatter_gather
 
 # Functions to be called in ode_fn
 edge_fn = [
@@ -159,30 +161,31 @@ def adj_mat_to_ode_stmts(adj_mat: np.ndarray, printing: bool = False) -> Callabl
 def one_hot_vectors(dim: int, indices: list[int], row_one_hot: bool) -> jax.Array:
     """Convert indices to one-hot vectors."""
     if row_one_hot:
-        return jnp.array(np.eye(dim)[indices])
-    return jnp.array(np.eye(dim)[indices].T)
+        return sparse.BCOO.fromdense(jnp.array(np.eye(dim)[indices]))
+    return sparse.BCOO.fromdense(jnp.array(np.eye(dim)[indices].T))
 
 
 def adj_mat_to_ode_stmts_vectorized(
     adj_mat: np.ndarray, printing: bool = False
 ) -> Callable:
 
+    namespace = {}
+
     def mk_one_hot_vector_call(
         dim: int, indices: list[int], row_one_hot: bool
-    ) -> ast.Call:
+    ) -> ast.Name:
         """Create a call expression for one_hot_vectors function."""
-        return set_ctx(
-            ast.Call(
-                func=mk_var("one_hot_vectors"),
-                args=[
-                    ast.Constant(value=dim),
-                    ast.List(elts=[ast.Constant(value=idx) for idx in indices]),
-                    ast.Constant(value=row_one_hot),
-                ],
-                keywords=[],
-            ),
-            ast.Load(),
-        )
+        one_hot_arr = one_hot_vectors(dim, indices, row_one_hot)
+        print(one_hot_arr)
+        var_name = f"one_hot_vectors_{len(namespace)}"
+        namespace[var_name] = one_hot_arr
+        return mk_var(var_name)
+
+    def mk_named_jnp_idx_arr(indices: list[int]) -> ast.Name:
+        """Create a jnp array of the indices and return the name of the array."""
+        var_name = f"jnp_idx_arr_{len(namespace)}"
+        namespace[var_name] = jnp.array(indices)
+        return mk_var(var_name)
 
     stmts = []
     n_state_var = adj_mat.shape[0]
@@ -204,45 +207,35 @@ def adj_mat_to_ode_stmts_vectorized(
             if adj_mat[i, j] != 0:
                 fn_to_coords[adj_mat[i, j]].append((i, j))
 
-    # vectorize arguments of functions Tx@x, Tx@xp, Ty@x, Ty@xp
-    # ddt_x = Tf @ f(Tx@x, Tx@xp, Ty@x, Ty@xp) + ...
+    # vectorize arguments of functions x[xcoord], xp[xcoord], x[ycoord], xp[ycoord]
+    # ddt_x = jnp.zeros(n_state_var).at[xcoord].add(f(x[xcoord], xp[xcoord], x[ycoord], Ty@xp)) + ...
     ddt_rhs_exprs = []
     for fn_idx, coords in fn_to_coords.items():
         if coords:
             x_coords, y_coords = zip(*coords)
-            x_coords, y_coords = list(x_coords), list(y_coords)
-            Tx = mk_one_hot_vector_call(n_args, x_coords, row_one_hot=True)
-            Ty = mk_one_hot_vector_call(n_args, y_coords, row_one_hot=True)
-            Tf = mk_one_hot_vector_call(n_state_var, x_coords, row_one_hot=False)
+            x_coord_ast = mk_named_jnp_idx_arr(list(x_coords))
+            y_coord_ast = mk_named_jnp_idx_arr(list(y_coords))
 
-            # Tf @ fn(Tx@x, Tx@xp, Ty@x, Ty@xp)
             ddt_rhs_exprs.append(
                 set_ctx(
-                    ast.BinOp(
-                        left=Tf,
-                        op=ast.MatMult(),
-                        right=ast.Call(
+                    mk_jnp_scatter_gather(
+                        arr_size=n_state_var,
+                        idx=x_coord_ast,
+                        val=ast.Call(
                             func=mk_var(fn_args_names[fn_idx]),
                             args=[
-                                ast.BinOp(
-                                    left=Tx,
-                                    op=ast.MatMult(),
-                                    right=mk_var(ODE_INPUT_VAR),
+                                mk_arr_access(
+                                    lst=mk_var(ODE_INPUT_VAR), idx=x_coord_ast
                                 ),
-                                ast.BinOp(
-                                    left=Tx, op=ast.MatMult(), right=mk_var(ODE_ARGS)
+                                mk_arr_access(lst=mk_var(ODE_ARGS), idx=x_coord_ast),
+                                mk_arr_access(
+                                    lst=mk_var(ODE_INPUT_VAR), idx=y_coord_ast
                                 ),
-                                ast.BinOp(
-                                    left=Ty,
-                                    op=ast.MatMult(),
-                                    right=mk_var(ODE_INPUT_VAR),
-                                ),
-                                ast.BinOp(
-                                    left=Ty, op=ast.MatMult(), right=mk_var(ODE_ARGS)
-                                ),
+                                mk_arr_access(lst=mk_var(ODE_ARGS), idx=y_coord_ast),
                             ],
                             keywords=[],
                         ),
+                        gather="add",
                     ),
                     ast.Load(),
                 )
@@ -278,7 +271,7 @@ def adj_mat_to_ode_stmts_vectorized(
             ast.Load(),
         )
     )
-    return wrap_ode_fn(stmts, printing=printing)
+    return wrap_ode_fn(stmts, namespace=namespace, printing=printing)
 
 
 def concat_call_expr(exprs: list[ast.expr], operator: ast.operator) -> ast.operator:
@@ -292,7 +285,9 @@ def concat_call_expr(exprs: list[ast.expr], operator: ast.operator) -> ast.opera
     )
 
 
-def wrap_ode_fn(ode_stmts: list[ast.stmt], printing: bool = False) -> ast.FunctionDef:
+def wrap_ode_fn(
+    ode_stmts: list[ast.stmt], namespace: dict[str, Any] = {}, printing: bool = False
+) -> ast.FunctionDef:
 
     arguments = ast.arguments(
         posonlyargs=[],
@@ -316,7 +311,7 @@ def wrap_ode_fn(ode_stmts: list[ast.stmt], printing: bool = False) -> ast.Functi
         print(ast.unparse(module))
 
     code = compile(source=module, filename="__tmp__.py", mode="exec")
-    namespace = {"jnp": jnp, "one_hot_vectors": one_hot_vectors}
+    namespace = {"jnp": jnp, "one_hot_vectors": one_hot_vectors} | namespace
     exec(code, namespace)
 
     return namespace[ODE_FN_NAME]

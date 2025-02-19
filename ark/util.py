@@ -141,3 +141,21 @@ def mk_jnp_assign(arr: ast.Name, idx: ast.expr, val: ast.Name | ast.Constant):
             keywords=[],
         ),
     )
+
+
+def mk_jnp_scatter_gather(arr_size: int, idx: ast.expr, val: ast.Expr, gather: str):
+    """
+    arr.at[idx].op(val)
+    """
+    scatter_base_zero = mk_jnp_call(
+        args=[ast.Constant(value=arr_size)], call_fn="zeros"
+    )
+    scatter_at = ast.Attribute(value=scatter_base_zero, attr="at")
+    return ast.Call(
+        func=ast.Attribute(
+            value=mk_arr_access(lst=scatter_at, idx=idx),
+            attr=gather,
+        ),
+        args=[val],
+        keywords=[],
+    )

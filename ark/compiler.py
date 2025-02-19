@@ -23,7 +23,14 @@ from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule, ProdRuleId
 from ark.specification.rule_keyword import DST, SRC, TIME, Target, kw_name
 from ark.specification.specification import CDGSpec
-from ark.util import concat_expr, mk_jnp_call, mk_list, set_ctx
+from ark.util import (
+    concat_expr,
+    mk_arr_access,
+    mk_jnp_call,
+    mk_jnp_scatter_gather,
+    mk_list,
+    set_ctx,
+)
 
 
 def ddt(name: str, order: int) -> str:
@@ -311,6 +318,8 @@ class ArkCompiler:
     FN_ARGS = "fargs"
     KWARGS = "kwargs"
     SIM_SOL = "__sol"
+    JNP_ARR = "jnp_arr"
+    GEN_VAR = {JNP_ARR}
     SOLVE_IVP_EXPR = parse_expr(
         f"{SIM_SOL} = scipy.integrate.solve_ivp({ODE_FN_NAME}, \
                                 {TIME_RANGE}, {INIT_STATE}, **{KWARGS})"
@@ -334,7 +343,7 @@ class ArkCompiler:
         self._ode_term_ast = None
         self._gen_rule_dict = {}
         self._verbose = 0
-        self._one_hot_var_id = 0
+        self._gen_var_id = {var_name: 0 for var_name in self.GEN_VAR}
 
     @property
     def prog_name(self):
@@ -729,9 +738,6 @@ class ArkCompiler:
         rewrite.set_attr_rn_fn(rn_attr)
         n_state_var = len(self._node_to_state_var)
         n_0th_order_var = len(self._node_to_0th_order_var)
-        n_args = len(self._switch_mapping) + sum(
-            len(attrs) for attrs in self._num_attr_mapping.values()
-        )
 
         # Collect the production rule categorized by
         # {redction_types} x (0th-order, higher-order)
@@ -751,8 +757,8 @@ class ArkCompiler:
         for prod_rule_id, info_list in prodrule_to_info.items():
             # Collect src/dst/self variable and attribute mapping and
             # edge attribute mapping
-            # variable -> Matrix @ x
-            # attribute -> Matrix @ args
+            # variable -> x[idx]
+            # attribute -> args[idx]
             Tx_coord, Ty_coord = [], []
 
             # [edge_attr_to_coord, src_attr_to_coord, dst_attr_to_coord]
@@ -806,6 +812,9 @@ class ArkCompiler:
             (src_coord, dst_coord) = (
                 (Tx_coord, Ty_coord) if x_is_src else (Ty_coord, Tx_coord)
             )
+            src_coord_ast = self._mk_named_jnp_arr(src_coord)
+            dst_coord_ast = self._mk_named_jnp_arr(dst_coord)
+            x_coord_ast = src_coord_ast if x_is_src else dst_coord_ast
 
             # Set the dimension and associated variable based on whether
             # they are vectorized state variableles or 0th order variables
@@ -828,29 +837,16 @@ class ArkCompiler:
             fn_name_mapping = rule_dict[prod_rule_id].get_rewrite_mapping(info.edge)
 
             # Convert the collected coordinates to ast of one-hot vectors and
-            # multiplied by the state variables or arguments
-            src_mat_ast = mk_matmul(
-                self._mk_one_hot_jnp_array_variable(
-                    dim=src_dim, indices=src_coord, row_one_hot=True
-                ),
-                src_var,
-            )
-            dst_mat_ast = mk_matmul(
-                self._mk_one_hot_jnp_array_variable(
-                    dim=dst_dim, indices=dst_coord, row_one_hot=True
-                ),
-                dst_var,
-            )
+            # index the state-variables and arguments
+            src_mat_ast = mk_arr_access(lst=src_var, idx=src_coord_ast)
+            dst_mat_ast = mk_arr_access(lst=dst_var, idx=dst_coord_ast)
 
             # edge_attr_to_mat_ast, src_attr_to_mat_ast, dst_attr_to_mat_ast
             attr_to_mat_ast_list = [{}, {}, {}]
             for i, a2c in enumerate(attr_to_coord_list):
                 for attr, coord in a2c.items():
-                    attr_to_mat_ast_list[i][attr] = mk_matmul(
-                        self._mk_one_hot_jnp_array_variable(
-                            dim=n_args, indices=coord, row_one_hot=True
-                        ),
-                        mk_var(self.ARGS),
+                    attr_to_mat_ast_list[i][attr] = mk_arr_access(
+                        lst=mk_var(self.ARGS), idx=self._mk_named_jnp_arr(coord)
                     )
 
             # Set up the mapping for the production rule rewrite
@@ -886,41 +882,33 @@ class ArkCompiler:
             )
 
             if switch_vec_idx_args_idx:
-                # switch expression is Tvecidx @ Tswitchargsidx @ args + col vec w/
-                # 0 at Tvecidx and 1 otherwise (non-switchables are considered
-                # as always-on switches)
+                # switch expression is computed by first picking the elementes in args that
+                # are used in as switched in the production rule, reordering to the corresponding
+                # production rule and then add a column vector whose value is 0 at switch locations
+                # and 1 otherwise (non-switchables are considered as always-on switches)
                 vec_idx, sw_args_idx = [i[0] for i in switch_vec_idx_args_idx], [
                     i[1] for i in switch_vec_idx_args_idx
                 ]
-                # Tswitchargs @ args
-                # [n_node_switch, n_args] @ [n_args, 1] = [n_node_switch, 1]
-                switch_args_expr = mk_matmul(
-                    self._mk_one_hot_jnp_array_variable(
-                        dim=n_args,
-                        indices=sw_args_idx,
-                        row_one_hot=True,
-                    ),
-                    mk_var(self.ARGS),
-                )
-                # Tvec [n_produced_expr, n_node_switch]
-                switch_Tvec_expr = self._mk_one_hot_jnp_array_variable(
-                    dim=n_produced_expr,
-                    indices=vec_idx,
-                    row_one_hot=False,
+                # choose the switches used in the prod rule
+                switch_args_expr = mk_arr_access(
+                    lst=mk_var(self.ARGS), idx=self._mk_named_jnp_arr(sw_args_idx)
                 )
 
+                # Map the switches to the corresponding production rule
+                reordered_switch = mk_jnp_scatter_gather(
+                    arr_size=n_produced_expr,
+                    idx=self._mk_named_jnp_arr(vec_idx),
+                    val=switch_args_expr,
+                    gather="add",
+                )
+
+                # column vector that is 0 at switch locations and 1 otherwise
                 col_vec = 1 - np.sum(np.eye(n_produced_expr)[vec_idx], axis=0)
-                col_vec_list_expr = mk_list(
-                    [ast.Constant(value=int(i)) for i in col_vec]
-                )
-                switch_col_vec_expr = mk_jnp_call(
-                    args=[col_vec_list_expr],
-                    call_fn="array",
-                )
+                switch_col_vec_expr = self._mk_named_jnp_arr(col_vec)
 
-                # switch expression
+                # Overall switch expression
                 switch_expr = mk_add(
-                    mk_matmul(switch_Tvec_expr, switch_args_expr),
+                    reordered_switch,
                     switch_col_vec_expr,
                 )
                 tgt_node = edge.src if x_is_src else edge.dst
@@ -936,13 +924,6 @@ class ArkCompiler:
                     right=switch_expr,
                 )
 
-            Txmat_T_ast = self._mk_one_hot_jnp_array_variable(
-                dim=x_dim,
-                indices=Tx_coord,
-                row_one_hot=False,
-            )
-            rhs_expr = mk_matmul(Txmat_T_ast, rewritten_prod_rule_expr)
-
             tgt_reduction = (
                 info.edge.src.reduction if x_is_src else info.edge.dst.reduction
             )
@@ -951,6 +932,14 @@ class ArkCompiler:
                 tgt_reduction in rhs_exprs[tgt_is_stateful]
             ), "Reduction type mismatch"
             f"Expected reduction in {rhs_exprs[tgt_is_stateful].keys()} but got {tgt_reduction}."
+
+            # Map the generated expression to the corresponding state variable
+            rhs_expr = mk_jnp_scatter_gather(
+                arr_size=x_dim,
+                idx=x_coord_ast,
+                val=rewritten_prod_rule_expr,
+                gather="mul" if tgt_reduction == PRODUCT else "add",
+            )
             rhs_exprs[tgt_is_stateful][tgt_reduction].append(rhs_expr)
 
         # Generate the assignment statement
@@ -1304,23 +1293,11 @@ class ArkCompiler:
 
         return prod_id_to_info
 
-    def _mk_one_hot_jnp_array_variable(
-        self, indices: list[int], dim: int, row_one_hot: bool
-    ) -> ast.Name:
-        """Initialize a jax array variable of one-hot vectors and return the variable name
-
-        The name will be f"{self.ONE_HOT_VAR}_{self._one_hot_var_id}".
-
-        Args:
-            indices (list[int]): indices to set to 1
-            dim (int): dimension of the one-hot vector
-            row_one_hot (bool): whether the one-hot vector is row-wise or column-wise
-
-        Returns:
-            ast.Name: Namee of the one-hot-jax array
-        """
-        one_hot_arr = one_hot_vectors(dim, indices, row_one_hot)
-        var_name = f"{self.ONE_HOT_VAR}_{self._one_hot_var_id}"
-        self._one_hot_var_id += 1
-        self._namespace[var_name] = one_hot_arr
+    def _mk_named_jnp_arr(self, arr: list[int]) -> ast.Name:
+        """Create a jnp array of the indices and return the name of the array."""
+        jnp_arr = jnp.array(arr)
+        var_id = self._gen_var_id[self.JNP_ARR]
+        var_name = f"{self.JNP_ARR}_{var_id}"
+        self._gen_var_id[self.JNP_ARR] += 1
+        self._namespace[var_name] = jnp_arr
         return mk_var(var_name)

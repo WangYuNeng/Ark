@@ -8,6 +8,9 @@ from typing import Callable
 
 import sympy
 
+from ark.specification.rule_keyword import DST, EDGE, SELF, SRC, kw_name
+from ark.util import set_ctx
+
 
 class BaseRewriteGen(ABC):
 
@@ -102,3 +105,76 @@ class SympyRewriteGen(BaseRewriteGen):
             new_fn_name = self._attr_rn_fn(self.mapping[ele_name], attr_name)
             sympy_mapping.add((sympy.Function(fn_name), sympy.Function(new_fn_name)))
         return expr.subs(list(sympy_mapping))
+
+
+class VectorizeRewriteGen(ast.NodeTransformer, BaseRewriteGen):
+    """Rewrite class for vectorized expressions
+
+    x.a(y * z.b) -> x_a((Ty @ var) * (Tzb @ args))
+    - x.a: function attribute. Transformed with the renaming function. TODO: add guard for the case where
+    the function attribute is not homogeneous.
+    - y: state variable. Transformed with one-hot vectors multiplied by the state variables.
+    - z.b: numerical attribute. Transformed with one-hot vectors multiplied by the numerical arguments.
+
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._fn_mapping = None
+        self._keyword_name_mapping = None
+        self._src_attr_mapping, self._dst_attr_mapping = None, None
+        self._edge_attr_mapping = None
+
+    def set_mappings(self, **kwargs) -> None:
+        """Set the mappings for the rewrite"""
+        self._fn_mapping = kwargs["fn_mapping"]
+        self._keyword_name_mapping = kwargs["keyword_name_mapping"]
+        self._src_attr_mapping, self._dst_attr_mapping = (
+            kwargs["src_attr_mapping"],
+            kwargs["dst_attr_mapping"],
+        )
+        self._edge_attr_mapping = kwargs["edge_attr_mapping"]
+
+    def visit_Name(self, node: ast.Name):
+        """rewrite the name in the ast with name_mapping"""
+        type_name, ctx = node.id, node.ctx
+        # Here the type name should only be statefule elemnets, i.e., SRC, DST, or SELF
+        # TODO: add a guard for this
+        return set_ctx(expr=self._keyword_name_mapping[type_name], ctx=ctx)
+
+    def visit_Attribute(self, node: ast.Attribute):
+        """rewrite the attribute in the ast with attr_mapping"""
+        value, attr, ctx = node.value, node.attr, node.ctx
+        assert isinstance(
+            value, ast.Name
+        ), "Only `Name`nodes are allowed in the value of an Attribute node."
+        f"Got type({value}) = {type(value)} instead."
+        id = value.id
+        if id == kw_name(SRC) or id == kw_name(SELF):
+            attr_mapping = self._src_attr_mapping
+        elif id == kw_name(DST):
+            attr_mapping = self._dst_attr_mapping
+        elif id == kw_name(EDGE):
+            attr_mapping = self._edge_attr_mapping
+        else:
+            raise ValueError(
+                f"Invalid attribute node: {node}. Expected 1=SRC, DST, or SELF for the value."
+                f"Got {id} instead."
+            )
+        new_node = set_ctx(expr=attr_mapping[attr], ctx=ctx)
+        return new_node
+
+    def visit_Call(self, node: ast.Call):
+        # Change the function name to the mapped function name
+        fn = node.func
+        assert isinstance(
+            fn, ast.Attribute
+        ), "Expected function to be an attribute node."
+        f"Got type({fn}) = {type(fn)} instead."
+        value, attr, ctx = fn.value.id, fn.attr, fn.ctx
+        new_name = ast.Name(id=self._attr_rn_fn(self._fn_mapping[value], attr), ctx=ctx)
+        return ast.Call(
+            func=new_name,
+            args=[self.visit(arg) for arg in node.args],
+            keywords=node.keywords,
+        )

@@ -10,12 +10,12 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
-import wandb
 from diffrax import Heun, Tsit5
 from jaxtyping import Array, PyTree
 from puf import PUFParams, create_switchable_star_cdg
 from spec import IdealE, InpI, MmE, MmI, MmV, lc_range, mm_tln_spec, w_range
 
+import wandb
 from ark.cdg.cdg import CDG, CDGEdge
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
@@ -57,6 +57,11 @@ parser.add_argument(
     "`high_lc`: use large LC value for the first two LC, expected to result in high I2O\n"
     "`low_lc`: use small LC value for the first two LC, expected to result in low I2O\n",
 )
+parser.add_argument(
+    "--vectorize_odeterm",
+    action="store_true",
+    help="Whether to compile the ODE term in vectorized form",
+)
 args = parser.parse_args()
 np.random.seed(args.seed)
 
@@ -96,6 +101,8 @@ LOAD_WEIGHT = args.load_weight
 TESTING = args.test
 
 FIX_WEIGHT_EXP = args.fix_weight_exp
+
+VECTORIZE_ODETERM = args.vectorize_odeterm
 
 print("Config:", train_config)
 
@@ -524,6 +531,7 @@ if __name__ == "__main__":
         readout_nodes=[middle_caps[0], middle_caps[1]],
         normalize_weight=NORMALIZE_WEIGHT,
         aggregate_args_lines=True,
+        vectorize=VECTORIZE_ODETERM,
     )
 
     loader = I2O_chls(

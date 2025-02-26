@@ -40,6 +40,9 @@ class ProdRuleId:
             [self.et.name, self.src_nt.name, self.dst_nt.name, kw_name(self.gen_tgt)]
         )
 
+    def __repr__(self) -> str:
+        return self.__str__()
+
 
 class ProdRule:
     """Production Rule Class"""
@@ -82,6 +85,15 @@ class ProdRule:
         return ast.parse(str(self._fn_exp), mode="eval")
 
     @property
+    def noise_ast(self) -> ast.Expr:
+        """Returns the AST of the noise function"""
+        if self._noise_exp is None:
+            return ast.parse("0", mode="eval")
+        elif isinstance(self._noise_exp, (int, float)):
+            return ast.parse(str(self._noise_exp), mode="eval")
+        return ast.parse(str(self._noise_exp), mode="eval")
+
+    @property
     def fn_sympy(self) -> sympy.Expr:
         """Returns the sympy expression of the production function"""
         if isinstance(self._fn_exp, (int, float)):
@@ -98,21 +110,36 @@ class ProdRule:
             return sympy.Float(self._noise_exp)
         return self._noise_exp.sympy
 
-    def get_rewrite_mapping(self, edge: CDGEdge):
-        """
-        Returns a dictionary that maps the keyword in production rules to the name
+    def get_rewrite_mapping(
+        self, edge: CDGEdge, edge_val=None, src_val=None, dst_val=None, time_val=None
+    ) -> dict:
+        """Returns a dictionary that maps the keyword in production rules to the name
         of the nodes and edges in the CDG.
+
+        if the xxx_val is None (default), the keywords map to the corresponding names of
+        the nodes and edges in the CDG. The SELF keyword always maps to the same value of
+        the SRC keyword.
+
+        Args:
+            edge: CDGEdge, the edge in the CDG
+            edge_val: float, value of the keyword EDGE
+            src_val: float, value of the keyword SRC
+            dst_val: float, value of the keyword DST
+            time_val: float, value of the keyword TIME
+
+        Returns:
+            dict, mapping between the keywords and the names of the nodes and edges
         """
         src: CDGNode
         dst: CDGNode
 
         src, dst = edge.src, edge.dst
         name_map = {
-            kw_name(EDGE): edge.name,
-            kw_name(SRC): src.name,
-            kw_name(DST): dst.name,
-            kw_name(SELF): src.name,
-            kw_name(TIME): kw_name(TIME),
+            kw_name(EDGE): edge_val if edge_val else edge.name,
+            kw_name(SRC): src_val if src_val else src.name,
+            kw_name(DST): dst_val if dst_val else dst.name,
+            kw_name(SELF): src_val if src_val else src.name,
+            kw_name(TIME): time_val if time_val else kw_name(TIME),
         }
         return name_map
 

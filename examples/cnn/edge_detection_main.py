@@ -16,7 +16,6 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
-import wandb
 from diffrax import Heun
 from edge_detection_parser import args
 from jaxtyping import PyTree
@@ -34,6 +33,7 @@ from spec import (
 )
 from tqdm import tqdm
 
+import wandb
 from ark.cdg.cdg import CDG
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
@@ -69,6 +69,8 @@ BZ = args.bz
 DATASET = args.dataset
 
 LONG_COMPILE_DEMO = args.long_compile_demo
+
+VECTORIZE_ODETERM = args.vectorize_odeterm
 
 if DATASET == "mnist":
     train_dl = MNISTTrainDataLoader(BZ, downsample=DW_SAMPLE)
@@ -540,6 +542,7 @@ if __name__ == "__main__":
             normalize_weight=False,
             do_clipping=False,
             aggregate_args_lines=True,
+            vectorize=VECTORIZE_ODETERM,
         )
         trainable_init = (
             mgr.get_initial_vals("analog"),
@@ -573,6 +576,7 @@ if __name__ == "__main__":
         normalize_weight=False,
         do_clipping=False,
         aggregate_args_lines=True,
+        vectorize=VECTORIZE_ODETERM,
     )
     train_dl.set_cnn_info(inps, graph, cnn_ckt_class)
     test_dl.set_cnn_info(inps, graph, cnn_ckt_class)

@@ -97,4 +97,9 @@ parser.add_argument(
 )
 parser.add_argument("--weight_scale", type=float, default=1.0, help="Scale the weights")
 parser.add_argument("--test", action="store_true", help="Test the model")
+parser.add_argument(
+    "--vectorize_odeterm",
+    action="store_true",
+    help="Whether to compile the ODE term in vectorized form",
+)
 args = parser.parse_args()

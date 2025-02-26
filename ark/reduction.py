@@ -1,6 +1,7 @@
 """
 Reduction functions for the dynamical system.
 """
+
 import ast
 from dataclasses import dataclass
 
@@ -24,6 +25,12 @@ class Reduction:
     sympy_op: type  # sympy.Mul is a type obj not a sympy.Expr obj (but sympy.Mul() is)
     sympy_switch: type
     name: str
+
+    def __str__(self):
+        return self.name
+
+    def __hash__(self):
+        return hash(self.name)
 
 
 SUM = Reduction(

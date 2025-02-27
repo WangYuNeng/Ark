@@ -71,10 +71,11 @@ def pattern_reconstruction_loss(
     l1_norm_weight: float,
     time_info: TimeInfo,
     diff_fn: Callable,
+    weight_offset: int,  # To exclude locking and coupling strength in the normalization
 ):
     y_raw = jax.vmap(model, in_axes=(None, 0, None, 0, 0, None, None))(
         time_info, x, [], args_seed, noise_seed, gumbel_temp, hard_gumbel
     )
     return diff_fn(y_raw[:, -1, :], y) + l1_norm_weight * jnp.sum(
-        jnp.abs(model.weights()[0])
+        jnp.abs(model.weights()[0][weight_offset:])
     )

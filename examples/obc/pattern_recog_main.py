@@ -90,9 +90,6 @@ TAG = args.tag
 TASK = args.task
 DIFF_FN = args.diff_fn
 L1_NORM_WEIGHT = args.l1_norm_weight
-assert (
-    not L1_NORM_WEIGHT or MATRIX_SOLVE
-), "L1 norm weight is only supported for matrix solve"
 
 NO_NOISELESS_TRAIN = args.no_noiseless_train
 
@@ -100,10 +97,20 @@ USE_HARD_GUMBEL = args.hard_gumbel
 GUMBEL_TEMP_START, GUMBEL_TEMP_END = args.gumbel_temp_start, args.gumbel_temp_end
 GUMBEL_SHEDULE = args.gumbel_schedule
 
+FIX_COUPLING_WEIGHT = args.fix_coupling_weight
+if FIX_COUPLING_WEIGHT and WEIGHT_BITS:
+    raise NotImplementedError(
+        "Digital weight is not supported for fixed coupling weight"
+    )
 TRAINABLE_LOCKING = args.trainable_locking
 INIT_LOCK_STRENGTH = args.locking_strength
 TRAINABLE_COUPLING = args.trainable_coupling
 INIT_COUPLING_STRENGTH = args.coupling_strength
+
+# A constant to record where the coupling weight starts in the trainable_analog parameters
+ANALOG_WEIGHT_OFFSET = (
+    0 if MATRIX_SOLVE else int(TRAINABLE_COUPLING) + int(TRAINABLE_LOCKING)
+)
 
 trainable_mgr = TrainableMgr()
 if TRAINABLE_LOCKING:
@@ -191,7 +198,7 @@ def pattern_to_edge_initialization(pattern: np.ndarray):
 
 def edge_init_to_trainable_init(
     weight_init: np.ndarray,
-    oscillator_ks: list[list[Trainable]],
+    oscillator_ks: list[list[list[list[Trainable]]]],
     trainable_mgr: TrainableMgr,
 ) -> tuple[jax.Array, list[jax.Array]]:
     """Convert the edge initialization to trainable initialization"""
@@ -203,18 +210,19 @@ def edge_init_to_trainable_init(
         one_hot = jax.nn.one_hot(nearest_bins, bins.shape[0])
         return one_hot
 
-    if WEIGHT_BITS is not None:
-        weight_choices: list = Cpl_digital.attr_def["k"].attr_type.val_choices
+    if not FIX_COUPLING_WEIGHT:
+        if WEIGHT_BITS is not None:
+            weight_choices: list = Cpl_digital.attr_def["k"].attr_type.val_choices
 
-        # normalize the weight choices to between -1 and 1
-        weight_choices = np.array(weight_choices)
-        weight_init = one_hot_digitize(weight_init, weight_choices)
+            # normalize the weight choices to between -1 and 1
+            weight_choices = np.array(weight_choices)
+            weight_init = one_hot_digitize(weight_init, weight_choices)
 
-    for row, col, row_, col_ in enumerate_node_pairs():
-        if isinstance(oscillator_ks[row][col][row_][col_], Trainable):
-            oscillator_ks[row][col][row_][col_].init_val = weight_init[
-                row, col, row_, col_
-            ]
+        for row, col, row_, col_ in enumerate_node_pairs():
+            if isinstance(oscillator_ks[row][col][row_][col_], Trainable):
+                oscillator_ks[row][col][row_][col_].init_val = weight_init[
+                    row, col, row_, col_
+                ]
 
     a_trainable = trainable_mgr.get_initial_vals("analog")
     d_trainable = trainable_mgr.get_initial_vals("digital")
@@ -487,6 +495,18 @@ if __name__ == "__main__":
         for _ in range(N_ROW)
     ]
 
+    if WEIGHT_INIT == "hebbian":
+        weight_init = pattern_to_edge_initialization(NUMBERS[0])
+        for i in range(1, N_CLASS):
+            w = pattern_to_edge_initialization(NUMBERS[i])
+            weight_init += w
+
+        weight_init /= N_CLASS
+    elif WEIGHT_INIT == "random":
+        weight_init = np.random.uniform(
+            low=-1, high=1, size=(N_ROW, N_COL, N_ROW, N_COL)
+        )
+
     # Initialze nodes
     for row in range(N_ROW):
         for col in range(N_COL):
@@ -505,12 +525,15 @@ if __name__ == "__main__":
             CONNECTION == "neighbor"
             and ((row_ == row + 1 and col_ == col) or (row_ == row and col_ == col + 1))
         ):
-            new_k = new_coupling_weight()
-            edge = cpl_type(k=new_k)
+            if FIX_COUPLING_WEIGHT:
+                edge = cpl_type(k=float(weight_init[row][col][row_][col_]))
+            else:
+                new_k = new_coupling_weight()
+                edge = cpl_type(k=new_k)
+                oscillator_ks[row][col][row_][col_] = oscillator_ks[row_][col_][row][
+                    col
+                ] = new_k
             graph.connect(edge, nodes[row][col], nodes[row_][col_])
-            oscillator_ks[row][col][row_][col_] = oscillator_ks[row_][col_][row][
-                col
-            ] = new_k
 
     # flatten the nodes for readout
     nodes_flat = [node for row in nodes for node in row]
@@ -551,7 +574,10 @@ if __name__ == "__main__":
             uniform_noise=UNIFORM_NOISE,
         )
         loss_fn = partial(
-            pattern_reconstruction_loss, time_info=time_info, diff_fn=diff_fn
+            pattern_reconstruction_loss,
+            time_info=time_info,
+            diff_fn=diff_fn,
+            weight_offset=ANALOG_WEIGHT_OFFSET,
         )
     elif TASK == "rand-to-many":
 
@@ -569,18 +595,6 @@ if __name__ == "__main__":
     np.random.seed(TEST_SEED)
     TEST_DATA = next(dl(TEST_BZ))
     np.random.set_state(random_state)
-
-    if WEIGHT_INIT == "hebbian":
-        weight_init = pattern_to_edge_initialization(NUMBERS[0])
-        for i in range(1, N_CLASS):
-            w = pattern_to_edge_initialization(NUMBERS[i])
-            weight_init += w
-
-        weight_init /= N_CLASS
-    elif WEIGHT_INIT == "random":
-        weight_init = np.random.uniform(
-            low=-1, high=1, size=(N_ROW, N_COL, N_ROW, N_COL)
-        )
 
     if MATRIX_SOLVE:
         if WEIGHT_BITS:
@@ -677,8 +691,8 @@ if __name__ == "__main__":
     )
 
     # Save the histogram of the coupling strength
-    if MATRIX_SOLVE:
-        coupling_weight = best_weight[0]
+    if MATRIX_SOLVE or (not WEIGHT_BITS):
+        coupling_weight = best_weight[0][ANALOG_WEIGHT_OFFSET:]
         plt.hist(coupling_weight.flatten(), bins=20)
         plt.title("Coupling strength histogram")
         if USE_WANDB:

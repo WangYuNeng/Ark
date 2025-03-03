@@ -73,6 +73,11 @@ parser.add_argument(
     help="Annealing schedule for the gumbel temperature",
 )
 parser.add_argument(
+    "--fix_coupling_weight",
+    action="store_true",
+    help="Fix the coupling weight to the initial value",
+)
+parser.add_argument(
     "--trainable_locking",
     action="store_true",
     help="Whether the locking strength is trainable",

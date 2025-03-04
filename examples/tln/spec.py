@@ -7,7 +7,10 @@ Provide specification for
 - Gain mismatched ladder
 """
 
+import os
+
 import jax.numpy as jnp
+import numpy as np
 
 from ark.reduction import SUM
 from ark.specification.attribute_def import AttrDef, AttrDefMismatch
@@ -243,9 +246,18 @@ val_rules = [v_val, i_val, inpv_val, inpi_val]
 tln_spec.add_validation_rules(val_rules)
 #### Validation rules end ####
 
-
+# Read the V-GM_LUT
+lut_file = "V-GM_LUT.csv"
+if os.path.exists(lut_file):
+    v2gm_lut = jnp.array(np.loadtxt(lut_file, delimiter=",").T)
+else:
+    v2gm_lut = None
 if __name__ == "__main__":
-    import ark.visualize.latex_gen as latexlib
+    print(v2gm_lut.shape)
+    lut = lambda x: jnp.interp(x, v2gm_lut[0], v2gm_lut[1])
+    x = np.arange(-1.3, 1.3, 0.001)
+    y = lut(x)
+    import matplotlib.pyplot as plt
 
-    latexlib.language_to_latex(tln_spec)
-    latexlib.language_to_latex(mm_tln_spec)
+    plt.plot(x, y)
+    plt.show()

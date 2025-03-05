@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 from functools import partial
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
-from spec import mm_tln_spec, pulse
+from spec import mm_tln_spec, pulse, unity
 from tqdm import tqdm
 
 from ark.cdg.cdg import CDG, CDGEdge, CDGNode
@@ -28,6 +28,7 @@ def create_branch(
     et: EdgeType,
     self_et: EdgeType,
     puf_params: PUFParams,
+    gm_lut: Callable,
 ) -> tuple[CDG, list[CDGNode], list[CDGNode], list[CDGEdge]]:
     """Create a branch of a TLN
 
@@ -52,7 +53,11 @@ def create_branch(
     # Start with 1 to skip the edge connected the center (will generate
     # in the `create_switchable_star_cdg` function)
     ets = [
-        et(ws=puf_params.branch_gms[0][i], wt=puf_params.branch_gms[1][i])
+        et(
+            ws=puf_params.branch_gms[0][i],
+            wt=puf_params.branch_gms[1][i],
+            gm_lut=gm_lut,
+        )
         for i in range(1, 2 * line_len)
     ]
     # Connect the edges
@@ -77,6 +82,7 @@ def create_switchable_star_cdg(
     init_inds: Optional[list[float]] = None,
     init_gms: Optional[tuple[list[float], list[float]]] = None,
     pulse_params: tuple[float, float, float] = (0.5e-9, 0.5e-9, 1e-9),
+    gm_lut: Optional[Callable] = unity,
 ) -> tuple[
     CDG,
     tuple[CDGNode, CDGNode],
@@ -100,6 +106,10 @@ def create_switchable_star_cdg(
         init_inds (Optional[list[float]]): The initial values of the inductors.
         init_gms (Optional[tuple[list[float], list[float]]): The initial values of the
             transconductances.
+        pulse_params (tuple[float, float, float]): The pulse parameters for the input
+            waveform.
+        gm_lut (Optional[Callable]): The lookup table for the transconductance
+            calculation.
 
     Returns:
         CDG,
@@ -155,7 +165,7 @@ def create_switchable_star_cdg(
     # Create 2 * n_bits nominally identical branches
     branch_pairs = [
         [
-            create_branch(line_len, v_nt, i_nt, et, self_et, puf_params)
+            create_branch(line_len, v_nt, i_nt, et, self_et, puf_params, gm_lut)
             for _ in range(n_bits)
         ]
         for _ in range(2)
@@ -169,6 +179,7 @@ def create_switchable_star_cdg(
                 switchable=True,
                 ws=puf_params.branch_gms[0][0],
                 wt=puf_params.branch_gms[1][0],
+                gm_lut=gm_lut,
             )
             for _ in range(n_bits)
         ]

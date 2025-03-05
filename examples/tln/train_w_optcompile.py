@@ -10,12 +10,23 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
+import wandb
 from diffrax import Heun, Tsit5
 from jaxtyping import Array, PyTree
 from puf import PUFParams, create_switchable_star_cdg
-from spec import IdealE, InpI, MmE, MmI, MmV, lc_range, mm_tln_spec, w_range
+from spec import (
+    IdealE,
+    InpI,
+    MmE,
+    MmI,
+    MmV,
+    lc_range,
+    lut_from_data,
+    mm_tln_spec,
+    unity,
+    w_range,
+)
 
-import wandb
 from ark.cdg.cdg import CDG, CDGEdge
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
@@ -30,6 +41,7 @@ parser.add_argument("--pulse_fall_time", type=float, default=0.5e-9)
 parser.add_argument("--pulse_width", type=float, default=1e-9)
 parser.add_argument("--n_branch", type=int, default=10)
 parser.add_argument("--line_len", type=int, default=4)
+parser.add_argument("--empirical_gm", action="store_true")
 parser.add_argument("--n_time_points", type=int, default=100)
 parser.add_argument("--readout_time", type=float, default=10e-9)
 parser.add_argument("--rand_init", action="store_true")
@@ -87,6 +99,7 @@ PULSE_FALL_TIME = args.pulse_fall_time
 PULSE_WIDTH = args.pulse_width
 N_BRANCH = args.n_branch
 LINE_LEN = args.line_len
+EMPIRICAL_GM = args.empirical_gm
 N_TIME_POINTS = args.n_time_points
 READOUT_TIME = args.readout_time
 RAND_INIT = args.rand_init
@@ -111,6 +124,8 @@ optim = optax.adam(LEARNING_RATE)
 time_info = TimeInfo(
     t0=0.0, t1=READOUT_TIME, dt0=READOUT_TIME / N_TIME_POINTS, saveat=[READOUT_TIME]
 )
+
+gm_lut_fn = lut_from_data if EMPIRICAL_GM else unity
 
 
 def plot_single_star_rsp(model, init_vals, switch, mismatch):
@@ -492,6 +507,7 @@ if __name__ == "__main__":
             init_inds=init_inds,
             init_gms=init_gms,
             pulse_params=(PULSE_RISE_TIME, PULSE_FALL_TIME, PULSE_WIDTH),
+            gm_lut=gm_lut_fn,
         )
     )
 

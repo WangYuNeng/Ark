@@ -45,6 +45,26 @@ def pulse(t, amplitude=1, delay=0, rise_time=5e-9, fall_time=5e-9, pulse_width=1
     )
 
 
+# Read the V-GM_LUT
+lut_file = "V-GM_LUT.csv"
+if os.path.exists(lut_file):
+    v2gm_lut = np.loadtxt(lut_file, delimiter=",").T
+    v2gm_lut[1] /= max(v2gm_lut[1])  # Normalize the gm values
+    v2gm_lut = jnp.array(v2gm_lut)
+else:
+    v2gm_lut = None
+
+
+# Ideal gm: not a function of input voltage, always modeled as 1 * ws (or wt)
+def unity(x):
+    return 1
+
+
+# Lookup table for gm based on input voltage (in a integrator)
+def lut_from_data(v):
+    return jnp.interp(v, v2gm_lut[0], v2gm_lut[1])
+
+
 lc_range, gr_range = Range(min=0.1e-9, max=10e-9), Range(min=0.0)
 w_range = Range(min=0.5, max=2.0)
 
@@ -120,6 +140,9 @@ MmE = EdgeType(
         "attr_def": {
             "ws": AttrDefMismatch(attr_type=AnalogAttr(w_range), rstd=0.1),
             "wt": AttrDefMismatch(attr_type=AnalogAttr(w_range), rstd=0.1),
+            "gm_lut": AttrDef(
+                attr_type=FunctionAttr(nargs=1)
+            ),  # Lookup table for gm based on input voltage (in a integrator)
         }
     },
 )
@@ -142,10 +165,18 @@ inpi2_v = ProdRule(IdealE, InpI, IdealV, DST, (SRC.fn(TIME) - VAR(DST) * SRC.g) 
 inpi2_i = ProdRule(IdealE, InpI, IdealI, DST, (SRC.fn(TIME) - VAR(DST)) / DST.l / SRC.g)
 prod_rules = [_v2i, v2_i, _i2v, i2_v, vself, iself, inpv2_v, inpv2_i, inpi2_v, inpi2_i]
 # Production rules account for mismatched parameters
-_v2i_mm = ProdRule(MmE, IdealV, IdealI, SRC, -EDGE.ws * VAR(DST) / SRC.c)
-v2_i_mm = ProdRule(MmE, IdealV, IdealI, DST, EDGE.wt * VAR(SRC) / DST.l)
-_i2v_mm = ProdRule(MmE, IdealI, IdealV, SRC, -EDGE.ws * VAR(DST) / SRC.l)
-i2_v_mm = ProdRule(MmE, IdealI, IdealV, DST, EDGE.wt * VAR(SRC) / DST.c)
+_v2i_mm = ProdRule(
+    MmE, IdealV, IdealI, SRC, -EDGE.ws * EDGE.gm_lut(-VAR(DST)) * VAR(DST) / SRC.c
+)
+v2_i_mm = ProdRule(
+    MmE, IdealV, IdealI, DST, EDGE.wt * EDGE.gm_lut(VAR(SRC)) * VAR(SRC) / DST.l
+)
+_i2v_mm = ProdRule(
+    MmE, IdealI, IdealV, SRC, -EDGE.ws * EDGE.gm_lut(-VAR(DST)) * VAR(DST) / SRC.l
+)
+i2_v_mm = ProdRule(
+    MmE, IdealI, IdealV, DST, EDGE.wt * EDGE.gm_lut(VAR(SRC)) * VAR(SRC) / DST.c
+)
 
 # If want to do noise simulation, uncomment the following lines
 # integrate 4kTrgm (k=1.38e-23, T=300K, r=2/3, g=1e-6) to 100GHz to get noise amplitude
@@ -195,6 +226,7 @@ inpi2_v_mm = ProdRule(
 inpi2_i_mm = ProdRule(
     MmE, InpI, IdealI, DST, EDGE.wt * (SRC.fn(TIME) - VAR(DST)) / DST.l / SRC.g
 )
+# Input current/voltage is not fed through gm, so no lookup table is needed
 hw_prod_rules = [
     _v2i_mm,
     v2_i_mm,
@@ -246,17 +278,10 @@ val_rules = [v_val, i_val, inpv_val, inpi_val]
 tln_spec.add_validation_rules(val_rules)
 #### Validation rules end ####
 
-# Read the V-GM_LUT
-lut_file = "V-GM_LUT.csv"
-if os.path.exists(lut_file):
-    v2gm_lut = jnp.array(np.loadtxt(lut_file, delimiter=",").T)
-else:
-    v2gm_lut = None
 if __name__ == "__main__":
     print(v2gm_lut.shape)
-    lut = lambda x: jnp.interp(x, v2gm_lut[0], v2gm_lut[1])
     x = np.arange(-1.3, 1.3, 0.001)
-    y = lut(x)
+    y = lut_from_data(x)
     import matplotlib.pyplot as plt
 
     plt.plot(x, y)

@@ -10,7 +10,6 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
-import wandb
 from diffrax import Heun, Tsit5
 from jaxtyping import Array, PyTree
 from puf import PUFParams, create_switchable_star_cdg
@@ -27,6 +26,7 @@ from spec import (
     w_range,
 )
 
+import wandb
 from ark.cdg.cdg import CDG, CDGEdge
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
@@ -485,14 +485,14 @@ if __name__ == "__main__":
             l_val = 8.414712707369841e-10
             gm0 = gm1 = 1.0265654825149246
 
-        init_caps = [c_val] + [None] * LINE_LEN
-        init_inds = [l_val] + [None] * (LINE_LEN - 1)
-        init_gms = [
+        fixed_caps = [c_val] + [None] * LINE_LEN
+        fixed_inds = [l_val] + [None] * (LINE_LEN - 1)
+        fixed_gms = [
             [gm0] + [None] * (2 * LINE_LEN - 1),
             [gm1] + [None] * (2 * LINE_LEN - 1),
         ]
     else:
-        init_caps = init_inds = init_gms = None
+        fixed_caps = fixed_inds = fixed_gms = None
 
     puf_cdg, middle_caps, switch_pairs, branch_pairs, puf_params = (
         create_switchable_star_cdg(
@@ -503,9 +503,9 @@ if __name__ == "__main__":
             et=MmE,
             self_et=IdealE,
             inp_nt=InpI,
-            init_caps=init_caps,
-            init_inds=init_inds,
-            init_gms=init_gms,
+            fixed_caps=fixed_caps,
+            fixed_inds=fixed_inds,
+            fixed_gms=fixed_gms,
             pulse_params=(PULSE_RISE_TIME, PULSE_FALL_TIME, PULSE_WIDTH),
             gm_lut=gm_lut_fn,
         )

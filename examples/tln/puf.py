@@ -78,9 +78,9 @@ def create_switchable_star_cdg(
     et: EdgeType,
     self_et: EdgeType,
     inp_nt: NodeType,
-    init_caps: Optional[list[float]] = None,
-    init_inds: Optional[list[float]] = None,
-    init_gms: Optional[tuple[list[float], list[float]]] = None,
+    fixed_caps: Optional[list[float]] = None,
+    fixed_inds: Optional[list[float]] = None,
+    fixed_gms: Optional[tuple[list[float], list[float]]] = None,
     pulse_params: tuple[float, float, float] = (0.5e-9, 0.5e-9, 1e-9),
     gm_lut: Optional[Callable] = unity,
 ) -> tuple[
@@ -102,10 +102,10 @@ def create_switchable_star_cdg(
         et (EdgeType): The edge type of connections.
         self_et (EdgeType): The edge type of self-connections.
         inp_nt (NodeType): The node type of the input current node.
-        init_caps (Optional[list[float]]): The initial values of the capacitors.
-        init_inds (Optional[list[float]]): The initial values of the inductors.
-        init_gms (Optional[tuple[list[float], list[float]]): The initial values of the
-            transconductances.
+        fixed_caps (Optional[list[float]]): The values of capacitors that are fixed during training.
+        fixed_inds (Optional[list[float]]): The values of inductors that are fixed during training.
+        fixed_gms (Optional[tuple[list[float], list[float]]): The values of the
+            transconductances that are fixed during training.
         pulse_params (tuple[float, float, float]): The pulse parameters for the input
             waveform.
         gm_lut (Optional[Callable]): The lookup table for the transconductance
@@ -124,39 +124,39 @@ def create_switchable_star_cdg(
         symbolic PUF parameters.
     """
 
-    assert not init_caps or len(init_caps) == line_len + 1
-    assert not init_inds or len(init_inds) == line_len
-    assert not init_gms or (
-        len(init_gms[0]) == 2 * line_len and len(init_gms[1]) == 2 * line_len
+    assert not fixed_caps or len(fixed_caps) == line_len + 1
+    assert not fixed_inds or len(fixed_inds) == line_len
+    assert not fixed_gms or (
+        len(fixed_gms[0]) == 2 * line_len and len(fixed_gms[1]) == 2 * line_len
     )
 
-    if not init_caps:
-        init_caps = [None] * (line_len + 1)
-    if not init_inds:
-        init_inds = [None] * line_len
-    if not init_gms:
-        init_gms = ([None] * 2 * line_len, [None] * 2 * line_len)
+    if not fixed_caps:
+        fixed_caps = [None] * (line_len + 1)
+    if not fixed_inds:
+        fixed_inds = [None] * line_len
+    if not fixed_gms:
+        fixed_gms = ([None] * 2 * line_len, [None] * 2 * line_len)
 
     # Initialize all the trainable elements
     weight_mgr = TrainableMgr()
     puf_params = PUFParams(
         mgr=weight_mgr,
-        middle_cap=init_caps[0] if init_caps[0] else weight_mgr.new_analog(),
+        middle_cap=fixed_caps[0] if fixed_caps[0] else weight_mgr.new_analog(),
         branch_caps=[
-            init_caps[i] if init_caps[i] else weight_mgr.new_analog()
+            fixed_caps[i] if fixed_caps[i] else weight_mgr.new_analog()
             for i in range(1, line_len + 1)
         ],
         branch_inds=[
-            init_inds[i] if init_inds[i] else weight_mgr.new_analog()
+            fixed_inds[i] if fixed_inds[i] else weight_mgr.new_analog()
             for i in range(line_len)
         ],
         branch_gms=(
             [
-                init_gms[0][i] if init_gms[0][i] else weight_mgr.new_analog()
+                fixed_gms[0][i] if fixed_gms[0][i] else weight_mgr.new_analog()
                 for i in range(2 * line_len)
             ],
             [
-                init_gms[1][i] if init_gms[1][i] else weight_mgr.new_analog()
+                fixed_gms[1][i] if fixed_gms[1][i] else weight_mgr.new_analog()
                 for i in range(2 * line_len)
             ],
         ),

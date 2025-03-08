@@ -16,13 +16,16 @@ class PUFParams:
 
     mgr: TrainableMgr
     middle_cap: Trainable | float
+    middle_g: Trainable | float
     branch_caps: list[Trainable | float]
+    branch_gs: list[Trainable | float]
     branch_inds: list[Trainable | float]
+    branch_rs: list[Trainable | float]
     branch_gms: tuple[list[Trainable | float], list[Trainable | float]]
 
 
 def create_branch(
-    line_len: int,
+    line_len: int | float,
     v_nt: NodeType,
     i_nt: EdgeType,
     et: EdgeType,
@@ -45,9 +48,17 @@ def create_branch(
     """
     # Create the CDG
     branch = CDG()
+    n_cap, n_ind = int(np.floor(line_len)), int(np.ceil(line_len))
+    n_gm = int(2 * line_len)
     # Create the nodes
-    v_nodes = [v_nt(c=puf_params.branch_caps[i], g=0.0) for i in range(line_len)]
-    i_nodes = [i_nt(l=puf_params.branch_inds[i], r=0.0) for i in range(line_len)]
+    v_nodes = [
+        v_nt(c=puf_params.branch_caps[i], g=puf_params.branch_gs[i])
+        for i in range(n_cap)
+    ]
+    i_nodes = [
+        i_nt(l=puf_params.branch_inds[i], r=puf_params.branch_rs[i])
+        for i in range(n_ind)
+    ]
 
     # Create the edges -- connece V-L-V-L-...,
     # Start with 1 to skip the edge connected the center (will generate
@@ -58,15 +69,22 @@ def create_branch(
             wt=puf_params.branch_gms[1][i],
             gm_lut=gm_lut,
         )
-        for i in range(1, 2 * line_len)
+        for i in range(1, n_gm)
     ]
     # Connect the edges
-    for i in range(line_len):
-        branch.connect(self_et(), v_nodes[i], v_nodes[i])
-        branch.connect(self_et(), i_nodes[i], i_nodes[i])
-        branch.connect(ets[2 * i], i_nodes[i], v_nodes[i])
-        if not i == line_len - 1:
-            branch.connect(ets[2 * i + 1], v_nodes[i], i_nodes[i + 1])
+    for i in range(n_gm):
+        node_i, is_v = divmod(i, 2)
+        if is_v:
+            branch.connect(self_et(), v_nodes[node_i], v_nodes[node_i])
+            if i == n_gm - 1:
+                break
+            branch.connect(ets[i], v_nodes[node_i], i_nodes[node_i + 1])
+
+        else:
+            branch.connect(self_et(), i_nodes[node_i], i_nodes[node_i])
+            if i == n_gm - 1:
+                break
+            branch.connect(ets[i], i_nodes[node_i], v_nodes[node_i])
     return branch, v_nodes, i_nodes, ets
 
 
@@ -78,9 +96,11 @@ def create_switchable_star_cdg(
     et: EdgeType,
     self_et: EdgeType,
     inp_nt: NodeType,
-    fixed_caps: Optional[list[float]] = None,
-    fixed_inds: Optional[list[float]] = None,
-    fixed_gms: Optional[tuple[list[float], list[float]]] = None,
+    fixed_caps: Optional[list[float] | float] = None,
+    fixed_gs: Optional[list[float] | float] = None,
+    fixed_inds: Optional[list[float] | float] = None,
+    fixed_rs: Optional[list[float] | float] = None,
+    fixed_gms: Optional[tuple[list[float], list[float]] | float] = None,
     pulse_params: tuple[float, float, float] = (0.5e-9, 0.5e-9, 1e-9),
     gm_lut: Optional[Callable] = unity,
 ) -> tuple[
@@ -96,15 +116,21 @@ def create_switchable_star_cdg(
     """Create a switchable star puf cdg with TLN
 
     Args:
-        line_len (int): The length of the TLN.
+        line_len (int): The length of the TLN. If the length is x.5, the TLN will have
+            floor(x) capacitors and ceil(x) inductors on a branch (excluding the center)
         v_nt (NodeType): The node type of the capacitor nodes.
         i_nt (EdgeType): The edge type of the inductor nodes.
         et (EdgeType): The edge type of connections.
         self_et (EdgeType): The edge type of self-connections.
         inp_nt (NodeType): The node type of the input current node.
-        fixed_caps (Optional[list[float]]): The values of capacitors that are fixed during training.
-        fixed_inds (Optional[list[float]]): The values of inductors that are fixed during training.
-        fixed_gms (Optional[tuple[list[float], list[float]]): The values of the
+        fixed_caps (Optional[list[float]] | float): The values of capacitors that are fixed during training.
+            if the value is flo
+        fixed_gs (Optional[list[float]]) | float: The values of conductances associated to capacitors that are
+            fixed during training.
+        fixed_inds (Optional[list[float]] | float): The values of inductors that are fixed during training.
+        fixed_rs (Optional[list[float]] | float): The values of resistances associated to inductors that are
+            fixed during training.
+        fixed_gms (Optional[tuple[list[float], list[float]] | float): The values of the
             transconductances that are fixed during training.
         pulse_params (tuple[float, float, float]): The pulse parameters for the input
             waveform.
@@ -124,40 +150,53 @@ def create_switchable_star_cdg(
         symbolic PUF parameters.
     """
 
-    assert not fixed_caps or len(fixed_caps) == line_len + 1
-    assert not fixed_inds or len(fixed_inds) == line_len
-    assert not fixed_gms or (
-        len(fixed_gms[0]) == 2 * line_len and len(fixed_gms[1]) == 2 * line_len
-    )
+    # line_len must be an integer or x.5
+    assert int(line_len) == line_len or line_len * 2 == int(line_len) * 2 + 1
+    line_n_cap = int(np.floor(line_len)) + 1
+    line_n_ind = int(np.ceil(line_len))
+    line_n_gm = int(2 * line_len)
 
-    if not fixed_caps:
-        fixed_caps = [None] * (line_len + 1)
-    if not fixed_inds:
-        fixed_inds = [None] * line_len
-    if not fixed_gms:
-        fixed_gms = ([None] * 2 * line_len, [None] * 2 * line_len)
+    if not isinstance(fixed_caps, list):
+        fixed_caps = [fixed_caps] * line_n_cap
+    if not isinstance(fixed_inds, list):
+        fixed_inds = [fixed_inds] * line_n_ind
+    if not isinstance(fixed_gms, tuple):
+        fixed_gms = ([fixed_gms] * line_n_gm, [fixed_gms] * line_n_gm)
+    if not isinstance(fixed_gs, list):
+        fixed_gs = [fixed_gs] * line_n_cap
+    if not isinstance(fixed_rs, list):
+        fixed_rs = [fixed_rs] * line_n_ind
 
     # Initialize all the trainable elements
     weight_mgr = TrainableMgr()
     puf_params = PUFParams(
         mgr=weight_mgr,
         middle_cap=fixed_caps[0] if fixed_caps[0] else weight_mgr.new_analog(),
+        middle_g=fixed_gs[0] if fixed_gs[0] else weight_mgr.new_analog(),
         branch_caps=[
             fixed_caps[i] if fixed_caps[i] else weight_mgr.new_analog()
-            for i in range(1, line_len + 1)
+            for i in range(1, line_n_cap)
+        ],
+        branch_gs=[
+            fixed_gs[i] if fixed_gs[i] else weight_mgr.new_analog()
+            for i in range(1, line_n_cap)
         ],
         branch_inds=[
             fixed_inds[i] if fixed_inds[i] else weight_mgr.new_analog()
-            for i in range(line_len)
+            for i in range(line_n_ind)
+        ],
+        branch_rs=[
+            fixed_rs[i] if fixed_rs[i] else weight_mgr.new_analog()
+            for i in range(line_n_ind)
         ],
         branch_gms=(
             [
                 fixed_gms[0][i] if fixed_gms[0][i] else weight_mgr.new_analog()
-                for i in range(2 * line_len)
+                for i in range(line_n_gm)
             ],
             [
                 fixed_gms[1][i] if fixed_gms[1][i] else weight_mgr.new_analog()
-                for i in range(2 * line_len)
+                for i in range(line_n_gm)
             ],
         ),
     )
@@ -172,7 +211,9 @@ def create_switchable_star_cdg(
     ]
 
     puf = CDG()
-    middle_caps = [v_nt(c=puf_params.middle_cap, g=0) for _ in range(2)]
+    middle_caps = [
+        v_nt(c=puf_params.middle_cap, g=puf_params.middle_g) for _ in range(2)
+    ]
     switche_pairs = [
         [
             et(

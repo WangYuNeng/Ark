@@ -65,7 +65,7 @@ def lut_from_data(v):
     return jnp.interp(v, v2gm_lut[0], v2gm_lut[1])
 
 
-lc_range, gr_range = Range(min=0.1e-9, max=10e-9), Range(min=0.0)
+lc_range, gr_range = Range(min=0.1e-9, max=10e-9), Range(min=-1, max=1)
 w_range = Range(min=0.5, max=2.0)
 
 #### Type definitions start ####

@@ -10,6 +10,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
+import wandb
 from diffrax import Heun, Tsit5
 from jaxtyping import Array, PyTree
 from puf import PUFParams, create_switchable_star_cdg
@@ -19,6 +20,7 @@ from spec import (
     MmE,
     MmI,
     MmV,
+    gr_range,
     lc_range,
     lut_from_data,
     mm_tln_spec,
@@ -26,7 +28,6 @@ from spec import (
     w_range,
 )
 
-import wandb
 from ark.cdg.cdg import CDG, CDGEdge
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
@@ -40,7 +41,7 @@ parser.add_argument("--pulse_rise_time", type=float, default=0.5e-9)
 parser.add_argument("--pulse_fall_time", type=float, default=0.5e-9)
 parser.add_argument("--pulse_width", type=float, default=1e-9)
 parser.add_argument("--n_branch", type=int, default=10)
-parser.add_argument("--line_len", type=int, default=4)
+parser.add_argument("--line_len", type=float, default=4)
 parser.add_argument("--empirical_gm", action="store_true")
 parser.add_argument("--n_time_points", type=int, default=100)
 parser.add_argument("--readout_time", type=float, default=10e-9)
@@ -73,6 +74,39 @@ parser.add_argument(
     "--vectorize_odeterm",
     action="store_true",
     help="Whether to compile the ODE term in vectorized form",
+)
+parser.add_argument(
+    "--init_lc",
+    type=float,
+    default=1e-9,
+    help="Initial value of inductance/capacitance (l/c)",
+)
+parser.add_argument(
+    "--init_gm",
+    type=float,
+    default=1,
+    help="Initial value of transconductance (gm)",
+)
+parser.add_argument(
+    "--init_gr",
+    type=float,
+    default=0,
+    help="Initial value of resistance/conductance (r/g)",
+)
+parser.add_argument(
+    "--fix_lc",
+    action="store_true",
+    help="Fix the LC value to the initial value",
+)
+parser.add_argument(
+    "--fix_gm",
+    action="store_true",
+    help="Fix the gm value to the initial value",
+)
+parser.add_argument(
+    "--fix_gr",
+    action="store_true",
+    help="Fix the gr value to the initial value",
 )
 args = parser.parse_args()
 np.random.seed(args.seed)
@@ -117,6 +151,16 @@ FIX_WEIGHT_EXP = args.fix_weight_exp
 
 VECTORIZE_ODETERM = args.vectorize_odeterm
 
+# LC, GM, GR initial values
+INIT_LC = args.init_lc
+INIT_GM = args.init_gm
+INIT_GR = args.init_gr
+
+# Whether to fix the LC, GM, GR values in training
+FIX_LC = args.fix_lc
+FIX_GM = args.fix_gm
+FIX_GR = args.fix_gr
+
 print("Config:", train_config)
 
 optim = optax.adam(LEARNING_RATE)
@@ -148,12 +192,12 @@ def plot_single_star_rsp(model, init_vals, switch, mismatch):
             readout_trace_time_info, init_vals, switch_val, mismatch[0], noise_seed
         )
         trace = np.array(trace).squeeze()
-        plt.plot(time_points, trace[:, 0] - trace[:, 1])
-        # plt.plot(time_points, trace[:, 0])
-        # plt.plot(time_points, trace[:, 1])
+        # plt.plot(time_points, trace[:, 0] - trace[:, 1])
+        plt.plot(time_points, trace[:, 0])
+        plt.plot(time_points, trace[:, 1])
     plt.title(f"switch={switch_val}")
-    plt.savefig("tmp.png", bbox_inches="tight", dpi=150)
-    exit()
+    # plt.savefig("tmp.png", bbox_inches="tight", dpi=150)
+    # exit()
     plt.show()
     plt.close()
 
@@ -492,7 +536,10 @@ if __name__ == "__main__":
             [gm1] + [None] * (2 * LINE_LEN - 1),
         ]
     else:
-        fixed_caps = fixed_inds = fixed_gms = None
+        fixed_caps = INIT_LC if FIX_LC else None
+        fixed_inds = INIT_LC if FIX_LC else None
+        fixed_gms = INIT_GM if FIX_GM else None
+        fixed_gr = INIT_GR if FIX_GR else None
 
     puf_cdg, middle_caps, switch_pairs, branch_pairs, puf_params = (
         create_switchable_star_cdg(
@@ -504,7 +551,9 @@ if __name__ == "__main__":
             self_et=IdealE,
             inp_nt=InpI,
             fixed_caps=fixed_caps,
+            fixed_gs=fixed_gr,
             fixed_inds=fixed_inds,
+            fixed_rs=fixed_gr,
             fixed_gms=fixed_gms,
             pulse_params=(PULSE_RISE_TIME, PULSE_FALL_TIME, PULSE_WIDTH),
             gm_lut=gm_lut_fn,
@@ -524,19 +573,39 @@ if __name__ == "__main__":
                 var.init_val = val
 
         lc_val = (
-            normalize(1e-9, lc_range.min, lc_range.max) if NORMALIZE_WEIGHT else 1e-9
+            normalize(INIT_LC, lc_range.min, lc_range.max)
+            if NORMALIZE_WEIGHT
+            else INIT_LC
         )
-        gm_val = normalize(1, w_range.min, w_range.max) if NORMALIZE_WEIGHT else 1
+        gm_val = (
+            normalize(INIT_GM, w_range.min, w_range.max)
+            if NORMALIZE_WEIGHT
+            else INIT_GM
+        )
+        gr_val = (
+            normalize(INIT_GR, gr_range.min, gr_range.max)
+            if NORMALIZE_WEIGHT
+            else INIT_GR
+        )
         set_val_if_trainable(
             puf_params.middle_cap,
-            (normalize(1e-9, lc_range.min, lc_range.max) if NORMALIZE_WEIGHT else 1e-9),
+            lc_val,
         )
-        for cap, ind in zip(puf_params.branch_caps, puf_params.branch_inds):
+        set_val_if_trainable(
+            puf_params.middle_g,
+            gr_val,
+        )
+        for cap in puf_params.branch_caps:
             set_val_if_trainable(cap, lc_val)
+        for ind in puf_params.branch_inds:
             set_val_if_trainable(ind, lc_val)
         for gm0, gm1 in zip(puf_params.branch_gms[0], puf_params.branch_gms[1]):
             set_val_if_trainable(gm0, gm_val)
             set_val_if_trainable(gm1, gm_val)
+        for g in puf_params.branch_gs:
+            set_val_if_trainable(g, gr_val)
+        for r in puf_params.branch_rs:
+            set_val_if_trainable(r, gr_val)
 
     mgr = puf_params.mgr
     puf_ckt_class = OptCompiler().compile(
@@ -575,12 +644,12 @@ if __name__ == "__main__":
     )
 
     # for init_vals, switches, mismatch in loader:
-    # plot_single_star_rsp(
-    #     model,
-    #     init_vals,
-    #     switches,
-    #     mismatch,
-    # )
+    #     plot_single_star_rsp(
+    #         model,
+    #         init_vals,
+    #         switches,
+    #         mismatch,
+    #     )
     # plot_puf_output_with_noise(
     #     puf_ckt_class,
     #     trainable_init,

@@ -46,7 +46,7 @@ def pulse(t, amplitude=1, delay=0, rise_time=5e-9, fall_time=5e-9, pulse_width=1
 
 
 # Read the V-GM_LUT
-lut_file = "V-GM_LUT.csv"
+lut_file = "V-Gm_LUT.csv"
 if os.path.exists(lut_file):
     v2gm_lut = np.loadtxt(lut_file, delimiter=",").T
     v2gm_lut[1] /= max(v2gm_lut[1])  # Normalize the gm values

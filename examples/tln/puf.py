@@ -226,9 +226,13 @@ def create_switchable_star_cdg(
         ]
         for _ in range(2)
     ]
-    rise_time, fall_time, pulse_width = pulse_params
+    amplitude, rise_time, fall_time, pulse_width = pulse_params
     short_pulse = partial(
-        pulse, rise_time=rise_time, fall_time=fall_time, pulse_width=pulse_width
+        pulse,
+        amplitude=amplitude,
+        rise_time=rise_time,
+        fall_time=fall_time,
+        pulse_width=pulse_width,
     )
     for branches, cap, switches in zip(branch_pairs, middle_caps, switche_pairs):
         # Assume the input current input is ideal for simplicity

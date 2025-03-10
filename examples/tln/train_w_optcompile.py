@@ -40,6 +40,7 @@ parser.add_argument("--learning_rate", type=float, default=5e-2)
 parser.add_argument("--pulse_rise_time", type=float, default=0.5e-9)
 parser.add_argument("--pulse_fall_time", type=float, default=0.5e-9)
 parser.add_argument("--pulse_width", type=float, default=1e-9)
+parser.add_argument("--pulse_height", type=float, default=1)
 parser.add_argument("--n_branch", type=int, default=10)
 parser.add_argument("--line_len", type=float, default=4)
 parser.add_argument("--empirical_gm", action="store_true")
@@ -108,6 +109,24 @@ parser.add_argument(
     action="store_true",
     help="Fix the gr value to the initial value",
 )
+parser.add_argument(
+    "--rstd",
+    type=float,
+    default=0.1,
+    help="Relative standard deviation of the random mismatch",
+)
+parser.add_argument(
+    "--plot_single_star_rsp",
+    action="store_true",
+    help="Plot the transient response of a single star " "with all branches connected",
+)
+parser.add_argument(
+    "--save_single_star_trace",
+    type=str,
+    default=None,
+    help="Save the transient response of a single branch to a file. "
+    "See `plot_single_star_rsp`",
+)
 args = parser.parse_args()
 np.random.seed(args.seed)
 
@@ -131,8 +150,10 @@ LEARNING_RATE = args.learning_rate
 PULSE_RISE_TIME = args.pulse_rise_time
 PULSE_FALL_TIME = args.pulse_fall_time
 PULSE_WIDTH = args.pulse_width
+PULSE_HEIGHT = args.pulse_height
 N_BRANCH = args.n_branch
 LINE_LEN = args.line_len
+RSTD = args.rstd
 EMPIRICAL_GM = args.empirical_gm
 N_TIME_POINTS = args.n_time_points
 READOUT_TIME = args.readout_time
@@ -161,6 +182,14 @@ FIX_LC = args.fix_lc
 FIX_GM = args.fix_gm
 FIX_GR = args.fix_gr
 
+PLOT_SINGLE_STAR = args.plot_single_star_rsp
+SAVE_TRACE_PATH = args.save_single_star_trace
+
+MmE.attr_def["ws"].rstd = RSTD
+MmE.attr_def["wt"].rstd = RSTD
+MmV.attr_def["c"].rstd = RSTD
+MmI.attr_def["l"].rstd = RSTD
+
 print("Config:", train_config)
 
 optim = optax.adam(LEARNING_RATE)
@@ -186,20 +215,21 @@ def plot_single_star_rsp(model, init_vals, switch, mismatch):
     )
 
     # switch_val = switch[0][0][0]
-    switch_val = jnp.array([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-    for noise_seed in range(5):
-        trace = model(
-            readout_trace_time_info, init_vals, switch_val, mismatch[0], noise_seed
-        )
-        trace = np.array(trace).squeeze()
-        # plt.plot(time_points, trace[:, 0] - trace[:, 1])
-        plt.plot(time_points, trace[:, 0])
-        plt.plot(time_points, trace[:, 1])
-    plt.title(f"switch={switch_val}")
-    # plt.savefig("tmp.png", bbox_inches="tight", dpi=150)
-    # exit()
-    plt.show()
-    plt.close()
+    switch_val = np.ones(2 * N_BRANCH)
+    trace = model(
+        readout_trace_time_info, init_vals, jnp.array(switch_val), mismatch[0], 0
+    )
+    trace = np.array(trace).squeeze()
+    if SAVE_TRACE_PATH:
+        jnp.savez(SAVE_TRACE_PATH, time_points=time_points, trace=trace.T)
+    else:
+        plt.plot(time_points, trace[:, 0], label="branch 0")
+        plt.plot(time_points, trace[:, 1], label="branch 1")
+        plt.plot(time_points, trace[:, 0] - trace[:, 1], label="rsp (diff)")
+
+        plt.legend()
+        plt.show()
+        plt.close()
 
 
 def plot_puf_output_with_noise(puf_ckt_class, trainable_init, init_vals, mismatch):
@@ -555,7 +585,7 @@ if __name__ == "__main__":
             fixed_inds=fixed_inds,
             fixed_rs=fixed_gr,
             fixed_gms=fixed_gms,
-            pulse_params=(PULSE_RISE_TIME, PULSE_FALL_TIME, PULSE_WIDTH),
+            pulse_params=(PULSE_HEIGHT, PULSE_RISE_TIME, PULSE_FALL_TIME, PULSE_WIDTH),
             gm_lut=gm_lut_fn,
         )
     )
@@ -617,6 +647,7 @@ if __name__ == "__main__":
         normalize_weight=NORMALIZE_WEIGHT,
         aggregate_args_lines=True,
         vectorize=VECTORIZE_ODETERM,
+        do_clipping=False,  # For experiment's purpose, weight might be a lot off from the specified range
     )
 
     loader = I2O_chls(
@@ -643,13 +674,15 @@ if __name__ == "__main__":
         # solver=Heun(),
     )
 
-    # for init_vals, switches, mismatch in loader:
-    #     plot_single_star_rsp(
-    #         model,
-    #         init_vals,
-    #         switches,
-    #         mismatch,
-    #     )
+    if PLOT_SINGLE_STAR:
+        init_vals, switches, mismatch = loader.__next__()
+        plot_single_star_rsp(
+            model,
+            init_vals,
+            switches,
+            mismatch,
+        )
+        exit()
     # plot_puf_output_with_noise(
     #     puf_ckt_class,
     #     trainable_init,

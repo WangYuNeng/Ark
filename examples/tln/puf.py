@@ -23,6 +23,48 @@ class PUFParams:
     branch_rs: list[Trainable | float]
     branch_gms: tuple[list[Trainable | float], list[Trainable | float]]
 
+    def to_csv(self, filename: str):
+        "Save the current parameter values to a csv file"
+
+        def get_val(p: Trainable | float):
+            return p.init_val if isinstance(p, Trainable) else p
+
+        param_dict = {}
+        param_dict["C0"] = get_val(self.middle_cap)
+        param_dict["g0"] = get_val(self.middle_g)
+        for i, (c, g) in enumerate(zip(self.branch_caps, self.branch_gs)):
+            tot_idx = 2 * (i + 1)  # Consider Cs and Ls indexed together
+            param_dict[f"C{tot_idx}"] = get_val(c)
+            param_dict[f"g{tot_idx}"] = get_val(g)
+        for i, (l, r) in enumerate(zip(self.branch_inds, self.branch_rs)):
+            tot_idx = 2 * i + 1
+            param_dict[f"L{tot_idx}"] = get_val(l)
+            param_dict[f"r{tot_idx}"] = get_val(r)
+
+        for i, (ws, wt) in enumerate(zip(*self.branch_gms)):
+            param_dict[f"gm_fb{i}"] = get_val(ws)
+            param_dict[f"gm_ff{i}"] = get_val(wt)
+
+        # write the dictionary to a csv file
+        with open(filename, "w") as f:
+            tot_lcs = 1 + len(self.branch_caps) + len(self.branch_inds)
+            for i in range(tot_lcs):
+                if i % 2 == 0:
+                    lc, gr = param_dict[f"C{i}"], param_dict[f"g{i}"]
+                else:
+                    lc, gr = param_dict[f"L{i}"], param_dict[f"r{i}"]
+                f.write(f"C{i}, {lc}\n" f"go{i}, {gr}\n")
+                if i != tot_lcs - 1:
+                    gm_ff, gm_fb = param_dict[f"gm_ff{i}"], param_dict[f"gm_fb{i}"]
+                    f.write(
+                        f"C{i}, {lc}\n"
+                        f"go{i}, {gr}\n"
+                        f"Gm_ff{i}, {gm_ff}\n"
+                        f"Gm_fb{i}, {gm_fb}\n"
+                    )
+
+        return
+
 
 def create_branch(
     line_len: int | float,

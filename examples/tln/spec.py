@@ -138,8 +138,12 @@ MmE = EdgeType(
     bases=IdealE,
     attrs={
         "attr_def": {
-            "ws": AttrDefMismatch(attr_type=AnalogAttr(w_range), rstd=0.1),
-            "wt": AttrDefMismatch(attr_type=AnalogAttr(w_range), rstd=0.1),
+            "ws": AttrDefMismatch(
+                attr_type=AnalogAttr(w_range), rstd=0.1
+            ),  # gm_feedback
+            "wt": AttrDefMismatch(
+                attr_type=AnalogAttr(w_range), rstd=0.1
+            ),  # gm_feedforward
             "gm_lut": AttrDef(
                 attr_type=FunctionAttr(nargs=1)
             ),  # Lookup table for gm based on input voltage (in a integrator)

@@ -59,6 +59,12 @@ parser.add_argument(
     "--save_weight", type=str, default=None, help="Path to save weights"
 )
 parser.add_argument(
+    "--save_csv_weight",
+    type=str,
+    default=None,
+    help="Path to save weights in csv format",
+)
+parser.add_argument(
     "--load_weight", type=str, default=None, help="Path to load weights"
 )
 parser.add_argument("--test", action="store_true", help="Test the model")
@@ -702,3 +708,9 @@ if __name__ == "__main__":
 
     if args.save_weight:
         jnp.savez(args.save_weight, analog=best_weight[0], digital=best_weight[1])
+
+    if args.save_csv_weight:
+        mgr.set_initial_vals(
+            "analog", best_weight[0]
+        )  # TLN PUF only has analog trainable
+        puf_params.to_csv(args.save_csv_weight)

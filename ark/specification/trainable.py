@@ -1,6 +1,7 @@
 """Handle trainable attributes."""
 
 import jax.numpy as jnp
+from jaxtyping import Array
 
 
 class Trainable:
@@ -73,11 +74,31 @@ class TrainableMgr:
         param_list.append(trainable)
         return trainable
 
-    def get_initial_vals(self, datatype: str):
+    def get_initial_vals(self, datatype: str) -> Array | list:
         """Get the initial values of all trainable parameters."""
         if datatype == "analog":
             return jnp.array([trainable.init_val for trainable in self.analog])
         elif datatype == "digital":
             return [trainable.init_val for trainable in self.digital]
+        else:
+            raise ValueError(f"Unknown datatype: {datatype}")
+
+    def set_initial_vals(self, datatype: str, vals: Array | list):
+        """Set the initial values of all trainable parameters.
+        If the datatype is digital, vals should be a list.
+        If the datatype is analog, vals should be a jnp array.
+        """
+        if datatype == "analog":
+            assert isinstance(
+                vals, jnp.ndarray
+            ), "Inital values of analog attributes should be a jnp array."
+            for trainable, val in zip(self.analog, vals):
+                trainable.init_val = val
+        elif datatype == "digital":
+            assert isinstance(
+                vals, list
+            ), "Inital values of digital attributes should be a list."
+            for trainable, val in zip(self.digital, vals):
+                trainable.init_val = val
         else:
             raise ValueError(f"Unknown datatype: {datatype}")

@@ -193,7 +193,7 @@ def create_switchable_star_cdg(
         self_et (EdgeType): The edge type of self-connections.
         inp_nt (NodeType): The node type of the input current node.
         fixed_caps (Optional[list[float]] | float): The values of capacitors that are fixed during training.
-            if the value is flo
+            if the value is float, all the capacitors will fix to that value.
         fixed_gs (Optional[list[float]]) | float: The values of conductances associated to capacitors that are
             fixed during training.
         fixed_inds (Optional[list[float]] | float): The values of inductors that are fixed during training.
@@ -240,31 +240,41 @@ def create_switchable_star_cdg(
     weight_mgr = TrainableMgr()
     puf_params = PUFParams(
         mgr=weight_mgr,
-        middle_cap=fixed_caps[0] if fixed_caps[0] else weight_mgr.new_analog(),
-        middle_g=fixed_gs[0] if fixed_gs[0] else weight_mgr.new_analog(),
+        middle_cap=(
+            fixed_caps[0] if fixed_caps[0] is not None else weight_mgr.new_analog()
+        ),
+        middle_g=fixed_gs[0] if fixed_gs[0] is not None else weight_mgr.new_analog(),
         branch_caps=[
-            fixed_caps[i] if fixed_caps[i] else weight_mgr.new_analog()
+            fixed_caps[i] if fixed_caps[i] is not None else weight_mgr.new_analog()
             for i in range(1, line_n_cap)
         ],
         branch_gs=[
-            fixed_gs[i] if fixed_gs[i] else weight_mgr.new_analog()
+            fixed_gs[i] if fixed_gs[i] is not None else weight_mgr.new_analog()
             for i in range(1, line_n_cap)
         ],
         branch_inds=[
-            fixed_inds[i] if fixed_inds[i] else weight_mgr.new_analog()
+            fixed_inds[i] if fixed_inds[i] is not None else weight_mgr.new_analog()
             for i in range(line_n_ind)
         ],
         branch_rs=[
-            fixed_rs[i] if fixed_rs[i] else weight_mgr.new_analog()
+            fixed_rs[i] if fixed_rs[i] is not None else weight_mgr.new_analog()
             for i in range(line_n_ind)
         ],
         branch_gms=(
             [
-                fixed_gms[0][i] if fixed_gms[0][i] else weight_mgr.new_analog()
+                (
+                    fixed_gms[0][i]
+                    if fixed_gms[0][i] is not None
+                    else weight_mgr.new_analog()
+                )
                 for i in range(line_n_gm)
             ],
             [
-                fixed_gms[1][i] if fixed_gms[1][i] else weight_mgr.new_analog()
+                (
+                    fixed_gms[1][i]
+                    if fixed_gms[1][i] is not None
+                    else weight_mgr.new_analog()
+                )
                 for i in range(line_n_gm)
             ],
         ),

@@ -8,7 +8,12 @@ from tqdm import tqdm
 
 from ark.cdg.cdg import CDG, CDGEdge, CDGNode
 from ark.specification.cdg_types import EdgeType, NodeType
+from ark.specification.range import Range
 from ark.specification.trainable import Trainable, TrainableMgr
+
+
+def get_val(p: Trainable | float):
+    return p.init_val if isinstance(p, Trainable) else p
 
 
 @dataclass
@@ -25,9 +30,6 @@ class PUFParams:
 
     def to_csv(self, filename: str):
         "Save the current parameter values to a csv file"
-
-        def get_val(p: Trainable | float):
-            return p.init_val if isinstance(p, Trainable) else p
 
         param_dict = {}
         param_dict["C0"] = get_val(self.middle_cap)
@@ -64,6 +66,31 @@ class PUFParams:
                     )
 
         return
+
+    def denormalize_param(self, lc_range: Range, w_range: Range, gr_range: Range):
+        def set_val_if_trainable(var: Trainable | float, val: float):
+            if isinstance(var, Trainable):
+                var.init_val = val
+
+        def de_normalize(val: float, r: Range):
+            return r.min + (r.max - r.min) * (val + 1) / 2
+
+        set_val_if_trainable(
+            self.middle_cap, de_normalize(get_val(self.middle_cap), lc_range)
+        )
+        set_val_if_trainable(
+            self.middle_g, de_normalize(get_val(self.middle_g), gr_range)
+        )
+        for c, g in zip(self.branch_caps, self.branch_gs):
+            c = set_val_if_trainable(c, de_normalize(get_val(c), lc_range))
+            g = set_val_if_trainable(g, de_normalize(get_val(g), gr_range))
+        for l, r in zip(self.branch_inds, self.branch_rs):
+            l = set_val_if_trainable(l, de_normalize(get_val(l), lc_range))
+            r = set_val_if_trainable(r, de_normalize(get_val(r), gr_range))
+
+        for ws, wt in zip(*self.branch_gms):
+            ws = set_val_if_trainable(ws, de_normalize(get_val(ws), w_range))
+            wt = set_val_if_trainable(wt, de_normalize(get_val(wt), w_range))
 
 
 def create_branch(

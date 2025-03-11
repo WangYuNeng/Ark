@@ -713,4 +713,8 @@ if __name__ == "__main__":
         mgr.set_initial_vals(
             "analog", best_weight[0]
         )  # TLN PUF only has analog trainable
+        if NORMALIZE_WEIGHT:
+            puf_params.denormalize_param(
+                lc_range=lc_range, w_range=w_range, gr_range=gr_range
+            )
         puf_params.to_csv(args.save_csv_weight)

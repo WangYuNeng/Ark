@@ -58,12 +58,7 @@ class PUFParams:
                 f.write(f"C{i}, {lc}\n" f"go{i}, {gr}\n")
                 if i != tot_lcs - 1:
                     gm_ff, gm_fb = param_dict[f"gm_ff{i}"], param_dict[f"gm_fb{i}"]
-                    f.write(
-                        f"C{i}, {lc}\n"
-                        f"go{i}, {gr}\n"
-                        f"Gm_ff{i}, {gm_ff}\n"
-                        f"Gm_fb{i}, {gm_fb}\n"
-                    )
+                    f.write(f"Gm_ff{i}, {gm_ff}\n" f"Gm_fb{i}, {gm_fb}\n")
 
         return
 

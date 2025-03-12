@@ -189,6 +189,7 @@ class ProdRuleCDGInfo:
     x: int
     y: int
     edge: CDGEdge
+    x_is_src: bool
 
 
 def multi_hot_vectors(
@@ -808,7 +809,7 @@ class ArkCompiler:
 
             # If x is the src, SRC should map to one-hot vectors of x-th state variable,
             # DST should map to one-hot vectors of y-th state variable, and vice versa.
-            x_is_src = info.x == node_to_var[info.edge.src.name]
+            x_is_src = info.x_is_src
             (src_coord, dst_coord) = (
                 (Tx_coord, Ty_coord) if x_is_src else (Ty_coord, Tx_coord)
             )
@@ -1287,8 +1288,9 @@ class ArkCompiler:
                     )
                     if gen_rule.identifier not in prod_id_to_info:
                         prod_id_to_info[gen_rule.identifier] = []
+                    x_is_src = node.which_tgt(edge) == SRC
                     prod_id_to_info[gen_rule.identifier].append(
-                        ProdRuleCDGInfo(x, y, edge)
+                        ProdRuleCDGInfo(x=x, y=y, edge=edge, x_is_src=x_is_src)
                     )
 
         return prod_id_to_info

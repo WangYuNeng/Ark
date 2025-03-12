@@ -148,7 +148,8 @@ def mk_jnp_scatter_gather(arr_size: int, idx: ast.expr, val: ast.Expr, gather: s
     arr.at[idx].op(val)
     """
     scatter_base_zero = mk_jnp_call(
-        args=[ast.Constant(value=arr_size)], call_fn="zeros"
+        args=[ast.Constant(value=arr_size)],
+        call_fn="zeros" if gather == "add" else "ones",
     )
     scatter_at = ast.Attribute(value=scatter_base_zero, attr="at")
     return ast.Call(

@@ -77,25 +77,31 @@ class Classifier(eqx.Module):
         lorenz_trainble_mgr: TrainableMgr,
         solver: diffrax.AbstractSolver,
         use_batch_norm: bool = False,
+        no_lorenz: bool = False,
     ):
-        lorenz_sys_cdg, state_vars = build_lorenz96_sys(
-            n_state_var=n_state_var, init_F=forcing, trainable_mgr=lorenz_trainble_mgr
-        )
-        lorenz_sys_cls = OptCompiler().compile(
-            prog_name="lorenz_96",
-            cdg=lorenz_sys_cdg,
-            cdg_spec=lorenz96_spec,
-            trainable_mgr=trainable_mgr,
-            readout_nodes=state_vars,
-            vectorize=VECTORIZE,
-            normalize_weight=False,
-        )
+        if no_lorenz:
+            self.lorenz96_sys = None
+        else:
+            lorenz_sys_cdg, state_vars = build_lorenz96_sys(
+                n_state_var=n_state_var,
+                init_F=forcing,
+                trainable_mgr=lorenz_trainble_mgr,
+            )
+            lorenz_sys_cls = OptCompiler().compile(
+                prog_name="lorenz_96",
+                cdg=lorenz_sys_cdg,
+                cdg_spec=lorenz96_spec,
+                trainable_mgr=trainable_mgr,
+                readout_nodes=state_vars,
+                vectorize=VECTORIZE,
+                normalize_weight=False,
+            )
 
-        self.lorenz96_sys = lorenz_sys_cls(
-            init_trainable=trainable_mgr.get_initial_vals(),
-            is_stochastic=False,
-            solver=solver,
-        )
+            self.lorenz96_sys = lorenz_sys_cls(
+                init_trainable=trainable_mgr.get_initial_vals(),
+                is_stochastic=False,
+                solver=solver,
+            )
         self.w_in = jnp.array(np.random.randn(n_state_var, img_size))
         self.w_out = jnp.array(np.random.randn(n_classes, n_state_var))
 
@@ -110,13 +116,16 @@ class Classifier(eqx.Module):
         initial_state = jnp.matmul(self.w_in, img)
         if self.batch_norm is not None:
             initial_state, norm_state = self.batch_norm(initial_state, norm_state)
-        trace = self.lorenz96_sys(
-            time_info=time_info,
-            initial_state=initial_state,
-            switch=[],  # No switch
-            args_seed=0,  # No random mismatch
-            noise_seed=0,  # No random noise
-        ).T
+        if self.lorenz96_sys:
+            trace = self.lorenz96_sys(
+                time_info=time_info,
+                initial_state=initial_state,
+                switch=[],  # No switch
+                args_seed=0,  # No random mismatch
+                noise_seed=0,  # No random noise
+            ).T
+        else:
+            trace = initial_state
         return jnp.matmul(self.w_out, trace), norm_state
 
 
@@ -199,6 +208,7 @@ if __name__ == "__main__":
         lorenz_trainble_mgr=trainable_mgr,
         solver=Tsit5(),
         use_batch_norm=BATCH_NORM,
+        no_lorenz=NO_LORENZ,
     )
 
     train(

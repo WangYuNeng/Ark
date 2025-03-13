@@ -2,15 +2,27 @@ import argparse
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--seed", type=int, default=0)
-parser.add_argument("--n_state_var", type=int, default=10)
-parser.add_argument("--n_steps", type=int, default=1000)
-parser.add_argument("--batch_size", type=int, default=512)
-parser.add_argument("--lr", type=float, default=0.01)
+# Lorenz96 parameters
+parser.add_argument("--n_state_var", type=int, default=4)
+parser.add_argument("--forcing", type=float, default=2.0)
 
+# Simulation parameters
 parser.add_argument("--readout_time", type=float, default=1.0)
 parser.add_argument("--n_time_points", type=int, default=20)
+parser.add_argument("--vectorize", action="store_true")
 
-parser.add_argument("--forcing", type=float, default=8.0)
+# Training parameters
+parser.add_argument("--seed", type=int, default=0)
+parser.add_argument("--n_epochs", type=int, default=32)
+parser.add_argument("--batch_size", type=int, default=512)
+parser.add_argument("--lr", type=float, default=0.01)
+parser.add_argument("--validation_split", type=float, default=0.1)
+parser.add_argument("--testing", action="store_true")
+
+# Data parameters
+parser.add_argument(
+    "--dataset", type=str, default="mnist", choices=["mnist", "fashion_mnist"]
+)
+
 
 args = parser.parse_args()

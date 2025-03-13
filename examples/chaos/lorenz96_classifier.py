@@ -35,6 +35,9 @@ LR = args.lr
 VALIDATION_SPLIT = args.validation_split
 TESTING = args.testing
 
+BATCH_NORM = args.batch_norm
+NO_LORENZ = args.no_lorenz
+
 DATASET = args.dataset
 train_loader, val_loader = get_dataloader(
     dataset=DATASET,
@@ -60,6 +63,7 @@ time_info = TimeInfo(
 
 class Classifier(eqx.Module):
 
+    batch_norm: eqx.nn.BatchNorm
     lorenz96_sys: BaseAnalogCkt
     w_in: Array
     w_out: Array
@@ -72,6 +76,7 @@ class Classifier(eqx.Module):
         forcing: float,
         lorenz_trainble_mgr: TrainableMgr,
         solver: diffrax.AbstractSolver,
+        use_batch_norm: bool = False,
     ):
         lorenz_sys_cdg, state_vars = build_lorenz96_sys(
             n_state_var=n_state_var, init_F=forcing, trainable_mgr=lorenz_trainble_mgr
@@ -94,8 +99,17 @@ class Classifier(eqx.Module):
         self.w_in = jnp.array(np.random.randn(n_state_var, img_size))
         self.w_out = jnp.array(np.random.randn(n_classes, n_state_var))
 
-    def __call__(self, img: Array, time_info: TimeInfo) -> Array:
+        if use_batch_norm:
+            self.batch_norm = eqx.nn.BatchNorm(
+                input_size=n_state_var, axis_name="batch"
+            )
+        else:
+            self.batch_norm = None
+
+    def __call__(self, img: Array, time_info: TimeInfo, norm_state) -> Array:
         initial_state = jnp.matmul(self.w_in, img)
+        if self.batch_norm is not None:
+            initial_state, norm_state = self.batch_norm(initial_state, norm_state)
         trace = self.lorenz96_sys(
             time_info=time_info,
             initial_state=initial_state,
@@ -103,16 +117,20 @@ class Classifier(eqx.Module):
             args_seed=0,  # No random mismatch
             noise_seed=0,  # No random noise
         ).T
-        return jnp.matmul(self.w_out, trace)
+        return jnp.matmul(self.w_out, trace), norm_state
 
 
-def loss(model: Classifier, img: Array, label: Array) -> Array:
-    pred_label = jax.vmap(model, in_axes=(0, None))(img, time_info)
-    return cross_entropy(pred_label, label)
+def loss(model: Classifier, state, img: Array, label: Array) -> Array:
+    pred_label, state = jax.vmap(
+        model, axis_name="batch", in_axes=(0, None, None), out_axes=(0, None)
+    )(img, time_info, state)
+    return cross_entropy(pred_label, label), state
 
 
-def accuracy(model: Classifier, img: Array, label: Array) -> Array:
-    pred_label = jax.vmap(model, in_axes=(0, None))(img, time_info)
+def accuracy(model: Classifier, state, img: Array, label: Array) -> Array:
+    pred_label, _ = jax.vmap(
+        model, axis_name="batch", in_axes=(0, None, None), out_axes=(0, None)
+    )(img, time_info, state)
     return jnp.mean(jnp.argmax(pred_label, axis=1) == label)
 
 
@@ -128,22 +146,27 @@ def cross_entropy(y_pred: Array, y_true: Array) -> Array:
 
 def train(
     model: Classifier,
+    state,
     optimizer: optax.GradientTransformation,
     train_loader: DataLoader,
     val_loader: DataLoader,
 ):
-    opt_state = optimizer.init(eqx.filter(model, eqx.is_array))
+    opt_state = optimizer.init(eqx.filter(model, eqx.is_inexact_array))
 
     @eqx.filter_jit
-    def make_step(model: Classifier, opt_state: PyTree, img: Array, label: Array):
-        loss_val, grads = eqx.filter_value_and_grad(loss)(model, img, label)
+    def make_step(
+        model: Classifier, state, opt_state: PyTree, img: Array, label: Array
+    ):
+        (loss_val, state), grads = eqx.filter_value_and_grad(loss, has_aux=True)(
+            model, state, img, label
+        )
         updates, opt_state = optimizer.update(grads, opt_state)
         model = eqx.apply_updates(model, updates)
-        return model, opt_state, loss_val, accuracy(model, img, label)
+        return model, state, opt_state, loss_val, accuracy(model, state, img, label)
 
     @eqx.filter_jit
-    def val_step(model: Classifier, img: Array, label: Array):
-        return loss(model, img, label), accuracy(model, img, label)
+    def val_step(model: Classifier, state, img: Array, label: Array):
+        return loss(model, state, img, label)[0], accuracy(model, state, img, label)
 
     print("Step\tTrain loss\tTrain accuracy\tValidation loss\tValidation accuracy")
     best_val_acc = 0
@@ -151,12 +174,12 @@ def train(
     for step in range(N_EPOCHS):
         for img, label in tqdm(train_loader):
             img, label = img.numpy(), label.numpy()
-            model, opt_state, train_loss, train_acc = make_step(
-                model, opt_state, img, label
+            model, state, opt_state, train_loss, train_acc = make_step(
+                model, state, opt_state, img, label
             )
         for img, label in val_loader:
             img, label = img.numpy(), label.numpy()
-            val_loss, val_acc = val_step(model, img, label)
+            val_loss, val_acc = val_step(model, state, img, label)
         print(
             f"{step}\t{train_loss:.6f}\t{train_acc:.6f}\t{val_loss:.6f}\t{val_acc:.6f}"
         )
@@ -168,17 +191,19 @@ def train(
 
 if __name__ == "__main__":
 
-    classifer = Classifier(
+    classifer, state = eqx.nn.make_with_state(Classifier)(
         img_size=IMG_SIZE,
         n_classes=N_LABEL,
         n_state_var=N_STATE_VAR,
         forcing=FORCING,
         lorenz_trainble_mgr=trainable_mgr,
         solver=Tsit5(),
+        use_batch_norm=BATCH_NORM,
     )
 
     train(
         model=classifer,
+        state=state,
         optimizer=optax.adam(LR),
         train_loader=train_loader,
         val_loader=val_loader,

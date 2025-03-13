@@ -19,6 +19,10 @@ parser.add_argument("--lr", type=float, default=0.01)
 parser.add_argument("--validation_split", type=float, default=0.1)
 parser.add_argument("--testing", action="store_true")
 
+# Model parameters
+parser.add_argument("--batch_norm", action="store_true")
+parser.add_argument("--no_lorenz", action="store_true")
+
 # Data parameters
 parser.add_argument(
     "--dataset", type=str, default="mnist", choices=["mnist", "fashion_mnist"]

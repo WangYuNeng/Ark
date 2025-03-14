@@ -3,6 +3,7 @@
 from typing import Optional
 
 import jax.numpy as jnp
+from jaxtyping import Array
 
 
 class Trainable:
@@ -92,5 +93,25 @@ class TrainableMgr:
             return [trainable.init_val for trainable in self.digital]
         elif datatype is None:
             return (self.get_initial_vals("analog"), self.get_initial_vals("digital"))
+        else:
+            raise ValueError(f"Unknown datatype: {datatype}")
+
+    def set_initial_vals(self, datatype: str, vals: Array | list):
+        """Set the initial values of all trainable parameters.
+        If the datatype is digital, vals should be a list.
+        If the datatype is analog, vals should be a jnp array.
+        """
+        if datatype == "analog":
+            assert isinstance(
+                vals, jnp.ndarray
+            ), "Inital values of analog attributes should be a jnp array."
+            for trainable, val in zip(self.analog, vals):
+                trainable.init_val = val
+        elif datatype == "digital":
+            assert isinstance(
+                vals, list
+            ), "Inital values of digital attributes should be a list."
+            for trainable, val in zip(self.digital, vals):
+                trainable.init_val = val
         else:
             raise ValueError(f"Unknown datatype: {datatype}")

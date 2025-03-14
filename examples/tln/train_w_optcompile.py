@@ -10,12 +10,24 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
+import wandb
 from diffrax import Heun, Tsit5
 from jaxtyping import Array, PyTree
 from puf import PUFParams, create_switchable_star_cdg
-from spec import IdealE, InpI, MmE, MmI, MmV, lc_range, mm_tln_spec, w_range
+from spec import (
+    IdealE,
+    InpI,
+    MmE,
+    MmI,
+    MmV,
+    gr_range,
+    lc_range,
+    lut_from_data,
+    mm_tln_spec,
+    unity,
+    w_range,
+)
 
-import wandb
 from ark.cdg.cdg import CDG, CDGEdge
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
@@ -28,8 +40,10 @@ parser.add_argument("--learning_rate", type=float, default=5e-2)
 parser.add_argument("--pulse_rise_time", type=float, default=0.5e-9)
 parser.add_argument("--pulse_fall_time", type=float, default=0.5e-9)
 parser.add_argument("--pulse_width", type=float, default=1e-9)
+parser.add_argument("--pulse_height", type=float, default=1)
 parser.add_argument("--n_branch", type=int, default=10)
-parser.add_argument("--line_len", type=int, default=4)
+parser.add_argument("--line_len", type=float, default=4)
+parser.add_argument("--empirical_gm", action="store_true")
 parser.add_argument("--n_time_points", type=int, default=100)
 parser.add_argument("--readout_time", type=float, default=10e-9)
 parser.add_argument("--rand_init", action="store_true")
@@ -43,6 +57,12 @@ parser.add_argument("--wandb", action="store_true")
 parser.add_argument("--tag", type=str, default=None)
 parser.add_argument(
     "--save_weight", type=str, default=None, help="Path to save weights"
+)
+parser.add_argument(
+    "--save_csv_weight",
+    type=str,
+    default=None,
+    help="Path to save weights in csv format",
 )
 parser.add_argument(
     "--load_weight", type=str, default=None, help="Path to load weights"
@@ -61,6 +81,57 @@ parser.add_argument(
     "--vectorize_odeterm",
     action="store_true",
     help="Whether to compile the ODE term in vectorized form",
+)
+parser.add_argument(
+    "--init_lc",
+    type=float,
+    default=1e-9,
+    help="Initial value of inductance/capacitance (l/c)",
+)
+parser.add_argument(
+    "--init_gm",
+    type=float,
+    default=1,
+    help="Initial value of transconductance (gm)",
+)
+parser.add_argument(
+    "--init_gr",
+    type=float,
+    default=0,
+    help="Initial value of resistance/conductance (r/g)",
+)
+parser.add_argument(
+    "--fix_lc",
+    action="store_true",
+    help="Fix the LC value to the initial value",
+)
+parser.add_argument(
+    "--fix_gm",
+    action="store_true",
+    help="Fix the gm value to the initial value",
+)
+parser.add_argument(
+    "--fix_gr",
+    action="store_true",
+    help="Fix the gr value to the initial value",
+)
+parser.add_argument(
+    "--rstd",
+    type=float,
+    default=0.1,
+    help="Relative standard deviation of the random mismatch",
+)
+parser.add_argument(
+    "--plot_single_star_rsp",
+    action="store_true",
+    help="Plot the transient response of a single star " "with all branches connected",
+)
+parser.add_argument(
+    "--save_single_star_trace",
+    type=str,
+    default=None,
+    help="Save the transient response of a single branch to a file. "
+    "See `plot_single_star_rsp`",
 )
 args = parser.parse_args()
 np.random.seed(args.seed)
@@ -85,8 +156,11 @@ LEARNING_RATE = args.learning_rate
 PULSE_RISE_TIME = args.pulse_rise_time
 PULSE_FALL_TIME = args.pulse_fall_time
 PULSE_WIDTH = args.pulse_width
+PULSE_HEIGHT = args.pulse_height
 N_BRANCH = args.n_branch
 LINE_LEN = args.line_len
+RSTD = args.rstd
+EMPIRICAL_GM = args.empirical_gm
 N_TIME_POINTS = args.n_time_points
 READOUT_TIME = args.readout_time
 RAND_INIT = args.rand_init
@@ -104,6 +178,24 @@ FIX_WEIGHT_EXP = args.fix_weight_exp
 
 VECTORIZE_ODETERM = args.vectorize_odeterm
 
+# LC, GM, GR initial values
+INIT_LC = args.init_lc
+INIT_GM = args.init_gm
+INIT_GR = args.init_gr
+
+# Whether to fix the LC, GM, GR values in training
+FIX_LC = args.fix_lc
+FIX_GM = args.fix_gm
+FIX_GR = args.fix_gr
+
+PLOT_SINGLE_STAR = args.plot_single_star_rsp
+SAVE_TRACE_PATH = args.save_single_star_trace
+
+MmE.attr_def["ws"].rstd = RSTD
+MmE.attr_def["wt"].rstd = RSTD
+MmV.attr_def["c"].rstd = RSTD
+MmI.attr_def["l"].rstd = RSTD
+
 print("Config:", train_config)
 
 optim = optax.adam(LEARNING_RATE)
@@ -111,6 +203,8 @@ optim = optax.adam(LEARNING_RATE)
 time_info = TimeInfo(
     t0=0.0, t1=READOUT_TIME, dt0=READOUT_TIME / N_TIME_POINTS, saveat=[READOUT_TIME]
 )
+
+gm_lut_fn = lut_from_data if EMPIRICAL_GM else unity
 
 
 def plot_single_star_rsp(model, init_vals, switch, mismatch):
@@ -127,20 +221,21 @@ def plot_single_star_rsp(model, init_vals, switch, mismatch):
     )
 
     # switch_val = switch[0][0][0]
-    switch_val = jnp.array([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-    for noise_seed in range(5):
-        trace = model(
-            readout_trace_time_info, init_vals, switch_val, mismatch[0], noise_seed
-        )
-        trace = np.array(trace).squeeze()
-        plt.plot(time_points, trace[:, 0] - trace[:, 1])
-        # plt.plot(time_points, trace[:, 0])
-        # plt.plot(time_points, trace[:, 1])
-    plt.title(f"switch={switch_val}")
-    plt.savefig("tmp.png", bbox_inches="tight", dpi=150)
-    exit()
-    plt.show()
-    plt.close()
+    switch_val = np.ones(2 * N_BRANCH)
+    trace = model(
+        readout_trace_time_info, init_vals, jnp.array(switch_val), mismatch[0], 0
+    )
+    trace = np.array(trace).squeeze()
+    if SAVE_TRACE_PATH:
+        jnp.savez(SAVE_TRACE_PATH, time_points=time_points, trace=trace.T)
+    else:
+        plt.plot(time_points, trace[:, 0], label="branch 0")
+        plt.plot(time_points, trace[:, 1], label="branch 1")
+        plt.plot(time_points, trace[:, 0] - trace[:, 1], label="rsp (diff)")
+
+        plt.legend()
+        plt.show()
+        plt.close()
 
 
 def plot_puf_output_with_noise(puf_ckt_class, trainable_init, init_vals, mismatch):
@@ -470,14 +565,17 @@ if __name__ == "__main__":
             l_val = 8.414712707369841e-10
             gm0 = gm1 = 1.0265654825149246
 
-        init_caps = [c_val] + [None] * LINE_LEN
-        init_inds = [l_val] + [None] * (LINE_LEN - 1)
-        init_gms = [
+        fixed_caps = [c_val] + [None] * LINE_LEN
+        fixed_inds = [l_val] + [None] * (LINE_LEN - 1)
+        fixed_gms = [
             [gm0] + [None] * (2 * LINE_LEN - 1),
             [gm1] + [None] * (2 * LINE_LEN - 1),
         ]
     else:
-        init_caps = init_inds = init_gms = None
+        fixed_caps = INIT_LC if FIX_LC else None
+        fixed_inds = INIT_LC if FIX_LC else None
+        fixed_gms = INIT_GM if FIX_GM else None
+        fixed_gr = INIT_GR if FIX_GR else None
 
     puf_cdg, middle_caps, switch_pairs, branch_pairs, puf_params = (
         create_switchable_star_cdg(
@@ -488,10 +586,13 @@ if __name__ == "__main__":
             et=MmE,
             self_et=IdealE,
             inp_nt=InpI,
-            init_caps=init_caps,
-            init_inds=init_inds,
-            init_gms=init_gms,
-            pulse_params=(PULSE_RISE_TIME, PULSE_FALL_TIME, PULSE_WIDTH),
+            fixed_caps=fixed_caps,
+            fixed_gs=fixed_gr,
+            fixed_inds=fixed_inds,
+            fixed_rs=fixed_gr,
+            fixed_gms=fixed_gms,
+            pulse_params=(PULSE_HEIGHT, PULSE_RISE_TIME, PULSE_FALL_TIME, PULSE_WIDTH),
+            gm_lut=gm_lut_fn,
         )
     )
 
@@ -508,19 +609,39 @@ if __name__ == "__main__":
                 var.init_val = val
 
         lc_val = (
-            normalize(1e-9, lc_range.min, lc_range.max) if NORMALIZE_WEIGHT else 1e-9
+            normalize(INIT_LC, lc_range.min, lc_range.max)
+            if NORMALIZE_WEIGHT
+            else INIT_LC
         )
-        gm_val = normalize(1, w_range.min, w_range.max) if NORMALIZE_WEIGHT else 1
+        gm_val = (
+            normalize(INIT_GM, w_range.min, w_range.max)
+            if NORMALIZE_WEIGHT
+            else INIT_GM
+        )
+        gr_val = (
+            normalize(INIT_GR, gr_range.min, gr_range.max)
+            if NORMALIZE_WEIGHT
+            else INIT_GR
+        )
         set_val_if_trainable(
             puf_params.middle_cap,
-            (normalize(1e-9, lc_range.min, lc_range.max) if NORMALIZE_WEIGHT else 1e-9),
+            lc_val,
         )
-        for cap, ind in zip(puf_params.branch_caps, puf_params.branch_inds):
+        set_val_if_trainable(
+            puf_params.middle_g,
+            gr_val,
+        )
+        for cap in puf_params.branch_caps:
             set_val_if_trainable(cap, lc_val)
+        for ind in puf_params.branch_inds:
             set_val_if_trainable(ind, lc_val)
         for gm0, gm1 in zip(puf_params.branch_gms[0], puf_params.branch_gms[1]):
             set_val_if_trainable(gm0, gm_val)
             set_val_if_trainable(gm1, gm_val)
+        for g in puf_params.branch_gs:
+            set_val_if_trainable(g, gr_val)
+        for r in puf_params.branch_rs:
+            set_val_if_trainable(r, gr_val)
 
     mgr = puf_params.mgr
     puf_ckt_class = OptCompiler().compile(
@@ -532,6 +653,7 @@ if __name__ == "__main__":
         normalize_weight=NORMALIZE_WEIGHT,
         aggregate_args_lines=True,
         vectorize=VECTORIZE_ODETERM,
+        do_clipping=False,  # For experiment's purpose, weight might be a lot off from the specified range
     )
 
     loader = I2O_chls(
@@ -558,13 +680,15 @@ if __name__ == "__main__":
         # solver=Heun(),
     )
 
-    # for init_vals, switches, mismatch in loader:
-    # plot_single_star_rsp(
-    #     model,
-    #     init_vals,
-    #     switches,
-    #     mismatch,
-    # )
+    if PLOT_SINGLE_STAR:
+        init_vals, switches, mismatch = loader.__next__()
+        plot_single_star_rsp(
+            model,
+            init_vals,
+            switches,
+            mismatch,
+        )
+        exit()
     # plot_puf_output_with_noise(
     #     puf_ckt_class,
     #     trainable_init,
@@ -584,3 +708,13 @@ if __name__ == "__main__":
 
     if args.save_weight:
         jnp.savez(args.save_weight, analog=best_weight[0], digital=best_weight[1])
+
+    if args.save_csv_weight:
+        mgr.set_initial_vals(
+            "analog", best_weight[0]
+        )  # TLN PUF only has analog trainable
+        if NORMALIZE_WEIGHT:
+            puf_params.denormalize_param(
+                lc_range=lc_range, w_range=w_range, gr_range=gr_range
+            )
+        puf_params.to_csv(args.save_csv_weight)

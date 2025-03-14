@@ -1,5 +1,7 @@
 from typing import Generator, Iterable, Mapping, NewType, Optional
 
+import matplotlib.pyplot as plt
+import networkx as nx
 import numpy as np
 
 from ark.reduction import Reduction
@@ -629,3 +631,13 @@ class CDG:
     def elements(self) -> list[CDGElement]:
         """Return all elements in the graph."""
         return self.nodes + self.edges
+
+    def visualize(self):
+        """Build a networkx graph and visualize it."""
+        graph = nx.Graph()
+        for node in self.nodes:
+            graph.add_node(node.name)
+        for edge in self.edges:
+            graph.add_edge(edge.src.name, edge.dst.name)
+        nx.draw(graph, with_labels=True)
+        plt.show()

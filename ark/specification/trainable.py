@@ -1,5 +1,7 @@
 """Handle trainable attributes."""
 
+from typing import Optional
+
 import jax.numpy as jnp
 
 
@@ -73,11 +75,22 @@ class TrainableMgr:
         param_list.append(trainable)
         return trainable
 
-    def get_initial_vals(self, datatype: str):
-        """Get the initial values of all trainable parameters."""
+    def get_initial_vals(self, datatype: Optional[str] = None):
+        """Get the initial values of all trainable parameters.
+
+        Args:
+            datatype: The type of the trainable parameters.
+            `analog` for analog parameters, `digital` for digital parameters.
+            If None, return the initial values of both analog and digital parameters.
+
+        Returns:
+            The initial values of the specified trainable parameters.
+        """
         if datatype == "analog":
             return jnp.array([trainable.init_val for trainable in self.analog])
         elif datatype == "digital":
             return [trainable.init_val for trainable in self.digital]
+        elif datatype is None:
+            return (self.get_initial_vals("analog"), self.get_initial_vals("digital"))
         else:
             raise ValueError(f"Unknown datatype: {datatype}")

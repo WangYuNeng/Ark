@@ -5,17 +5,18 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
-from classifier_dataloader import get_dataloader
-from classifier_parser import args
-from diffrax import Tsit5
-from jaxtyping import Array, PyTree
-from spec import build_lorenz96_sys, lorenz96_spec
-from torch.utils.data import DataLoader
-from tqdm import tqdm
-
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
 from ark.specification.trainable import TrainableMgr
+from diffrax import Tsit5
+from jaxtyping import Array, PyTree
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+
+import wandb
+from classifier_dataloader import get_dataloader
+from classifier_parser import args
+from spec import build_lorenz96_sys, lorenz96_spec
 
 jax.config.update("jax_enable_x64", True)
 
@@ -46,6 +47,14 @@ train_loader, val_loader = get_dataloader(
     train=True,
     validation_split=VALIDATION_SPLIT,
 )
+test_loader, _ = get_dataloader(
+    dataset=DATASET,
+    batch_size=BATCH_SIZE,
+    shuffle=False,
+    train=False,
+    validation_split=0,
+)
+WANDB = args.wandb
 
 # get the image size
 IMG_SIZE = next(iter(train_loader))[0].shape[1]
@@ -59,6 +68,11 @@ time_info = TimeInfo(
     dt0=READOUT_TIME / N_TIME_POINTS,
     saveat=[READOUT_TIME],
 )
+
+if WANDB:
+    wandb_run = wandb.init(
+        config=vars(args),
+    )
 
 
 class Classifier(eqx.Module):
@@ -125,8 +139,15 @@ class Classifier(eqx.Module):
                 noise_seed=0,  # No random noise
             ).T
         else:
-            trace = initial_state
+            trace = jax.nn.gelu(initial_state)
         return jnp.matmul(self.w_out, trace), norm_state
+
+    def weight(self):
+        return {
+            "w_in": self.w_in.copy(),
+            "w_out": self.w_out.copy(),
+            "lorenz96_sys": self.lorenz96_sys.weights(),
+        }
 
 
 def loss(model: Classifier, state, img: Array, label: Array) -> Array:
@@ -159,6 +180,7 @@ def train(
     optimizer: optax.GradientTransformation,
     train_loader: DataLoader,
     val_loader: DataLoader,
+    test_loader: DataLoader = None,
 ):
     opt_state = optimizer.init(eqx.filter(model, eqx.is_inexact_array))
 
@@ -177,24 +199,54 @@ def train(
     def val_step(model: Classifier, state, img: Array, label: Array):
         return loss(model, state, img, label)[0], accuracy(model, state, img, label)
 
-    print("Step\tTrain loss\tTrain accuracy\tValidation loss\tValidation accuracy")
+    print(
+        "Step\tTrain loss\tTrain accuracy\tValidation loss\tValidation accuracy\tTest accuracy"
+    )
     best_val_acc = 0
-    best_weights = eqx.filter(model, eqx.is_array)
+    best_weights = model.weight()
     for step in range(N_EPOCHS):
-        for img, label in tqdm(train_loader):
+        train_losses, train_accs = [], []
+        val_losses, val_accs = [], []
+        for img, label in train_loader:
             img, label = img.numpy(), label.numpy()
             model, state, opt_state, train_loss, train_acc = make_step(
                 model, state, opt_state, img, label
             )
+            train_losses.append(train_loss)
+            train_accs.append(train_acc)
         for img, label in val_loader:
             img, label = img.numpy(), label.numpy()
             val_loss, val_acc = val_step(model, state, img, label)
+            val_losses.append(val_loss)
+            val_accs.append(val_acc)
+        if test_loader:
+            test_accs = []
+            for img, label in test_loader:
+                img, label = img.numpy(), label.numpy()
+                test_acc = accuracy(model, state, img, label)
+                test_accs.append(test_acc)
+            test_accs = np.mean(test_accs)
+        else:
+            test_accs = ["N/A"]
+        train_loss, train_acc = np.mean(train_losses), np.mean(train_accs)
+        val_loss, val_acc = np.mean(val_losses), np.mean(val_accs)
         print(
-            f"{step}\t{train_loss:.6f}\t{train_acc:.6f}\t{val_loss:.6f}\t{val_acc:.6f}"
+            f"{step}\t{train_loss:.6f}\t{train_acc:.6f}\t{val_loss:.6f}\t{val_acc:.6f}\t{test_acc}"
         )
+        if WANDB:
+            wandb.log(
+                {
+                    "train_loss": train_loss,
+                    "train_acc": train_acc,
+                    "val_loss": val_loss,
+                    "val_acc": val_acc,
+                    "test_acc": test_acc,
+                }
+            )
         if val_acc > best_val_acc:
             best_val_acc = val_acc
-            best_weights = eqx.filter(model, eqx.is_array)
+            best_weights = model.weight()
+            # FIXME: Also save the state
     return best_weights
 
 
@@ -217,4 +269,5 @@ if __name__ == "__main__":
         optimizer=optax.adam(LR),
         train_loader=train_loader,
         val_loader=val_loader,
+        test_loader=test_loader if TESTING else None,
     )

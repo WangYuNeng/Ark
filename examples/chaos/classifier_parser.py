@@ -28,5 +28,7 @@ parser.add_argument(
     "--dataset", type=str, default="mnist", choices=["mnist", "fashion_mnist"]
 )
 
+parser.add_argument("--wandb", action="store_true")
+
 
 args = parser.parse_args()

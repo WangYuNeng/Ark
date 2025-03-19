@@ -73,7 +73,7 @@ def loss(model: NACSysClassifier, img: Array, label: Array) -> Array:
 
 
 def accuracy(model: NACSysClassifier, img: Array, label: Array) -> Array:
-    pred_label = jax.vmap(model, axis_name="batch", in_axes=(0, None))(img, time_info)
+    pred_label = jax.vmap(model, in_axes=(0, None))(img, time_info)
     return jnp.mean(jnp.argmax(pred_label, axis=1) == label)
 
 

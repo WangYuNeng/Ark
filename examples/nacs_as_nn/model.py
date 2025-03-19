@@ -113,7 +113,7 @@ class NACSysGrid(eqx.Module):
             switch=[],  # No switch
             args_seed=0,  # No random mismatch
             noise_seed=0,  # No random noise
-        ).T
+        ).flatten()
         return self._forward_postprocess(trace)
 
     def _build_system_cdg(self):

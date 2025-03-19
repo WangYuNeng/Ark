@@ -26,6 +26,7 @@ parser.add_argument(
 )
 
 parser.add_argument("--wandb", action="store_true")
+parser.add_argument("--tag", type=str, default="")
 
 
 args = parser.parse_args()

@@ -64,6 +64,7 @@ time_info = TimeInfo(
 if WANDB:
     wandb_run = wandb.init(
         config=vars(args),
+        tags=[args.tag] if args.tag else None,
     )
 
 

@@ -115,14 +115,19 @@ def train(
     for step in range(N_EPOCHS):
         train_losses, train_accs = [], []
         val_losses, val_accs = [], []
-        for img, label in tqdm(train_loader):
+        for i, (img, label) in tqdm(enumerate(train_loader)):
+            if i == len(train_loader) - 1:
+                # The last batch has a different shape. Drop to avoid recompilation
+                break
             img, label = img.numpy(), label.numpy()
             model, opt_state, train_loss, train_acc = make_step(
                 model, opt_state, img, label
             )
             train_losses.append(train_loss)
             train_accs.append(train_acc)
-        for img, label in val_loader:
+        for i, (img, label) in enumerate(val_loader):
+            if i == len(val_loader) - 1:
+                break
             img, label = img.numpy(), label.numpy()
             val_loss, val_acc = val_step(model, img, label)
             val_losses.append(val_loss)
@@ -133,9 +138,9 @@ def train(
                 img, label = img.numpy(), label.numpy()
                 test_acc = accuracy(model, img, label)
                 test_accs.append(test_acc)
-            test_accs = np.mean(test_accs)
+            test_acc = np.mean(test_accs)
         else:
-            test_accs = ["N/A"]
+            test_acc = ["N/A"]
         train_loss, train_acc = np.mean(train_losses), np.mean(train_accs)
         val_loss, val_acc = np.mean(val_losses), np.mean(val_accs)
         print(

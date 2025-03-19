@@ -3,7 +3,7 @@ import argparse
 parser = argparse.ArgumentParser()
 
 # System configuration
-parser.add_argument("--sys_name", type=str, choices=["OBC", "CNN", "CANN"])
+parser.add_argument("--sys_name", type=str, choices=["OBC", "CNN", "CANN", "None"])
 parser.add_argument("--input_type", type=str, choices=["initial_state", "fixed"])
 parser.add_argument("--neighbor_dist", type=int, default=2)
 parser.add_argument("--trainable_init", type=str, choices=["uniform", "normal"])

@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, Optional
 
 import equinox as eqx
 import jax
@@ -283,14 +283,12 @@ class NACSysGrid(eqx.Module):
 
 
 class NACSysClassifier(eqx.Module):
-    """Classifier model with Lorenz96 system.
+    """Classifier model with novel analog comuting system.
 
     Args:
-        n_state_var (int): # of state variables in Lorenz96 system
         n_classes (int): # of classes
         img_size (int): size of the input image
-        use_batch_norm (bool): whether to use batch normalization
-        lorenz_sys_cls (NACSysGrid): Lorenz96 system
+        nacs_sys (Optional[NACSysGrid]): analog computing system
     """
 
     w_out: Array
@@ -300,18 +298,23 @@ class NACSysClassifier(eqx.Module):
         self,
         n_classes: int,
         img_size: int,
-        nacs_sys: NACSysGrid,
+        nacs_sys: Optional[NACSysGrid],
     ):
-        assert nacs_sys.dimension == (img_size, img_size)
+        assert not nacs_sys or nacs_sys.dimension == (img_size, img_size)
         self.nacs_sys = nacs_sys
         self.w_out = jnp.array(np.random.randn(n_classes, img_size**2))
 
     def __call__(self, img: Array, time_info: TimeInfo) -> Array:
-        x = self.nacs_sys(img, time_info)
+        if self.nacs_sys:
+            x = self.nacs_sys(img, time_info)
+        else:
+            x = img.flatten()
         return jnp.matmul(self.w_out, x)
 
     def weight(self):
         return {
             "w_out": self.w_out.copy(),
-            "nacs_sys": self.nacs_sys.dynamical_sys.weights(),
+            "nacs_sys": (
+                self.nacs_sys.dynamical_sys.weights() if self.nacs_sys else None
+            ),
         }

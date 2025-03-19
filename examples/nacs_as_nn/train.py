@@ -115,7 +115,9 @@ def train(
     for step in range(N_EPOCHS):
         train_losses, train_accs = [], []
         val_losses, val_accs = [], []
-        for i, (img, label) in tqdm(enumerate(train_loader)):
+        for i, (img, label) in tqdm(
+            enumerate(train_loader), total=len(train_loader) - 1
+        ):
             if i == len(train_loader) - 1:
                 # The last batch has a different shape. Drop to avoid recompilation
                 break
@@ -163,14 +165,17 @@ def train(
 
 
 if __name__ == "__main__":
-    nacs_sys = NACSysGrid(
-        sys_name=SYS_NAME,
-        n_rows=IMG_SIZE,
-        n_cols=IMG_SIZE,
-        neighbor_dist=NEIGHBOR_DIST,
-        input_type=INPUT_TYPE,
-        trainable_initialization=TRAINABLE_INIT,
-    )
+    if SYS_NAME == "None":
+        nacs_sys = None
+    else:
+        nacs_sys = NACSysGrid(
+            sys_name=SYS_NAME,
+            n_rows=IMG_SIZE,
+            n_cols=IMG_SIZE,
+            neighbor_dist=NEIGHBOR_DIST,
+            input_type=INPUT_TYPE,
+            trainable_initialization=TRAINABLE_INIT,
+        )
     classifer = NACSysClassifier(
         n_classes=N_LABEL,
         img_size=IMG_SIZE,

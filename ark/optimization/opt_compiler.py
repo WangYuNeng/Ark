@@ -506,8 +506,10 @@ class OptCompiler:
                 "readout": readout_fn,
                 "cdg_to_initial_states": cdg_to_init_state_fn,
                 "cdg_to_switch_array": cdg_to_switch_array_fn,
-                "node_to_init_state_id": lambda node_name: node_mapping[node_name],
-                "switch_to_args_id": lambda switch: switch_map[switch],
+                "node_to_init_state_id": lambda self, node_name: node_mapping[
+                    node_name
+                ],
+                "switch_to_args_id": lambda self, switch: switch_map[switch],
             },
         )
 

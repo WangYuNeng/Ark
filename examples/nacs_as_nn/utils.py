@@ -85,5 +85,3 @@ def create_connected_grid(
                     )
 
     return cdg, nodes, edges
-
-    return cdg, nodes, edges

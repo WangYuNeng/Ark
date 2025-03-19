@@ -14,7 +14,7 @@ obc_spec = CDGSpec("obc")
 # Nonlinear network that might exhibit chaos
 # https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.61.259
 # dh_i/dt = -h_i + sum_j J_ij tanh(g*h_j)
-cann_spec = CDGSpec("nln")
+cann_spec = CDGSpec("cann")
 
 # Input that is fixed in the dynamic
 # should be stateless, setting for convenience of setting its value
@@ -24,7 +24,7 @@ Inp = NodeType(name="Inp", attrs={"order": 1})
 #### Type definitions start ####
 # Cells in CNN, z is the bias
 Neuron = NodeType(
-    name="IdealV",
+    name="Neuron",
     attrs={
         "order": 1,
         "attr_def": {
@@ -34,18 +34,19 @@ Neuron = NodeType(
     },
 )
 
-FlowE = EdgeType(
-    name="FlowE", attrs={"attr_def": {"g": AttrDef(attr_type=AnalogAttr())}}
+# k: coupling strength
+Coupling = EdgeType(
+    name="Coupling", attrs={"attr_def": {"k": AttrDef(attr_type=AnalogAttr())}}
 )
 
-cdg_types = [Neuron, Inp, FlowE]
+cdg_types = [Neuron, Inp, Coupling]
 cnn_spec.add_cdg_types(cdg_types)
 #### Type definitions end ####
 
 #### Production rules start ####
-Amat = ProdRule(FlowE, Neuron, Neuron, DST, EDGE.g * DST.act(VAR(SRC)))
-Bmat = ProdRule(FlowE, Inp, Neuron, DST, EDGE.g * VAR(SRC))
-SelfFeedback = ProdRule(FlowE, Neuron, Neuron, SELF, -VAR(SRC) + SRC.z)
+Amat = ProdRule(Coupling, Neuron, Neuron, DST, EDGE.k * DST.act(VAR(SRC)))
+Bmat = ProdRule(Coupling, Inp, Neuron, DST, EDGE.k * VAR(SRC))
+SelfFeedback = ProdRule(Coupling, Neuron, Neuron, SELF, -VAR(SRC) + SRC.z)
 prod_rules = [Bmat, SelfFeedback, Amat]
 cnn_spec.add_production_rules(prod_rules)
 #### Production rules end ####
@@ -69,10 +70,6 @@ Osc = NodeType(
     },
 )
 
-# k: coupling strength
-Coupling = EdgeType(
-    name="Coupling", attrs={"attr_def": {"k": AttrDef(attr_type=AnalogAttr())}}
-)
 cdg_types = [Osc, Coupling, Inp]
 obc_spec.add_cdg_types(cdg_types)
 #### Type definitions end ####
@@ -107,7 +104,7 @@ r_lock = ProdRule(
     -EDGE.k * SRC.lock_fn(VAR(SRC), SRC.lock_strength),
     noise_exp=1e-1,
 )
-production_rules = [r_cp_src, r_cp_dst, r_lock]
+production_rules = [r_cp_src, r_cp_dst, r_lock, inp_cp_osc]
 obc_spec.add_production_rules(production_rules)
 
 
@@ -130,7 +127,7 @@ n_cp_dst = ProdRule(
     Neuron,
     Neuron,
     DST,
-    -EDGE.k * DST.act_fn(DST.g * VAR(SRC)),
+    -EDGE.k * DST.act(DST.z * VAR(SRC)),
 )  # The J matrix is not symmetric, the "k" value is not shared and need edges
 # for source to destination and destination to source, respectively (unlike OBC)
 cp_self = ProdRule(
@@ -145,7 +142,7 @@ inp_cp_neuron = ProdRule(
     Inp,
     Neuron,
     DST,
-    -EDGE.k * DST.act_fn(DST.g * VAR(SRC)),
+    -EDGE.k * DST.act(DST.z * VAR(SRC)),
 )
 production_rules = [n_cp_dst, cp_self, inp_cp_neuron]
 cann_spec.add_production_rules(production_rules)

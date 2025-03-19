@@ -150,14 +150,12 @@ class BaseAnalogCkt(eqx.Module):
 
         raise NotImplementedError
 
-    @staticmethod
-    def node_to_init_state_id(node_name: str) -> int:
+    def node_to_init_state_id(self, node_name: str) -> int:
         """Map the node name to the initial state id."""
 
         raise NotImplementedError
 
-    @staticmethod
-    def switch_to_args_id(switch: int) -> int:
+    def switch_to_args_id(self, switch: int) -> int:
         """Map the switch value to the args id."""
 
         raise NotImplementedError

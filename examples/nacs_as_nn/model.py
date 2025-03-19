@@ -50,7 +50,9 @@ class NACSysGrid(eqx.Module):
         sys_name (str): name of the system, one of "CNN", "OBC", "CANN"
         n_rows (int): # of rows in the grid
         n_cols (int): # of rows in the grid
-        neighbor_dist (int): distance of the neighboring connection
+        neighbor_dist (int): distance of the neighboring connection, If the sid length is an even number,
+            the value specifies the side length of the sqaure; otherwise, the value specifies the half diagonal
+            length of the square.
         input_type (str): type of input, one of "fixed", "initial_state"
         solver (AbstractSolver, optional): solver for numerical integration. Defaults to Tsit5().
         trainable_initialization (str, optional): intialization method for the trainable parmeters.

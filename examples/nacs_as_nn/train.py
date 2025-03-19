@@ -105,7 +105,7 @@ def train(
 
     @eqx.filter_jit
     def val_step(model: NACSysClassifier, img: Array, label: Array):
-        return loss(model, img, label)[0], accuracy(model, img, label)
+        return loss(model, img, label), accuracy(model, img, label)
 
     print(
         "Step\tTrain loss\tTrain accuracy\tValidation loss\tValidation accuracy\tTest accuracy"

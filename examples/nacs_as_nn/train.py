@@ -68,16 +68,12 @@ if WANDB:
 
 
 def loss(model: NACSysClassifier, img: Array, label: Array) -> Array:
-    pred_label = jax.vmap(model, in_axes=(0, None, None), out_axes=(0, None))(
-        img, time_info
-    )
+    pred_label = jax.vmap(model, in_axes=(0, None))(img, time_info)
     return cross_entropy(pred_label, label)
 
 
-def accuracy(model: NACSysClassifier, state, img: Array, label: Array) -> Array:
-    pred_label, _ = jax.vmap(
-        model, axis_name="batch", in_axes=(0, None, None), out_axes=(0, None)
-    )(img, time_info, state)
+def accuracy(model: NACSysClassifier, img: Array, label: Array) -> Array:
+    pred_label = jax.vmap(model, axis_name="batch", in_axes=(0, None))(img, time_info)
     return jnp.mean(jnp.argmax(pred_label, axis=1) == label)
 
 
@@ -162,7 +158,6 @@ def train(
 
 
 if __name__ == "__main__":
-
     nacs_sys = NACSysGrid(
         sys_name=SYS_NAME,
         n_rows=IMG_SIZE,

@@ -9,8 +9,8 @@ normalize = torchvision.transforms.Compose(
         torchvision.transforms.ToTensor(),
         # Normalize to [-1, 1]
         torchvision.transforms.Normalize((0.5,), (0.5,)),
-        # Flatten
-        torchvision.transforms.Lambda(lambda x: x.view(-1)),
+        # Squeez the channel dimension
+        torchvision.transforms.Lambda(lambda x: x.squeeze(0)),
         # Convert to float64
         torchvision.transforms.Lambda(lambda x: x.double()),
     ]

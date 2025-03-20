@@ -10,7 +10,12 @@ parser.add_argument("--trainable_init", type=str, choices=["uniform", "normal"])
 
 # Simulation parameters
 parser.add_argument("--readout_time", type=float, default=1.0)
-parser.add_argument("--n_time_points", type=int, default=20)
+parser.add_argument(
+    "--dt0",
+    type=int,
+    default=0.05,
+    help="Initial time step size.",
+)
 
 # Training parameters
 parser.add_argument("--seed", type=int, default=0)

@@ -1,8 +1,13 @@
+import random
+
+import diffrax
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
 import numpy as np
 import optax
+import torch
 from classifier_dataloader import get_dataloader
 from classifier_parser import args
 from jaxtyping import Array, PyTree
@@ -17,6 +22,8 @@ jax.config.update("jax_enable_x64", True)
 
 SEED = args.seed
 np.random.seed(SEED)
+random.seed(SEED + 1)
+torch.manual_seed(SEED + 2)
 
 SYS_NAME = args.sys_name
 INPUT_TYPE = args.input_type
@@ -24,7 +31,7 @@ NEIGHBOR_DIST = args.neighbor_dist
 TRAINABLE_INIT = args.trainable_init
 
 READOUT_TIME = args.readout_time
-N_TIME_POINTS = args.n_time_points
+DT0 = args.dt0
 
 N_EPOCHS = args.n_epochs
 BATCH_SIZE = args.batch_size
@@ -53,11 +60,10 @@ WANDB = args.wandb
 IMG_SIZE = next(iter(train_loader))[0].shape[1]
 N_LABEL = 10  # 10 classes for MNIST and FashionMNIST
 
-time_points = np.linspace(0, READOUT_TIME, N_TIME_POINTS, endpoint=True)
 time_info = TimeInfo(
     t0=0,
     t1=READOUT_TIME,
-    dt0=READOUT_TIME / N_TIME_POINTS,
+    dt0=DT0,
     saveat=[READOUT_TIME],
 )
 

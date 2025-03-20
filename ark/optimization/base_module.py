@@ -55,6 +55,9 @@ class BaseAnalogCkt(eqx.Module):
         gumbel_temp: jax.typing.DTypeLike = 1,
         hard_gumbel: bool = False,
         max_steps: int = 4096,
+        stepsize_controller: diffrax.AbstractAdaptiveStepSizeController = diffrax.PIDController(
+            rtol=1e-3, atol=1e-6
+        ),
     ):
         """The differentiable forward pass of the circuit simulation.
 
@@ -81,6 +84,7 @@ class BaseAnalogCkt(eqx.Module):
                 dt0=time_info.dt0,
                 y0=initial_state,
                 saveat=diffrax.SaveAt(ts=time_info.saveat),
+                stepsize_controller=stepsize_controller,
                 args=args,
                 max_steps=max_steps,
             )
@@ -102,6 +106,7 @@ class BaseAnalogCkt(eqx.Module):
                 dt0=time_info.dt0,
                 y0=initial_state,
                 saveat=diffrax.SaveAt(ts=time_info.saveat),
+                stepsize_controller=stepsize_controller,
                 args=args,
                 max_steps=max_steps,
             )

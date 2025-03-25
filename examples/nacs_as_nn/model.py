@@ -113,7 +113,7 @@ class NACSysGrid(eqx.Module):
             switch=[],  # No switch
             args_seed=0,  # No random mismatch
             noise_seed=0,  # No random noise
-        ).flatten()
+        ).reshape(self.dimension)
         return self._forward_postprocess(trace)
 
     def _build_system_cdg(self):
@@ -291,29 +291,58 @@ class NACSysClassifier(eqx.Module):
         nacs_sys (Optional[NACSysGrid]): analog computing system
     """
 
-    w_out: Array
+    batch_norm_hidden: Optional[eqx.nn.BatchNorm]
+    fc_out: eqx.nn.Linear
+    fc_hidden: eqx.nn.Linear
     nacs_sys: NACSysGrid
+    img_downsample: int
 
     def __init__(
         self,
         n_classes: int,
         img_size: int,
         nacs_sys: Optional[NACSysGrid],
+        hidden_size: int,
+        key: jax.random.PRNGKey,
+        img_downsample: int = 1,
+        use_batch_norm: bool = False,
     ):
         assert not nacs_sys or nacs_sys.dimension == (img_size, img_size)
+        assert (
+            img_size % img_downsample == 0
+        ), "img_size must be divisible by downsample ratio"
+        key1, key2 = jax.random.split(key, 2)
         self.nacs_sys = nacs_sys
-        self.w_out = jnp.array(np.random.randn(n_classes, img_size**2))
+        img_dim = img_size // img_downsample
+        self.img_downsample = img_downsample
+        self.fc_hidden = eqx.nn.Linear(
+            img_dim**2,
+            hidden_size,
+            key=key1,
+            use_bias=False,
+        )
+        self.fc_out = eqx.nn.Linear(hidden_size, n_classes, key=key2, use_bias=False)
+        self.batch_norm_hidden = (
+            eqx.nn.BatchNorm(input_size=hidden_size, axis_name="batch")
+            if use_batch_norm
+            else None
+        )
 
-    def __call__(self, img: Array, time_info: TimeInfo) -> Array:
+    def __call__(
+        self, x: Array, state: eqx.nn.State, time_info: TimeInfo
+    ) -> tuple[Array, eqx.nn.State]:
         if self.nacs_sys:
-            x = self.nacs_sys(img, time_info)
-        else:
-            x = img.flatten()
-        return jnp.matmul(self.w_out, x)
+            x = self.nacs_sys(x, time_info)
+        x = self.fc_hidden(x[:: self.img_downsample, :: self.img_downsample].flatten())
+        x = jax.nn.relu(x)
+        if self.batch_norm_hidden:
+            x, state = self.batch_norm_hidden(x, state)
+        return self.fc_out(x), state
 
     def weight(self):
         return {
-            "w_out": self.w_out.copy(),
+            "fc_hidden": self.fc_hidden.weight,
+            "fc_out": self.fc_out.weight,
             "nacs_sys": (
                 self.nacs_sys.dynamical_sys.weights() if self.nacs_sys else None
             ),

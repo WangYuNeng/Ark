@@ -38,6 +38,9 @@ BATCH_SIZE = args.batch_size
 LR = args.lr
 VALIDATION_SPLIT = args.validation_split
 TESTING = args.testing
+HIDDEN_SIZE = args.hidden_size
+IMG_DOWNSAMPLE = args.image_downsample
+BATCH_NORM = args.batch_norm
 
 DATASET = args.dataset
 train_loader, val_loader = get_dataloader(
@@ -74,13 +77,21 @@ if WANDB:
     )
 
 
-def loss(model: NACSysClassifier, img: Array, label: Array) -> Array:
-    pred_label = jax.vmap(model, in_axes=(0, None))(img, time_info)
-    return cross_entropy(pred_label, label)
+def loss(
+    model: NACSysClassifier, state: eqx.nn.State, img: Array, label: Array
+) -> Array:
+    pred_label, state = jax.vmap(
+        model, axis_name="batch", in_axes=(0, None, None), out_axes=(0, None)
+    )(img, state, time_info)
+    return cross_entropy(pred_label, label), state
 
 
-def accuracy(model: NACSysClassifier, img: Array, label: Array) -> Array:
-    pred_label = jax.vmap(model, in_axes=(0, None))(img, time_info)
+def accuracy(
+    model: NACSysClassifier, state: eqx.nn.State, img: Array, label: Array
+) -> Array:
+    pred_label, _ = jax.vmap(
+        model, axis_name="batch", in_axes=(0, None, None), out_axes=(0, None)
+    )(img, state, time_info)
     return jnp.mean(jnp.argmax(pred_label, axis=1) == label)
 
 
@@ -96,6 +107,7 @@ def cross_entropy(y_pred: Array, y_true: Array) -> Array:
 
 def train(
     model: NACSysClassifier,
+    state: eqx.nn.State,
     optimizer: optax.GradientTransformation,
     train_loader: DataLoader,
     val_loader: DataLoader,
@@ -104,15 +116,25 @@ def train(
     opt_state = optimizer.init(eqx.filter(model, eqx.is_inexact_array))
 
     @eqx.filter_jit
-    def make_step(model: NACSysClassifier, opt_state: PyTree, img: Array, label: Array):
-        loss_val, grads = eqx.filter_value_and_grad(loss)(model, img, label)
+    def make_step(
+        model: NACSysClassifier,
+        state: eqx.nn.State,
+        opt_state: PyTree,
+        img: Array,
+        label: Array,
+    ):
+        (loss_val, state), grads = eqx.filter_value_and_grad(loss, has_aux=True)(
+            model, state, img, label
+        )
         updates, opt_state = optimizer.update(grads, opt_state)
         model = eqx.apply_updates(model, updates)
-        return model, opt_state, loss_val, accuracy(model, img, label)
+        return model, state, opt_state, loss_val, accuracy(model, state, img, label)
 
     @eqx.filter_jit
-    def val_step(model: NACSysClassifier, img: Array, label: Array):
-        return loss(model, img, label), accuracy(model, img, label)
+    def val_step(
+        model: NACSysClassifier, state: eqx.nn.State, img: Array, label: Array
+    ):
+        return loss(model, state, img, label)[0], accuracy(model, state, img, label)
 
     print(
         "Step\tTrain loss\tTrain accuracy\tValidation loss\tValidation accuracy\tTest accuracy"
@@ -129,8 +151,8 @@ def train(
                 # The last batch has a different shape. Drop to avoid recompilation
                 break
             img, label = img.numpy(), label.numpy()
-            model, opt_state, train_loss, train_acc = make_step(
-                model, opt_state, img, label
+            model, state, opt_state, train_loss, train_acc = make_step(
+                model, state, opt_state, img, label
             )
             train_losses.append(train_loss)
             train_accs.append(train_acc)
@@ -138,14 +160,16 @@ def train(
             if i == len(val_loader) - 1:
                 break
             img, label = img.numpy(), label.numpy()
-            val_loss, val_acc = val_step(model, img, label)
+            val_loss, val_acc = val_step(model, state, img, label)
             val_losses.append(val_loss)
             val_accs.append(val_acc)
         if test_loader:
             test_accs = []
             for img, label in test_loader:
+                if i == len(test_loader) - 1:
+                    break
                 img, label = img.numpy(), label.numpy()
-                test_acc = accuracy(model, img, label)
+                _, test_acc = val_step(model, state, img, label)
                 test_accs.append(test_acc)
             test_acc = np.mean(test_accs)
         else:
@@ -183,14 +207,26 @@ if __name__ == "__main__":
             input_type=INPUT_TYPE,
             trainable_initialization=TRAINABLE_INIT,
         )
-    classifer = NACSysClassifier(
+    classifer, state = eqx.nn.make_with_state(NACSysClassifier)(
         n_classes=N_LABEL,
         img_size=IMG_SIZE,
         nacs_sys=nacs_sys,
+        hidden_size=HIDDEN_SIZE,
+        img_downsample=IMG_DOWNSAMPLE,
+        use_batch_norm=BATCH_NORM,
+        key=jax.random.PRNGKey(SEED),
     )
+    # FIXME: somehow make_with_state produce states in float32, causing
+    # incompatibility issue later. For now, manually convert the state to float64
+    if BATCH_NORM:
+        state._state[1] = (
+            state._state[1][0].astype("float64"),
+            state._state[1][1].astype("float64"),
+        )
 
     train(
         model=classifer,
+        state=state,
         optimizer=optax.adam(LR),
         train_loader=train_loader,
         val_loader=val_loader,

@@ -19,6 +19,9 @@ parser.add_argument(
 
 # Training parameters
 parser.add_argument("--seed", type=int, default=0)
+parser.add_argument("--hidden_size", type=int, default=128)
+parser.add_argument("--image_downsample", type=int, default=1)
+parser.add_argument("--batch_norm", action="store_true")
 parser.add_argument("--n_epochs", type=int, default=32)
 parser.add_argument("--batch_size", type=int, default=512)
 parser.add_argument("--lr", type=float, default=0.01)

@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import optax
 import torch
+import wandb
 from classifier_dataloader import get_dataloader
 from classifier_parser import args
 from jaxtyping import Array, PyTree
@@ -15,7 +16,6 @@ from model import NACSysClassifier, NACSysGrid
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-import wandb
 from ark.optimization.base_module import TimeInfo
 
 jax.config.update("jax_enable_x64", True)
@@ -41,6 +41,7 @@ TESTING = args.testing
 HIDDEN_SIZE = args.hidden_size
 IMG_DOWNSAMPLE = args.image_downsample
 BATCH_NORM = args.batch_norm
+EARLY_STOPPING = args.early_stopping
 
 DATASET = args.dataset
 train_loader, val_loader = get_dataloader(
@@ -141,6 +142,7 @@ def train(
     )
     best_val_acc = 0
     best_weights = model.weight()
+    no_improvement = 0
     for step in range(N_EPOCHS):
         train_losses, train_accs = [], []
         val_losses, val_accs = [], []
@@ -192,6 +194,11 @@ def train(
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             best_weights = model.weight()
+            no_improvement = 0
+        else:
+            no_improvement += 1
+            if no_improvement == EARLY_STOPPING:
+                break
     return best_weights
 
 

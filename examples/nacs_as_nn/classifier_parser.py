@@ -26,6 +26,7 @@ parser.add_argument("--n_epochs", type=int, default=32)
 parser.add_argument("--batch_size", type=int, default=512)
 parser.add_argument("--lr", type=float, default=0.01)
 parser.add_argument("--validation_split", type=float, default=0.1)
+parser.add_argument("--early_stopping", type=int, default=100)
 parser.add_argument("--testing", action="store_true")
 
 # Data parameters

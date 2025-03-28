@@ -48,6 +48,8 @@ class NACSysGrid(eqx.Module):
 
     Args:
         sys_name (str): name of the system, one of "CNN", "OBC", "CANN"
+        mismatch_rstd (float): standard deviation for the parameter random mismatch. Will affect the bias `z`
+            and the coupling strength `k` of the nodes and edges respectively.
         n_rows (int): # of rows in the grid
         n_cols (int): # of rows in the grid
         neighbor_dist (int): distance of the neighboring connection, If the sid length is an even number,
@@ -65,10 +67,12 @@ class NACSysGrid(eqx.Module):
     dimension: tuple[int, int]
     initial_state_mapping: list[int]
     neighbor_dist: int
+    mismatch_rstd: float
 
     def __init__(
         self,
         sys_name: Literal["CNN", "OBC", "CANN"],
+        mismatch_rstd: float,
         n_rows: int,
         n_cols: int,
         neighbor_dist: int,
@@ -77,6 +81,7 @@ class NACSysGrid(eqx.Module):
         trainable_initialization: Literal["uniform", "normal"] = "uniform",
     ):
         self.sys_name = sys_name
+        self.mismatch_rstd = mismatch_rstd
         self.input_type = input_type
         self.dimension = (n_rows, n_cols)
         self.neighbor_dist = neighbor_dist
@@ -105,13 +110,13 @@ class NACSysGrid(eqx.Module):
             nodes, input_nodes_edges
         )
 
-    def __call__(self, x: Array, time_info: TimeInfo) -> Array:
+    def __call__(self, x: Array, time_info: TimeInfo, args_seed: int) -> Array:
         x = self._forward_preprocess(x)
         trace = self.dynamical_sys(
             time_info=time_info,
             initial_state=x,
             switch=[],  # No switch
-            args_seed=0,  # No random mismatch
+            args_seed=args_seed,  # No random mismatch
             noise_seed=0,  # No random noise
         ).reshape(self.dimension)
         return self._forward_postprocess(trace)
@@ -119,12 +124,18 @@ class NACSysGrid(eqx.Module):
     def _build_system_cdg(self):
         sys_name = self.sys_name
         if sys_name == "CNN" or sys_name == "CANN":
-            node_type = spec.Neuron
+            if self.mismatch_rstd == 0:
+                node_type = spec.Neuron
+                edge_type = spec.Coupling
+            else:
+                node_type = spec.Neuron_mismatched
+                edge_type = spec.Coupling_mismatched
+                node_type.attr_def["z"].rstd = self.mismatch_rstd
+                edge_type.attr_def["k"].rstd = self.mismatch_rstd
             node_attrs = {
                 "z": 0.0,
                 "act": one_clipping if sys_name == "CNN" else wrapped_tanh,
             }
-            edge_type = spec.Coupling
             edge_attrs = {"k": 0.0}
             bidirectional_edge = False
             cdg_spec = spec.cnn_spec if sys_name == "CNN" else spec.cann_spec
@@ -329,10 +340,10 @@ class NACSysClassifier(eqx.Module):
         )
 
     def __call__(
-        self, x: Array, state: eqx.nn.State, time_info: TimeInfo
+        self, x: Array, state: eqx.nn.State, time_info: TimeInfo, mismatch_seed: int
     ) -> tuple[Array, eqx.nn.State]:
         if self.nacs_sys:
-            x = self.nacs_sys(x, time_info)
+            x = self.nacs_sys(x, time_info, mismatch_seed)
         x = self.fc_hidden(x[:: self.img_downsample, :: self.img_downsample].flatten())
         x = jax.nn.relu(x)
         if self.batch_norm_hidden:

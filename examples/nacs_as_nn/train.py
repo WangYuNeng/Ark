@@ -26,6 +26,7 @@ random.seed(SEED + 1)
 torch.manual_seed(SEED + 2)
 
 SYS_NAME = args.sys_name
+MISMATCH_RSTD = args.mismatch_rstd
 INPUT_TYPE = args.input_type
 NEIGHBOR_DIST = args.neighbor_dist
 TRAINABLE_INIT = args.trainable_init
@@ -87,20 +88,28 @@ if WANDB:
 
 
 def loss(
-    model: NACSysClassifier, state: eqx.nn.State, img: Array, label: Array
+    model: NACSysClassifier,
+    state: eqx.nn.State,
+    img: Array,
+    label: Array,
+    mismatch_seeds: Array,
 ) -> Array:
     pred_label, state = jax.vmap(
-        model, axis_name="batch", in_axes=(0, None, None), out_axes=(0, None)
-    )(img, state, time_info)
+        model, axis_name="batch", in_axes=(0, None, None, 0), out_axes=(0, None)
+    )(img, state, time_info, mismatch_seeds)
     return cross_entropy(pred_label, label), state
 
 
 def accuracy(
-    model: NACSysClassifier, state: eqx.nn.State, img: Array, label: Array
+    model: NACSysClassifier,
+    state: eqx.nn.State,
+    img: Array,
+    label: Array,
+    mismatch_seeds: Array,
 ) -> Array:
     pred_label, _ = jax.vmap(
-        model, axis_name="batch", in_axes=(0, None, None), out_axes=(0, None)
-    )(img, state, time_info)
+        model, axis_name="batch", in_axes=(0, None, None, 0), out_axes=(0, None)
+    )(img, state, time_info, mismatch_seeds)
     return jnp.mean(jnp.argmax(pred_label, axis=1) == label)
 
 
@@ -131,19 +140,32 @@ def train(
         opt_state: PyTree,
         img: Array,
         label: Array,
+        mismatch_seeds: Array,
     ):
         (loss_val, state), grads = eqx.filter_value_and_grad(loss, has_aux=True)(
-            model, state, img, label
+            model, state, img, label, mismatch_seeds
         )
         updates, opt_state = optimizer.update(grads, opt_state)
         model = eqx.apply_updates(model, updates)
-        return model, state, opt_state, loss_val, accuracy(model, state, img, label)
+        return (
+            model,
+            state,
+            opt_state,
+            loss_val,
+            accuracy(model, state, img, label, mismatch_seeds),
+        )
 
     @eqx.filter_jit
     def val_step(
-        model: NACSysClassifier, state: eqx.nn.State, img: Array, label: Array
+        model: NACSysClassifier,
+        state: eqx.nn.State,
+        img: Array,
+        label: Array,
+        mismatch_seeds: Array,
     ):
-        return loss(model, state, img, label)[0], accuracy(model, state, img, label)
+        return loss(model, state, img, label, mismatch_seeds)[0], accuracy(
+            model, state, img, label, mismatch_seeds
+        )
 
     print(
         "Step\tTrain loss\tTrain accuracy\tValidation loss\tValidation accuracy\tTest accuracy"
@@ -161,8 +183,9 @@ def train(
                 # The last batch has a different shape. Drop to avoid recompilation
                 break
             img, label = img.numpy(), label.numpy()
+            mismatch_seeds = np.random.randint(0, 2**32, size=(img.shape[0],))
             model, state, opt_state, train_loss, train_acc = make_step(
-                model, state, opt_state, img, label
+                model, state, opt_state, img, label, mismatch_seeds
             )
             train_losses.append(train_loss)
             train_accs.append(train_acc)
@@ -170,7 +193,8 @@ def train(
             if i == len(val_loader) - 1:
                 break
             img, label = img.numpy(), label.numpy()
-            val_loss, val_acc = val_step(model, state, img, label)
+            mismatch_seeds = np.random.randint(0, 2**32, size=(img.shape[0],))
+            val_loss, val_acc = val_step(model, state, img, label, mismatch_seeds)
             val_losses.append(val_loss)
             val_accs.append(val_acc)
         if test_loader:
@@ -179,7 +203,8 @@ def train(
                 if i == len(test_loader) - 1:
                     break
                 img, label = img.numpy(), label.numpy()
-                _, test_acc = val_step(model, state, img, label)
+                mismatch_seeds = np.random.randint(0, 2**32, size=(img.shape[0],))
+                _, test_acc = val_step(model, state, img, label, mismatch_seeds)
                 test_accs.append(test_acc)
             test_acc = np.mean(test_accs)
         else:
@@ -223,6 +248,7 @@ if __name__ == "__main__":
     else:
         nacs_sys = NACSysGrid(
             sys_name=SYS_NAME,
+            mismatch_rstd=MISMATCH_RSTD,
             n_rows=IMG_SIZE,
             n_cols=IMG_SIZE,
             neighbor_dist=NEIGHBOR_DIST,

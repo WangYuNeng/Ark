@@ -7,6 +7,12 @@ parser.add_argument(
     "--sys_name", type=str, choices=["OBC", "CNN", "CANN", "None"], required=True
 )
 parser.add_argument(
+    "--mismatch_rstd",
+    type=float,
+    default=0.0,
+    help="Relative standard deviation for mismatch.",
+)
+parser.add_argument(
     "--input_type", type=str, choices=["initial_state", "fixed"], required=True
 )
 parser.add_argument("--neighbor_dist", type=int, default=2)

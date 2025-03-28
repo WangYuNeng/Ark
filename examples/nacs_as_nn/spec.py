@@ -1,4 +1,4 @@
-from ark.specification.attribute_def import AttrDef
+from ark.specification.attribute_def import AttrDef, AttrDefMismatch
 from ark.specification.attribute_type import AnalogAttr, FunctionAttr
 from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule
@@ -34,9 +34,28 @@ Neuron = NodeType(
     },
 )
 
+Neuron_mismatched = NodeType(
+    name="Neuron_mismatched",
+    bases=(Neuron,),  # Inherit from Neuron
+    attrs={
+        "order": 1,
+        "attr_def": {
+            "z": AttrDefMismatch(attr_type=AnalogAttr(), rstd=0.1),
+            "act": AttrDef(attr_type=FunctionAttr(nargs=1)),
+        },
+    },
+)
+
+
 # k: coupling strength
 Coupling = EdgeType(
     name="Coupling", attrs={"attr_def": {"k": AttrDef(attr_type=AnalogAttr())}}
+)
+
+Coupling_mismatched = EdgeType(
+    name="Coupling_mismatched",
+    bases=(Coupling,),  # Inherit from Coupling
+    attrs={"attr_def": {"k": AttrDefMismatch(attr_type=AnalogAttr(), rstd=0.1)}},
 )
 
 cdg_types = [Neuron, Inp, Coupling]

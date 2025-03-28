@@ -3,10 +3,16 @@ import argparse
 parser = argparse.ArgumentParser()
 
 # System configuration
-parser.add_argument("--sys_name", type=str, choices=["OBC", "CNN", "CANN", "None"])
-parser.add_argument("--input_type", type=str, choices=["initial_state", "fixed"])
+parser.add_argument(
+    "--sys_name", type=str, choices=["OBC", "CNN", "CANN", "None"], required=True
+)
+parser.add_argument(
+    "--input_type", type=str, choices=["initial_state", "fixed"], required=True
+)
 parser.add_argument("--neighbor_dist", type=int, default=2)
-parser.add_argument("--trainable_init", type=str, choices=["uniform", "normal"])
+parser.add_argument(
+    "--trainable_init", type=str, choices=["uniform", "normal"], required=True
+)
 
 # Simulation parameters
 parser.add_argument("--readout_time", type=float, default=1.0)
@@ -36,6 +42,9 @@ parser.add_argument(
 
 parser.add_argument("--wandb", action="store_true")
 parser.add_argument("--tag", type=str, default="")
+parser.add_argument("--run_name", type=str, default="")
+parser.add_argument("--load_path", type=str, default="")
+parser.add_argument("--save_path", type=str, default="")
 
 
 args = parser.parse_args()

@@ -59,10 +59,17 @@ test_loader, _ = get_dataloader(
     validation_split=0,
 )
 WANDB = args.wandb
-
+RUN_NAME = args.run_name
 # get the image size
 IMG_SIZE = next(iter(train_loader))[0].shape[1]
 N_LABEL = 10  # 10 classes for MNIST and FashionMNIST
+SAVE_PATH = args.save_path
+LOAD_PATH = args.load_path
+
+if SAVE_PATH and BATCH_NORM or LOAD_PATH and BATCH_NORM:
+    raise NotImplementedError(
+        "Batch normalization is not supported with saving/loading model."
+    )
 
 time_info = TimeInfo(
     t0=0,
@@ -75,6 +82,7 @@ if WANDB:
     wandb_run = wandb.init(
         config=vars(args),
         tags=[args.tag] if args.tag else None,
+        name=RUN_NAME if RUN_NAME else None,
     )
 
 
@@ -141,7 +149,7 @@ def train(
         "Step\tTrain loss\tTrain accuracy\tValidation loss\tValidation accuracy\tTest accuracy"
     )
     best_val_acc = 0
-    best_weights = model.weight()
+    test_acc_at_best_val = 0
     no_improvement = 0
     for step in range(N_EPOCHS):
         train_losses, train_accs = [], []
@@ -193,13 +201,20 @@ def train(
             )
         if val_acc > best_val_acc:
             best_val_acc = val_acc
-            best_weights = model.weight()
+            test_acc_at_best_val = test_acc
             no_improvement = 0
+
+            if SAVE_PATH:
+                eqx.tree_serialise_leaves(SAVE_PATH, model)
         else:
             no_improvement += 1
             if no_improvement == EARLY_STOPPING:
                 break
-    return best_weights
+    if WANDB:
+        wandb.log(
+            {"best_val_acc": best_val_acc, "test_acc_at_best_val": test_acc_at_best_val}
+        )
+    return
 
 
 if __name__ == "__main__":
@@ -223,6 +238,10 @@ if __name__ == "__main__":
         use_batch_norm=BATCH_NORM,
         key=jax.random.PRNGKey(SEED),
     )
+
+    if LOAD_PATH:
+        classifer = eqx.tree_deserialise_leaves(LOAD_PATH, classifer)
+
     # FIXME: somehow make_with_state produce states in float32, causing
     # incompatibility issue later. For now, manually convert the state to float64
     if BATCH_NORM:

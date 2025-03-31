@@ -43,6 +43,7 @@ HIDDEN_SIZE = args.hidden_size
 IMG_DOWNSAMPLE = args.image_downsample
 BATCH_NORM = args.batch_norm
 EARLY_STOPPING = args.early_stopping
+TEST_ONLY = args.test_only
 
 DATASET = args.dataset
 train_loader, val_loader = get_dataloader(
@@ -173,6 +174,18 @@ def train(
     best_val_acc = 0
     test_acc_at_best_val = 0
     no_improvement = 0
+
+    if TEST_ONLY:
+        test_accs = []
+        for i, (img, label) in tqdm(enumerate(test_loader), total=len(test_loader)):
+            img, label = img.numpy(), label.numpy()
+            mismatch_seeds = np.random.randint(0, 2**32, size=(img.shape[0],))
+            _, test_acc = val_step(model, state, img, label, mismatch_seeds)
+            test_accs.append(test_acc)
+        print(f"Test accuracy: {np.mean(test_accs)}")
+        if WANDB:
+            wandb.log({"test_acc": np.mean(test_accs)})
+        return
     for step in range(N_EPOCHS):
         train_losses, train_accs = [], []
         val_losses, val_accs = [], []

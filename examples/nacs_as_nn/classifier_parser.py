@@ -1,0 +1,57 @@
+import argparse
+
+parser = argparse.ArgumentParser()
+
+# System configuration
+parser.add_argument(
+    "--sys_name", type=str, choices=["OBC", "CNN", "CANN", "None"], required=True
+)
+parser.add_argument(
+    "--mismatch_rstd",
+    type=float,
+    default=0.0,
+    help="Relative standard deviation for mismatch.",
+)
+parser.add_argument(
+    "--input_type", type=str, choices=["initial_state", "fixed"], required=True
+)
+parser.add_argument("--neighbor_dist", type=int, default=2)
+parser.add_argument(
+    "--trainable_init", type=str, choices=["uniform", "normal"], required=True
+)
+
+# Simulation parameters
+parser.add_argument("--readout_time", type=float, default=1.0)
+parser.add_argument(
+    "--dt0",
+    type=int,
+    default=0.05,
+    help="Initial time step size.",
+)
+
+# Training parameters
+parser.add_argument("--seed", type=int, default=0)
+parser.add_argument("--hidden_size", type=int, default=128)
+parser.add_argument("--image_downsample", type=int, default=1)
+parser.add_argument("--batch_norm", action="store_true")
+parser.add_argument("--n_epochs", type=int, default=32)
+parser.add_argument("--batch_size", type=int, default=512)
+parser.add_argument("--lr", type=float, default=0.01)
+parser.add_argument("--validation_split", type=float, default=0.1)
+parser.add_argument("--early_stopping", type=int, default=100)
+parser.add_argument("--testing", action="store_true")
+parser.add_argument("--test_only", action="store_true")
+
+# Data parameters
+parser.add_argument(
+    "--dataset", type=str, default="mnist", choices=["mnist", "fashion_mnist"]
+)
+
+parser.add_argument("--wandb", action="store_true")
+parser.add_argument("--tag", type=str, default="")
+parser.add_argument("--run_name", type=str, default="")
+parser.add_argument("--load_path", type=str, default="")
+parser.add_argument("--save_path", type=str, default="")
+
+
+args = parser.parse_args()

@@ -54,6 +54,10 @@ class BaseAnalogCkt(eqx.Module):
         noise_seed: jax.typing.DTypeLike,
         gumbel_temp: jax.typing.DTypeLike = 1,
         hard_gumbel: bool = False,
+        max_steps: int = 4096,
+        stepsize_controller: diffrax.AbstractAdaptiveStepSizeController = diffrax.PIDController(
+            rtol=1e-3, atol=1e-6
+        ),
     ):
         """The differentiable forward pass of the circuit simulation.
 
@@ -80,7 +84,9 @@ class BaseAnalogCkt(eqx.Module):
                 dt0=time_info.dt0,
                 y0=initial_state,
                 saveat=diffrax.SaveAt(ts=time_info.saveat),
+                stepsize_controller=stepsize_controller,
                 args=args,
+                max_steps=max_steps,
             )
         else:
             ode_term = diffrax.ODETerm(self.ode_fn)
@@ -100,7 +106,9 @@ class BaseAnalogCkt(eqx.Module):
                 dt0=time_info.dt0,
                 y0=initial_state,
                 saveat=diffrax.SaveAt(ts=time_info.saveat),
+                stepsize_controller=stepsize_controller,
                 args=args,
+                max_steps=max_steps,
             )
 
         return self.readout(y=solution.ys)
@@ -144,6 +152,16 @@ class BaseAnalogCkt(eqx.Module):
     @staticmethod
     def cdg_to_switch_array(cdg) -> list[int]:
         """Extract the switch values from a CDG."""
+
+        raise NotImplementedError
+
+    def node_to_init_state_id(self, node_name: str) -> int:
+        """Map the node name to the initial state id."""
+
+        raise NotImplementedError
+
+    def switch_to_args_id(self, switch: int) -> int:
+        """Map the switch value to the args id."""
 
         raise NotImplementedError
 

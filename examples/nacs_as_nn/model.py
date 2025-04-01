@@ -100,6 +100,9 @@ class NACSysGrid(eqx.Module):
             vectorize=True,
             normalize_weight=False,
             do_clipping=False,
+            # TODO: Figure out why aggregate line causes system w/ mismatched to run faster but
+            # system w/o mismatches to run slower
+            aggregate_args_lines=True if mismatch_rstd else False,
         )
         self.dynamical_sys = sys_cls(
             init_trainable=trainable_mgr.get_initial_vals(),

@@ -7,6 +7,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
+import wandb
 from diffrax import Heun
 from jaxtyping import PyTree
 from pattern_recog_dataloader import NUMBERS_5x3, NUMBERS_10x6, dataloader, dataloader2
@@ -29,7 +30,6 @@ from spec_optimization import (
     obc_spec,
 )
 
-import wandb
 from ark.cdg.cdg import CDG
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
@@ -137,6 +137,11 @@ if LOAD_WEIGHT and WEIGHT_INIT:
 
 TESTING = args.test
 TEST_DATA = None
+WEIGGT_DROP_RATIO = args.weight_drop_ratio
+
+if WEIGGT_DROP_RATIO > 0:
+    assert TESTING, "Weight dropping is only for testing"
+    assert not WEIGHT_BITS, "Weight dropping is not supported for digital weight"
 
 time_info = TimeInfo(
     t0=0,
@@ -623,6 +628,15 @@ if __name__ == "__main__":
         else:
             weights = jnp.load(LOAD_WEIGHT)
             trainable_init = (weights["analog"], weights["digital"])
+
+        if WEIGGT_DROP_RATIO:
+            # Set the smallest weights to zero
+            analog_weight = trainable_init[0]
+            weight_drop_mask = np.abs(analog_weight) <= np.quantile(
+                np.abs(analog_weight), WEIGGT_DROP_RATIO
+            )
+            dropped_analog_weight = jnp.where(weight_drop_mask, 0.0, analog_weight)
+            trainable_init = (dropped_analog_weight, trainable_init[1])
 
     plot_data = next(dl(PLOT_BZ))
 

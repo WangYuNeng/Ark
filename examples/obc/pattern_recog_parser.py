@@ -165,6 +165,12 @@ parser.add_argument(
 parser.add_argument("--test", action="store_true", help="Test the model")
 parser.add_argument("--test_bz", type=int, default=1024, help="Size of the test batch")
 parser.add_argument(
+    "--weight_drop_ratio",
+    type=float,
+    default=0.0,
+    help="Ratio of smallest weights (abs) to drop during testing",
+)
+parser.add_argument(
     "--test_seed", type=int, default=428, help="Random seed for testing"
 )
 parser.add_argument(

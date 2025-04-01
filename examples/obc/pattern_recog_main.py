@@ -87,6 +87,7 @@ UNIFORM_NOISE = args.uniform_noise
 
 USE_WANDB = args.wandb
 TAG = args.tag
+RUN_NAME = args.run_name
 TASK = args.task
 DIFF_FN = args.diff_fn
 L1_NORM_WEIGHT = args.l1_norm_weight
@@ -157,7 +158,7 @@ obc_spec.production_rules()[4]._noise_exp = TRANS_NOISE_STD
 
 if USE_WANDB:
     tags = ["digit_recognitio"] if not TAG else ["digit_recognition", TAG]
-    wandb_run = wandb.init(project="obc", config=vars(args), tags=tags)
+    wandb_run = wandb.init(project="obc", config=vars(args), tags=tags, name=RUN_NAME)
 
 VECTORIZE_ODETERM = args.vectorize_odeterm
 

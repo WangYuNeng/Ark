@@ -156,6 +156,7 @@ parser.add_argument(
 )
 parser.add_argument("--wandb", action="store_true", help="Log to wandb")
 parser.add_argument("--tag", type=str, default=None, help="Tag for the wandb run")
+parser.add_argument("--run_name", type=str, default=None, help="Name of the wandb run")
 parser.add_argument(
     "--save_weight", type=str, default=None, help="Path to save weights"
 )

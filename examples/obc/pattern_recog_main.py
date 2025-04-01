@@ -211,7 +211,7 @@ def edge_init_to_trainable_init(
     def one_hot_digitize(x: np.ndarray, bins: np.ndarray):
         # Digitize with the nearest bin and then one-hot encode
         # the index is then one-hot encoded
-        nearest_bins = np.abs(x[:, :, None] - bins[None, None, :]).argmin(axis=-1)
+        nearest_bins = np.abs(x[:, :, :, :, None] - bins[None, None, :]).argmin(axis=-1)
         one_hot = jax.nn.one_hot(nearest_bins, bins.shape[0])
         return one_hot
 

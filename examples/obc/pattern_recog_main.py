@@ -429,6 +429,7 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: st
                             f"{log_prefix}_average_test_loss": np.mean(test_losses),
                         },
                     )
+                return None, best_weight
             continue
 
         if step == 0:  # Set up the baseline loss

@@ -31,7 +31,12 @@ do
                     --run_name $run_name-test --test --no_noiseless
                 done
             done
-                
         done
+        Test the loss w/ only hebbian rule
+        run_name=bit$weight_bits-$weight_init-seed$seed-no-opt
+        python3 pattern_recog_main.py --n_class $n_class --diff_fn $diff_fn  --uniform_noise --vectorize \
+        --trans_noise_std $trans_noise_std --steps $steps --bz $bz --optimizer $optimizer --seed $seed --wandb --tag $tag-baseline \
+        --weight_bits $weight_bits $tc $tl --pattern_shape 10x6 --weight_init hebbian \
+        --run_name $run_name-test --test --no_noiseless
     done
 done

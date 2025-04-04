@@ -7,6 +7,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
+import wandb
 from diffrax import Heun
 from jaxtyping import PyTree
 from pattern_recog_dataloader import NUMBERS_5x3, NUMBERS_10x6, dataloader, dataloader2
@@ -29,7 +30,6 @@ from spec_optimization import (
     obc_spec,
 )
 
-import wandb
 from ark.cdg.cdg import CDG
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
@@ -87,6 +87,7 @@ UNIFORM_NOISE = args.uniform_noise
 
 USE_WANDB = args.wandb
 TAG = args.tag
+RUN_NAME = args.run_name
 TASK = args.task
 DIFF_FN = args.diff_fn
 L1_NORM_WEIGHT = args.l1_norm_weight
@@ -137,6 +138,11 @@ if LOAD_WEIGHT and WEIGHT_INIT:
 
 TESTING = args.test
 TEST_DATA = None
+WEIGGT_DROP_RATIO = args.weight_drop_ratio
+
+if WEIGGT_DROP_RATIO > 0:
+    assert TESTING, "Weight dropping is only for testing"
+    assert not WEIGHT_BITS, "Weight dropping is not supported for digital weight"
 
 time_info = TimeInfo(
     t0=0,
@@ -152,7 +158,7 @@ obc_spec.production_rules()[4]._noise_exp = TRANS_NOISE_STD
 
 if USE_WANDB:
     tags = ["digit_recognitio"] if not TAG else ["digit_recognition", TAG]
-    wandb_run = wandb.init(project="obc", config=vars(args), tags=tags)
+    wandb_run = wandb.init(project="obc", config=vars(args), tags=tags, name=RUN_NAME)
 
 VECTORIZE_ODETERM = args.vectorize_odeterm
 
@@ -206,7 +212,7 @@ def edge_init_to_trainable_init(
     def one_hot_digitize(x: np.ndarray, bins: np.ndarray):
         # Digitize with the nearest bin and then one-hot encode
         # the index is then one-hot encoded
-        nearest_bins = np.abs(x[:, :, None] - bins[None, None, :]).argmin(axis=-1)
+        nearest_bins = np.abs(x[:, :, :, :, None] - bins[None, None, :]).argmin(axis=-1)
         one_hot = jax.nn.one_hot(nearest_bins, bins.shape[0])
         return one_hot
 
@@ -423,6 +429,7 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: st
                             f"{log_prefix}_average_test_loss": np.mean(test_losses),
                         },
                     )
+                return None, best_weight
             continue
 
         if step == 0:  # Set up the baseline loss
@@ -623,6 +630,15 @@ if __name__ == "__main__":
         else:
             weights = jnp.load(LOAD_WEIGHT)
             trainable_init = (weights["analog"], weights["digital"])
+
+        if WEIGGT_DROP_RATIO:
+            # Set the smallest weights to zero
+            analog_weight = trainable_init[0]
+            weight_drop_mask = np.abs(analog_weight) <= np.quantile(
+                np.abs(analog_weight), WEIGGT_DROP_RATIO
+            )
+            dropped_analog_weight = jnp.where(weight_drop_mask, 0.0, analog_weight)
+            trainable_init = (dropped_analog_weight, trainable_init[1])
 
     plot_data = next(dl(PLOT_BZ))
 

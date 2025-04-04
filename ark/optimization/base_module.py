@@ -106,7 +106,7 @@ class BaseAnalogCkt(eqx.Module):
                 dt0=time_info.dt0,
                 y0=initial_state,
                 saveat=diffrax.SaveAt(ts=time_info.saveat),
-                stepsize_controller=stepsize_controller,
+                stepsize_controller=diffrax.ConstantStepSize(),  # Not sure what are good parameters for SDE, use ConstantStepSize for now
                 args=args,
                 max_steps=max_steps,
             )

@@ -30,6 +30,7 @@ MISMATCH_RSTD = args.mismatch_rstd
 INPUT_TYPE = args.input_type
 NEIGHBOR_DIST = args.neighbor_dist
 TRAINABLE_INIT = args.trainable_init
+OUTPUT_QUANTIZATION_BITS = args.output_quantization_bits
 
 READOUT_TIME = args.readout_time
 DT0 = args.dt0
@@ -276,6 +277,7 @@ if __name__ == "__main__":
         img_downsample=IMG_DOWNSAMPLE,
         use_batch_norm=BATCH_NORM,
         key=jax.random.PRNGKey(SEED),
+        adc_quantization_bits=OUTPUT_QUANTIZATION_BITS,
     )
 
     if LOAD_PATH:

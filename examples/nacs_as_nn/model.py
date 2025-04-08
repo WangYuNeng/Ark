@@ -34,6 +34,28 @@ def wrapped_tanh(x):
     return jnp.tanh(x)
 
 
+def straight_through_quantize(x, n_bits: int):
+    """Straight through quantization function.
+
+    Args:
+        x (Array): input array
+        bits (int): # of bits for quantization
+
+    Returns:
+        Array: quantized array
+    """
+    levels = 2 * n_bits
+    # Compute step size: equally spaced between -1 and 1 => step = 2 / (levels - 1)
+    step = 2 / (levels - 1)
+    # Compute the quantization index:
+    # Shift x so that -1 maps to 0 and then divide by step.
+    index = jnp.round((x + 1) / step)
+    # Map index back to the quantized value.
+    x_quant = -1 + index * step
+    # Use stop_gradient so that during backpropagation the gradient is as if this were an identity.
+    return x + jax.lax.stop_gradient(x_quant - x)
+
+
 class NACSysGrid(eqx.Module):
     """Novel Analog Computing System (NACS) grid system.
 
@@ -287,13 +309,14 @@ class NACSysGrid(eqx.Module):
         """
 
         if self.sys_name == "CNN":
-            return one_clipping(trace)
+            output = one_clipping(trace)
         elif self.sys_name == "OBC":
-            return jnp.sin(jnp.pi * trace)
+            output = jnp.sin(jnp.pi * trace)
         elif self.sys_name == "CANN":
-            return jnp.tanh(trace)
+            output = jnp.tanh(trace)
         else:
             raise ValueError(f"Unknown system name {self.sys_name}")
+        return output
 
 
 class NACSysClassifier(eqx.Module):
@@ -303,6 +326,13 @@ class NACSysClassifier(eqx.Module):
         n_classes (int): # of classes
         img_size (int): size of the input image
         nacs_sys (Optional[NACSysGrid]): analog computing system
+        hidden_size (int): # of hidden neurons
+        key (jax.random.PRNGKey): random key for initialization
+        img_downsample (int, optional): downsample ratio for the image. Defaults to 1.
+        use_batch_norm (bool, optional): whether to use batch normalization. Defaults to False.
+        adc_quantization_bits (int, optional): # of bits for the image  quantization prior to the digital model.
+            Defaults to None (no quantization).
+
     """
 
     batch_norm_hidden: Optional[eqx.nn.BatchNorm]
@@ -310,6 +340,7 @@ class NACSysClassifier(eqx.Module):
     fc_hidden: eqx.nn.Linear
     nacs_sys: NACSysGrid
     img_downsample: int
+    adc_quantization_bits: Optional[int]
 
     def __init__(
         self,
@@ -320,6 +351,7 @@ class NACSysClassifier(eqx.Module):
         key: jax.random.PRNGKey,
         img_downsample: int = 1,
         use_batch_norm: bool = False,
+        adc_quantization_bits: Optional[int] = None,
     ):
         assert not nacs_sys or nacs_sys.dimension == (img_size, img_size)
         assert (
@@ -341,13 +373,21 @@ class NACSysClassifier(eqx.Module):
             if use_batch_norm
             else None
         )
+        self.adc_quantization_bits = adc_quantization_bits
 
     def __call__(
         self, x: Array, state: eqx.nn.State, time_info: TimeInfo, mismatch_seed: int
     ) -> tuple[Array, eqx.nn.State]:
         if self.nacs_sys:
             x = self.nacs_sys(x, time_info, mismatch_seed)
-        x = self.fc_hidden(x[:: self.img_downsample, :: self.img_downsample].flatten())
+        # downsample with average pooling
+        x = eqx.nn.AvgPool2d(
+            kernel_size=(self.img_downsample, self.img_downsample),
+            stride=(self.img_downsample, self.img_downsample),
+        )(x[None, :, :]).squeeze()
+        if self.adc_quantization_bits:
+            x = straight_through_quantize(x, self.adc_quantization_bits)
+        x = self.fc_hidden(x.flatten())
         x = jax.nn.relu(x)
         if self.batch_norm_hidden:
             x, state = self.batch_norm_hidden(x, state)

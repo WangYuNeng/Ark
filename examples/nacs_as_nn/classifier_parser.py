@@ -19,6 +19,7 @@ parser.add_argument("--neighbor_dist", type=int, default=2)
 parser.add_argument(
     "--trainable_init", type=str, choices=["uniform", "normal"], required=True
 )
+parser.add_argument("--output_quantization_bits", type=int, default=None)
 
 # Simulation parameters
 parser.add_argument("--readout_time", type=float, default=1.0)

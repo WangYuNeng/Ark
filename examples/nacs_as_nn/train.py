@@ -8,14 +8,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import optax
 import torch
-import wandb
 from classifier_dataloader import get_dataloader
 from classifier_parser import args
 from jaxtyping import Array, PyTree
-from model import NACSysClassifier, NACSysGrid
+from model import MixedNACSysClassifier, NACSysClassifier, NACSysGrid
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+import wandb
 from ark.optimization.base_module import TimeInfo
 
 jax.config.update("jax_enable_x64", True)
@@ -259,25 +259,47 @@ def train(
 if __name__ == "__main__":
     if SYS_NAME == "None":
         nacs_sys = None
-    else:
-        nacs_sys = NACSysGrid(
+    # else:
+    #     nacs_sys = NACSysGrid(
+    #         sys_name=SYS_NAME,
+    #         mismatch_rstd=MISMATCH_RSTD,
+    #         n_rows=IMG_SIZE,
+    #         n_cols=IMG_SIZE,
+    #         neighbor_dist=NEIGHBOR_DIST,
+    #         input_type=INPUT_TYPE,
+    #         trainable_initialization=TRAINABLE_INIT,
+    #     )
+    # classifer, state = eqx.nn.make_with_state(NACSysClassifier)(
+    #     n_classes=N_LABEL,
+    #     img_size=IMG_SIZE,
+    #     nacs_sys=nacs_sys,
+    #     hidden_size=HIDDEN_SIZE,
+    #     img_downsample=IMG_DOWNSAMPLE,
+    #     use_batch_norm=BATCH_NORM,
+    #     key=jax.random.PRNGKey(SEED),
+    #     adc_quantization_bits=OUTPUT_QUANTIZATION_BITS,
+    # )
+
+    nacs_sys_list = [
+        NACSysGrid(
             sys_name=SYS_NAME,
             mismatch_rstd=MISMATCH_RSTD,
-            n_rows=IMG_SIZE,
-            n_cols=IMG_SIZE,
+            n_rows=7,
+            n_cols=7,
             neighbor_dist=NEIGHBOR_DIST,
             input_type=INPUT_TYPE,
             trainable_initialization=TRAINABLE_INIT,
         )
-    classifer, state = eqx.nn.make_with_state(NACSysClassifier)(
-        n_classes=N_LABEL,
+        for _ in range(2)
+    ]
+    classifer, state = eqx.nn.make_with_state(MixedNACSysClassifier)(
+        n_classes=10,
         img_size=IMG_SIZE,
-        nacs_sys=nacs_sys,
-        hidden_size=HIDDEN_SIZE,
-        img_downsample=IMG_DOWNSAMPLE,
-        use_batch_norm=BATCH_NORM,
+        nacs_sys_list=nacs_sys_list,
+        hidden_size=128,
         key=jax.random.PRNGKey(SEED),
-        adc_quantization_bits=OUTPUT_QUANTIZATION_BITS,
+        use_batch_norm=False,
+        adc_quantization_bits=4,
     )
 
     if LOAD_PATH:

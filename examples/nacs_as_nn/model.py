@@ -1,4 +1,4 @@
-from typing import Literal, Optional
+from typing import Callable, Literal, Optional
 
 import equinox as eqx
 import jax
@@ -141,7 +141,7 @@ class NACSysGrid(eqx.Module):
             time_info=time_info,
             initial_state=x,
             switch=[],  # No switch
-            args_seed=args_seed,  # No random mismatch
+            args_seed=args_seed,
             noise_seed=0,  # No random noise
         ).reshape(self.dimension)
         return self._forward_postprocess(trace)
@@ -320,7 +320,7 @@ class NACSysGrid(eqx.Module):
 
 
 class NACSysClassifier(eqx.Module):
-    """Classifier model with novel analog comuting system.
+    """Classifier model with novel analog computing system.
 
     Args:
         n_classes (int): # of classes
@@ -401,3 +401,103 @@ class NACSysClassifier(eqx.Module):
                 self.nacs_sys.dynamical_sys.weights() if self.nacs_sys else None
             ),
         }
+
+
+def stack_fn(x, fs, **kwargs):
+    return jnp.stack([f(x, kwargs) for f in fs])
+
+
+class MixedNACSysClassifier(eqx.Module):
+    """Classifier model with a mixture of novel analog computing system  .
+
+    Args:
+        n_classes (int): # of classes
+        img_size (int): size of the input image
+        nacs_sys_list (list[NACSysGrid]): analog computing system
+        hidden_size (int): # of hidden neurons
+        key (jax.random.PRNGKey): random key for initialization
+        use_batch_norm (bool, optional): whether to use batch normalization. Defaults to False.
+        adc_quantization_bits (int, optional): # of bits for the image  quantization prior to the digital model.
+            Defaults to None (no quantization).
+
+    """
+
+    batch_norm_hidden: Optional[eqx.nn.BatchNorm]
+    fc_out: eqx.nn.Linear
+    fc_hidden: eqx.nn.Linear
+    nacs_sys_list: list[NACSysGrid]
+    kernel_size: int
+    adc_quantization_bits: Optional[int]
+    image_size: int
+
+    def __init__(
+        self,
+        n_classes: int,
+        img_size: int,
+        nacs_sys_list: list[NACSysGrid],
+        hidden_size: int,
+        key: jax.random.PRNGKey,
+        use_batch_norm: bool = False,
+        adc_quantization_bits: Optional[int] = None,
+    ):
+        nacs_sys_dim = nacs_sys_list[0].dimension
+        assert nacs_sys_dim[0] == nacs_sys_dim[1], "nacs system must be square"
+        for nacs_sys in nacs_sys_list:
+            assert (
+                nacs_sys.dimension == nacs_sys_dim
+            ), "All nacs systems must have the same dimension"
+        kernel_size = nacs_sys_dim[0]
+        n_kernels = len(nacs_sys_list)
+        assert (
+            img_size % kernel_size == 0
+        ), "img_size must be divisible by the nacs system kernel"
+        key1, key2 = jax.random.split(key, 2)
+        self.nacs_sys_list = nacs_sys_list
+        input_dim = (img_size // kernel_size) ** 2 * n_kernels
+        self.kernel_size = kernel_size
+        self.fc_hidden = eqx.nn.Linear(
+            input_dim,
+            hidden_size,
+            key=key1,
+            use_bias=False,
+        )
+        self.fc_out = eqx.nn.Linear(hidden_size, n_classes, key=key2, use_bias=False)
+        self.batch_norm_hidden = (
+            eqx.nn.BatchNorm(input_size=hidden_size, axis_name="batch")
+            if use_batch_norm
+            else None
+        )
+        self.adc_quantization_bits = adc_quantization_bits
+        self.image_size = img_size
+
+    def __call__(
+        self, x: Array, state: eqx.nn.State, time_info: TimeInfo, mismatch_seed: int
+    ) -> tuple[Array, eqx.nn.State]:
+
+        k = self.kernel_size
+        m = self.image_size
+        x_reshaped = x.reshape(m // k, k, m // k, k)
+        x_blocks = x_reshaped.transpose(0, 2, 1, 3)
+        x_blocks_flat = x_blocks.reshape(m // k, m // k, k, k)
+
+        # Apply the stack function to each block
+        x = jnp.stack(
+            [
+                jax.vmap(
+                    jax.vmap(
+                        lambda block: f(block, time_info, mismatch_seed), in_axes=(0)
+                    ),
+                    in_axes=(0),
+                )(x_blocks_flat)
+                for f in self.nacs_sys_list
+            ]
+        )
+        x = jnp.mean(x, axis=(3, 4))
+
+        if self.adc_quantization_bits:
+            x = straight_through_quantize(x, self.adc_quantization_bits)
+        x = self.fc_hidden(x.flatten())
+        x = jax.nn.relu(x)
+        if self.batch_norm_hidden:
+            x, state = self.batch_norm_hidden(x, state)
+        return self.fc_out(x), state

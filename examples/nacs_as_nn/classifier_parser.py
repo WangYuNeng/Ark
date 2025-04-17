@@ -47,6 +47,7 @@ parser.add_argument("--test_only", action="store_true")
 parser.add_argument(
     "--dataset", type=str, default="mnist", choices=["mnist", "fashion_mnist"]
 )
+parser.add_argument("--img_noise_std", type=float, default=0.0)
 
 parser.add_argument("--wandb", action="store_true")
 parser.add_argument("--tag", type=str, default="")

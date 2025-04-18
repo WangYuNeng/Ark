@@ -1,6 +1,6 @@
 # ARK: A Programming Language for Agile Development of Unconventional Computing Paradigms
 
-This package implements the language described in [Design of Novel Analog Compute Paradigms with Ark](https://arxiv.org/abs/2309.08774). 
+This package implements the language described in [Design of Novel Analog Compute Paradigms with Ark](https://arxiv.org/abs/2309.08774).
 
 ## Build from source
 
@@ -12,7 +12,7 @@ conda activate ark
 pip install -e .
 ```
 
-If you are on macOS and use `brew` to install `z3`, it is possible that z3 solver failed to find the `libz3.dylib` even when z3 is installed with brew. This because somehow z3 looks for librariesin `/op/how/bin/` instead of `/opt/homebrew/lib`. You can workaround this by running:
+If you are on macOS and use `brew` to install `z3`, it is possible that z3 solver failed to find the `libz3.dylib` even when z3 is installed with brew. This because somehow z3 looks for librariesin `/op/how/bin/` instead of `/opt/homebrew/lib`. You can get around by running:
 
 ```bash
 cp /opt/homebrew/lib/libz3.dylib /Users/{username}/miniconda3/envs/ark/lib
@@ -30,9 +30,11 @@ python3 pattern_recog_main.py --n_class 4 --diff_fn periodic_mse --uniform_noise
     --trainable_locking --trainable_coupling --pattern_shape 10x6 --weight_init hebbian --no_noiseless --plot_evol 4 --num_plot 4
 ```
 
-The program should first show plots of example obc evolutions without transient noise and a second plot with transient noise. The program will then run the optimization. Afterward, there will be a final plot will show the evolution of obc with the optimized weights.
+The program should first show plots of example obc evolutions without transient noise and a second plot with transient noise. The program will then run the optimization. Afterward, there will be a final plot showing the evolution of obc with the optimized weights.
 
-Can run a complete experiment with
+For the usage of the arguments, you can refer to `python3 pattern_recog_main.py -h`
+
+A complete experiment for OBC with uniform noise can be run with
 
 ```bash
 bash scripts/uniform_noise_exp.sh
@@ -43,7 +45,7 @@ If [weight-and-bias](https://wandb.ai/site/) is set up, you can log the training
 
 ## More Examples
 
-You can try more examples inside the `examples` directory.
+More examples inside the `examples` directory.
 
 - `obc`: A specification for the oscillator-based computing and a pattern recognition application.
   - `scripts/uniform_noise_exp.sh`: A script to run the OBC pattern recognition optimization under uniform noise.

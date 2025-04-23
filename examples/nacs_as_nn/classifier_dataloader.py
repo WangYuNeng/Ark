@@ -2,7 +2,32 @@ import torch
 import torch.utils
 import torch.utils.data
 import torchvision
+from classifier_parser import parser
 from torch.utils.data import DataLoader
+
+args = parser.parse_args()
+img_noise_std = args.img_noise_std
+
+
+class AddGaussianNoise(object):
+    def __init__(self, mean=0.0, std=0.2):
+        self.std = std
+        self.mean = mean
+
+    def __call__(self, tensor):
+        if self.std == 0:
+            return tensor
+        return torch.clip(
+            tensor + torch.randn(tensor.size()) * self.std + self.mean,
+            min=-1.0,
+            max=1.0,
+        )
+
+    def __repr__(self):
+        return self.__class__.__name__ + "(mean={0}, std={1})".format(
+            self.mean, self.std
+        )
+
 
 normalize = torchvision.transforms.Compose(
     [
@@ -13,6 +38,8 @@ normalize = torchvision.transforms.Compose(
         torchvision.transforms.Lambda(lambda x: x.squeeze(0)),
         # Convert to float64
         torchvision.transforms.Lambda(lambda x: x.double()),
+        # Add Gaussian noise
+        AddGaussianNoise(0.0, img_noise_std),
     ]
 )
 

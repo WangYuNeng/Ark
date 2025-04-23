@@ -7,7 +7,6 @@ import numpy as np
 import spec
 from diffrax import AbstractSolver, Tsit5
 from jaxtyping import Array
-from pattern_recog_matrix_solve import OscillatorNetworkMatrixSolve
 from utils import create_connected_grid
 
 from ark.cdg.cdg import CDGEdge, CDGNode
@@ -337,7 +336,6 @@ class NACSysClassifier(eqx.Module):
     """
 
     batch_norm_hidden: Optional[eqx.nn.BatchNorm]
-    obc_preprocess_sys: OscillatorNetworkMatrixSolve
     fc_out: eqx.nn.Linear
     fc_hidden: eqx.nn.Linear
     nacs_sys: NACSysGrid
@@ -349,7 +347,6 @@ class NACSysClassifier(eqx.Module):
         n_classes: int,
         img_size: int,
         nacs_sys: Optional[NACSysGrid],
-        obc_preprocess_sys: Optional[OscillatorNetworkMatrixSolve],
         hidden_size: int,
         key: jax.random.PRNGKey,
         img_downsample: int = 1,
@@ -362,7 +359,6 @@ class NACSysClassifier(eqx.Module):
         ), "img_size must be divisible by downsample ratio"
         key1, key2 = jax.random.split(key, 2)
         self.nacs_sys = nacs_sys
-        self.obc_preprocess_sys = obc_preprocess_sys
         img_dim = img_size // img_downsample
         self.img_downsample = img_downsample
         self.fc_hidden = eqx.nn.Linear(
@@ -382,7 +378,6 @@ class NACSysClassifier(eqx.Module):
     def __call__(
         self, x: Array, state: eqx.nn.State, time_info: TimeInfo, mismatch_seed: int
     ) -> tuple[Array, eqx.nn.State]:
-        x = self.obc_preprocess_sys(initial_state=x.flatten(), time_info=time_info)
         if self.nacs_sys:
             x = self.nacs_sys(x, time_info, mismatch_seed)
         # downsample with average pooling

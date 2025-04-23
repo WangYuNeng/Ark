@@ -8,15 +8,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import optax
 import torch
+import wandb
 from classifier_dataloader import get_dataloader
 from classifier_parser import args
 from jaxtyping import Array, PyTree
 from model import NACSysClassifier, NACSysGrid
-from pattern_recog_matrix_solve import OscillatorNetworkMatrixSolve
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-import wandb
 from ark.optimization.base_module import TimeInfo
 
 jax.config.update("jax_enable_x64", True)
@@ -62,8 +61,6 @@ test_loader, _ = get_dataloader(
     train=False,
     validation_split=0,
 )
-IMG_NOISE_STD = args.img_noise_std
-
 WANDB = args.wandb
 RUN_NAME = args.run_name
 # get the image size
@@ -200,8 +197,6 @@ def train(
                 # The last batch has a different shape. Drop to avoid recompilation
                 break
             img, label = img.numpy(), label.numpy()
-            if IMG_NOISE_STD:
-                img += np.clip(np.random.normal(0, IMG_NOISE_STD, img.shape), -1, 1)
             mismatch_seeds = np.random.randint(0, 2**32, size=(img.shape[0],))
             model, state, opt_state, train_loss, train_acc = make_step(
                 model, state, opt_state, img, label, mismatch_seeds
@@ -212,8 +207,6 @@ def train(
             if i == len(val_loader) - 1:
                 break
             img, label = img.numpy(), label.numpy()
-            if IMG_NOISE_STD:
-                img += np.clip(np.random.normal(0, IMG_NOISE_STD, img.shape), -1, 1)
             mismatch_seeds = np.random.randint(0, 2**32, size=(img.shape[0],))
             val_loss, val_acc = val_step(model, state, img, label, mismatch_seeds)
             val_losses.append(val_loss)
@@ -224,8 +217,6 @@ def train(
                 if i == len(test_loader) - 1:
                     break
                 img, label = img.numpy(), label.numpy()
-                if IMG_NOISE_STD:
-                    img += np.clip(np.random.normal(0, IMG_NOISE_STD, img.shape), -1, 1)
                 mismatch_seeds = np.random.randint(0, 2**32, size=(img.shape[0],))
                 _, test_acc = val_step(model, state, img, label, mismatch_seeds)
                 test_accs.append(test_acc)
@@ -265,28 +256,6 @@ def train(
     return
 
 
-def build_obc_preprocess_sys():
-    """Enumerate the training set and intialize the coupling strength with Hebbian rule."""
-    coupling_mat_shape = (IMG_SIZE, IMG_SIZE, IMG_SIZE, IMG_SIZE)
-    coupling_matrix = np.zeros(
-        coupling_mat_shape
-    )  # coupling_matrix.shape = (N_COL, N_ROW, N_COL, N_ROW)
-    n_imgs = 0
-    for i, (imgs, _) in tqdm(enumerate(train_loader), total=len(train_loader) - 1):
-        imgs = imgs.numpy()
-        for img in imgs:
-            coupling_matrix += np.outer(img.flatten(), img.flatten()).reshape(
-                coupling_mat_shape
-            )
-        n_imgs += imgs.shape[0]
-        break
-    coupling_matrix /= n_imgs
-
-    return OscillatorNetworkMatrixSolve(
-        init_coupling=coupling_matrix, init_locking=5, neighbor_connection=False
-    )
-
-
 if __name__ == "__main__":
     if SYS_NAME == "None":
         nacs_sys = None
@@ -300,12 +269,10 @@ if __name__ == "__main__":
             input_type=INPUT_TYPE,
             trainable_initialization=TRAINABLE_INIT,
         )
-    obc_preprocess_sys = build_obc_preprocess_sys()
     classifer, state = eqx.nn.make_with_state(NACSysClassifier)(
         n_classes=N_LABEL,
         img_size=IMG_SIZE,
         nacs_sys=nacs_sys,
-        obc_preprocess_sys=obc_preprocess_sys,
         hidden_size=HIDDEN_SIZE,
         img_downsample=IMG_DOWNSAMPLE,
         use_batch_norm=BATCH_NORM,

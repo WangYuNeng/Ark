@@ -37,6 +37,17 @@ Osc_modified = NodeType(
     },
 )
 
+FixedSource = NodeType(
+    "FixedSource",
+    attrs={
+        "order": 0,
+        "attr_def": {
+            "phase": AttrDef(attr_type=AnalogAttr((-10, 10))),
+        },
+    },
+)
+
+obc_spec.add_cdg_types([Osc_modified, FixedSource])
 # Digital coupling with 3 bit resolution -2**(n_bit-1) to 2**(n_bit-1) -1
 # Rescale to between +/- 1
 if args.weight_bits is None:
@@ -89,4 +100,14 @@ modified_cp_self = ProdRule(
     -EDGE.k * SRC.lock_fn(VAR(SRC), SRC.lock_strength),
 )
 
-obc_spec.add_production_rules([modified_cp_src, modified_cp_dst, modified_cp_self])
+source_cp_osc = ProdRule(
+    Coupling,
+    FixedSource,
+    Osc_modified,
+    DST,
+    -EDGE.k * DST.osc_fn(VAR(DST) - SRC.phase, DST.cpl_strength),
+)
+
+obc_spec.add_production_rules(
+    [modified_cp_src, modified_cp_dst, modified_cp_self, source_cp_osc]
+)

@@ -177,6 +177,13 @@ def check_trainable_consisitency(cdg: CDG):
     return max_id + 1
 
 
+def clip_w_straight_through(x: jax.Array, min_val: float, max_val: float) -> jax.Array:
+    """Clip the value and use the straight-through estimator for the gradient"""
+    x_clip = jnp.clip(x, min_val, max_val)
+    x_st = jax.lax.stop_gradient(x_clip) + x - jax.lax.stop_gradient(x)
+    return x_st
+
+
 class OptCompiler:
 
     SELF = "self"
@@ -186,6 +193,7 @@ class OptCompiler:
     D_TRAINABLE = "d_trainable"
     GUMBEL_TEMP = "gumbel_temp"
     GUMBEL_FN = "gumbel_softmax"
+    CLIPPING_FN = "clip_w_straight_through"
     HARD_GUMBEL_FLAG = "hard_gumbel"
     NORMALIZE_MIN, NORMALIZE_MAX = -1, 1
 
@@ -236,7 +244,12 @@ class OptCompiler:
         )
 
         self.mm_used_idx = 0
-        namespace = {"jax": jax, "jnp": jnp, self.GUMBEL_FN: gumbel_fn}
+        namespace = {
+            "jax": jax,
+            "jnp": jnp,
+            self.GUMBEL_FN: gumbel_fn,
+            self.CLIPPING_FN: clip_w_straight_through,
+        }
 
         # Usefule constants
         args_len = len(switch_map) + sum(len(x) for x in num_attr_map.values())
@@ -536,6 +549,12 @@ class OptCompiler:
                 call_fn="clip",
             )
 
+        def clip_expr(val: ast.expr, min_val, max_val):
+            return mk_call(
+                fn=ast.Name(id=self.CLIPPING_FN),
+                args=mk_list_val_expr([val, min_val, max_val]),
+            )
+
         self_dot_trainable = ast.Attribute(value=self_expr_gen(), attr=self.A_TRAINABLE)
 
         if not normalized and not clip:
@@ -560,7 +579,7 @@ class OptCompiler:
 
             trainable = self_dot_trainable
             if clip:
-                trainable = jnp_clip_expr(
+                trainable = clip_expr(
                     self_dot_trainable,
                     self.NORMALIZE_MIN,
                     self.NORMALIZE_MAX,
@@ -604,7 +623,7 @@ class OptCompiler:
             min_arr = mk_jnp_call([mk_list(mk_list_val_expr(min_arr))], call_fn="array")
             max_arr = mk_jnp_call([mk_list(mk_list_val_expr(max_arr))], call_fn="array")
 
-            trainable = jnp_clip_expr(
+            trainable = clip_expr(
                 self_dot_trainable,
                 min_arr,
                 max_arr,

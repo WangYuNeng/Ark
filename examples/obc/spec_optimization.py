@@ -31,8 +31,8 @@ Osc_modified = NodeType(
         "attr_def": {
             "lock_fn": AttrDef(attr_type=FunctionAttr(nargs=2)),
             "osc_fn": AttrDef(attr_type=FunctionAttr(nargs=2)),
-            "lock_strength": AttrDef(attr_type=AnalogAttr((-10, 10))),
-            "cpl_strength": AttrDef(attr_type=AnalogAttr((-10, 10))),
+            "lock_strength": AttrDef(attr_type=AnalogAttr((0, 10))),
+            "cpl_strength": AttrDef(attr_type=AnalogAttr((0, 10))),
         },
     },
 )
@@ -45,6 +45,10 @@ FixedSource = NodeType(
             "phase": AttrDef(attr_type=AnalogAttr((-10, 10))),
         },
     },
+)
+
+SelfCpl = EdgeType(
+    "SelfCpl",
 )
 
 obc_spec.add_cdg_types([Osc_modified, FixedSource])
@@ -100,6 +104,14 @@ modified_cp_self = ProdRule(
     -EDGE.k * SRC.lock_fn(VAR(SRC), SRC.lock_strength),
 )
 
+modified_cp_self_no_k = ProdRule(
+    SelfCpl,
+    Osc_modified,
+    Osc_modified,
+    SELF,
+    -SRC.lock_fn(VAR(SRC), SRC.lock_strength),
+)
+
 source_cp_osc = ProdRule(
     Coupling,
     FixedSource,
@@ -109,5 +121,11 @@ source_cp_osc = ProdRule(
 )
 
 obc_spec.add_production_rules(
-    [modified_cp_src, modified_cp_dst, modified_cp_self, source_cp_osc]
+    [
+        modified_cp_src,
+        modified_cp_dst,
+        modified_cp_self,
+        source_cp_osc,
+        modified_cp_self_no_k,
+    ]
 )

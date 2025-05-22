@@ -9,11 +9,36 @@ from ark.specification.trainable import Trainable, TrainableMgr
 
 (FALSE_PHASE, TRUE_PHASE, BLUE_PHASE) = (0, 2 / 3, 4 / 3)
 
-trainable_mgr = TrainableMgr()
-
 
 def locking_3x(x, lock_strength: float):
     return lock_strength * jnp.sin(3 * jnp.pi * x)
+
+
+@dataclass
+class Clause:
+    var0: int
+    var1: int
+    var2: int
+
+    def __iter__(self):
+        return iter((self.var0, self.var1, self.var2))
+
+    def __getitem__(self, idx):
+        return (self.var0, self.var1, self.var2)[idx]
+
+
+@dataclass
+class Problem:
+    clauses: list[Clause]
+
+    def __iter__(self):
+        return iter(self.clauses)
+
+    def __getitem__(self, idx):
+        return self.clauses[idx]
+
+    def __len__(self):
+        return len(self.clauses)
 
 
 @dataclass
@@ -81,7 +106,7 @@ class SATOscNetwork:
             for clauses in self.var_clause_cpls
         ]
 
-    def clauses_to_switch_array(self, clauses: list[tuple[int, int, int]]):
+    def problem_to_switch_array(self, problem: Problem):
         """
         Build the swtich array based on the input clauses.
 
@@ -95,12 +120,12 @@ class SATOscNetwork:
         assert (
             self.var_clause_cpls_args_idx is not None
         ), "mapping from switches to arguments indexes is not set"
-        assert len(clauses) == len(
+        assert len(problem) == len(
             self.clause_oscs
         ), "Number of clauses must match the number of clause oscillators"
         len_switch_args = 6 * len(self.var_oscs) * len(self.clause_oscs)
         switch_arr = [0 for _ in range(len_switch_args)]
-        for clause_id, clause in enumerate(clauses):
+        for clause_id, clause in enumerate(problem):
             for nth_var, signed_var in enumerate(clause):
                 # Get the index of the variable oscillator
                 var_idx = abs(signed_var) - 1
@@ -113,7 +138,7 @@ class SATOscNetwork:
         return switch_arr
 
 
-def create_3sat_graph(n_vars: int, n_clauses: int):
+def create_3sat_graph(n_vars: int, n_clauses: int, trainable_mgr: TrainableMgr):
     """
     Create a configurable 3-SAT graph with the given # of variables and clauses.
 
@@ -131,7 +156,7 @@ def create_3sat_graph(n_vars: int, n_clauses: int):
     var_osc_args = {
         "lock_fn": locking_3x,
         "osc_fn": opt_spec.coupling_fn,
-        "lock_strength": trainable_mgr.new_analog(init_val=1.0),
+        "lock_strength": 0.0,
         "cpl_strength": trainable_mgr.new_analog(init_val=1.0),
     }
     var_cpl_args = {
@@ -140,7 +165,7 @@ def create_3sat_graph(n_vars: int, n_clauses: int):
     clause_osc_args = {
         "lock_fn": locking_3x,
         "osc_fn": opt_spec.coupling_fn,
-        "lock_strength": trainable_mgr.new_analog(init_val=1.0),
+        "lock_strength": 0.0,
         "cpl_strength": trainable_mgr.new_analog(init_val=1.0),
     }
     clause_cpl_args = {
@@ -154,10 +179,6 @@ def create_3sat_graph(n_vars: int, n_clauses: int):
     }
     var2clause_cpl_args = {
         "k": trainable_mgr.new_analog(init_val=-1.0),
-    }
-
-    self_cpl_args = {
-        "k": 1.0,
     }
 
     # Create True, False, Blue oscillators
@@ -175,7 +196,7 @@ def create_3sat_graph(n_vars: int, n_clauses: int):
     blue_to_var_cpls = []
     for _ in range(n_vars):
         oscs = tuple([opt_spec.Osc_modified(**var_osc_args) for _ in range(2)])
-        self_cpls = tuple([opt_spec.Coupling(**self_cpl_args) for _ in range(2)])
+        self_cpls = tuple([opt_spec.SelfCpl() for _ in range(2)])
         osc_cpl = opt_spec.Coupling(**var_cpl_args)
         blue_cpls = tuple([opt_spec.Coupling(**blue2var_cpl_args) for _ in range(2)])
 
@@ -205,7 +226,7 @@ def create_3sat_graph(n_vars: int, n_clauses: int):
         oscs = [opt_spec.Osc_modified(**clause_osc_args) for _ in range(6)]
         cpls = [opt_spec.Coupling(**clause_cpl_args) for _ in range(5)]
         b2c_cpls = [opt_spec.Coupling(**base2clause_cpl_args) for _ in range(5)]
-        self_cpls = [opt_spec.Coupling(**self_cpl_args) for _ in range(6)]
+        self_cpls = [opt_spec.SelfCpl() for _ in range(6)]
 
         # Connect internal clause oscillators
         sat_graph.connect(cpls[0], oscs[0], oscs[1])

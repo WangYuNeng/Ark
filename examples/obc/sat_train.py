@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from functools import partial
 from typing import Callable, Generator
 
@@ -11,6 +10,8 @@ import optax
 import spec_optimization as opt_spec
 from diffrax import Tsit5
 from jaxtyping import PyTree
+from sat_dataloader import SATDataloader, sat_3var7clauses_data
+from sat_loss import loss_w_sol
 from sat_utils import BLUE_PHASE, FALSE_PHASE, TRUE_PHASE, create_3sat_graph
 
 import wandb
@@ -28,63 +29,32 @@ time_info = TimeInfo(
     saveat=[1.0],
 )
 
-BZ = 1024
-STEPS = 50
-
-
-def loss_all_true(model: BaseAnalogCkt, x: jax.Array):
-    """
-    Loss function for the 3-SAT problem. The loss is the sum of the squared differences between
-    the output of the model and the target value (1 for True, 0 for False).
-    """
-    # Get the output of the mode
-    y_raw = jax.vmap(model, in_axes=(None, 0, None, None, None))(time_info, x, [], 0, 0)
-    sine_y = jnp.sin(y_raw * jnp.pi)
-
-    # Calculate the loss
-    all_true_arr = jnp.sin(jnp.array([FALSE_PHASE, TRUE_PHASE]) * jnp.pi)
-    loss = jnp.mean((sine_y - all_true_arr) ** 2)
-    return loss
+BZ = 128
+STEPS = 300
 
 
 @eqx.filter_jit
-def make_step(
-    model: BaseAnalogCkt,
-    opt_state: PyTree,
-    loss_fn: Callable,
-    data: jax.Array,
-):
-    train_loss, grads = eqx.filter_value_and_grad(loss_fn)(model, data)
+def make_step(model: BaseAnalogCkt, opt_state: PyTree, loss_fn: Callable, data):
+    train_loss, grads = eqx.filter_value_and_grad(loss_fn)(model, *data)
     updates, opt_state = optim.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
     return model, opt_state, train_loss
 
 
-def data_loader(batch_size: int):
-    """
-    Data loader for the 3-SAT problem. Generates random input data for the model.
-    """
-    while True:
-        # Generate random input data
-        x = np.random.uniform(0, 1, (batch_size, N_TOTAL_OSCS))
-        # Convert to jax array
-        x = jnp.array(x)
-        yield x
-
-
 def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator):
     opt_state = optim.init(eqx.filter(model, eqx.is_array))
 
-    for step, data in zip(range(STEPS), dl(BZ)):
+    print("Initial trainable params:")
+    print(model.a_trainable)
+    for step, data in zip(range(STEPS), dl):
 
         model, opt_state, train_loss = make_step(model, opt_state, loss_fn, data)
 
-        print(f"Step {step}, Train loss: {train_loss}")
+        print(f"\nStep {step}, Train loss: {train_loss}")
+        print("Trainable params")
+        print(model.a_trainable)
 
     return model
-
-
-N_PLOT = 3
 
 
 def plot_results(model: BaseAnalogCkt, data: jax.Array, switches: jax.Array):
@@ -98,17 +68,17 @@ def plot_results(model: BaseAnalogCkt, data: jax.Array, switches: jax.Array):
         saveat=jnp.arange(0, 1.0, 0.01),
     )
 
-    figs, axes = plt.subplots(nrows=N_PLOT, ncols=1, figsize=(10, 5))
-    for i in range(N_PLOT):
+    n_plot = data.shape[0]
+    figs, axes = plt.subplots(nrows=n_plot, ncols=1, figsize=(10, 5))
+    for i in range(n_plot):
         axes[i].set_title(f"Oscillator {i}")
         axes[i].set_xlabel("Time")
         axes[i].set_ylabel("Phase")
-        model_out = model(ti, data[i], switches, 0, 0).T
-        for trace in model_out:
-            axes[i].plot(
-                ti.saveat,
-                trace,
-            )
+        model_out = model(ti, data[i], switches[i], 0, 0).T
+        for osc_id, trace in enumerate(model_out):
+            sign = "-" if osc_id % 2 == 0 else "+"
+            label = f"{sign}var{osc_id // 2 + 1}"
+            axes[i].plot(ti.saveat, trace, label=label)
 
         # Use 3 colores to represent the [FALSE, TRUE, BLUE] phases
         # FALSE -> red, TRUE -> green, BLUE -> blue
@@ -119,6 +89,7 @@ def plot_results(model: BaseAnalogCkt, data: jax.Array, switches: jax.Array):
                 color="r",
                 linestyle="--",
             )
+        axes[i].legend()
     plt.tight_layout()
     plt.show()
 
@@ -126,7 +97,7 @@ def plot_results(model: BaseAnalogCkt, data: jax.Array, switches: jax.Array):
 if __name__ == "__main__":
     np.random.seed(428)
 
-    graph, nw = create_3sat_graph(2, 2)
+    graph, nw = create_3sat_graph(n_vars=3, n_clauses=7, trainable_mgr=trainable_mgr)
 
     # flatten the var_oscs
     nodes_flat = []
@@ -140,7 +111,7 @@ if __name__ == "__main__":
         trainable_mgr=trainable_mgr,
         readout_nodes=nodes_flat,
         normalize_weight=False,
-        do_clipping=False,
+        do_clipping=True,
         vectorize=True,
     )
 
@@ -151,16 +122,17 @@ if __name__ == "__main__":
         solver=Tsit5(),
     )
     nw.set_var_clause_cpls_args_idx(model=model)
-    print(nw.var_clause_cpls_args_idx)
-    clauses = [(-1, -1, -1), (-2, -2, -2)]
-    switch_arr = jnp.array(nw.clauses_to_switch_array(clauses))
-    print("Switch array: ", switch_arr)
 
-    test_traces = np.random.uniform(0, 1, (N_PLOT, len(graph.stateful_nodes)))
-    plot_results(model, test_traces, switch_arr)
-    model = train(model=model, loss_fn=loss_all_true, dl=data_loader)
-    for name, val in zip(
-        ["locking_strength", "cpl_strength", "cpl_value"], model.a_trainable
-    ):
-        print(f"{name}: {val}")
-    plot_results(model, test_traces)
+    sat_probs, sat_solutions = sat_3var7clauses_data()
+    dataloader = SATDataloader(BZ, sat_probs, nw, sat_solutions)
+    init_states, switches, sol = dataloader.__iter__().__next__()
+
+    print(sol[:2])
+    print(jnp.sin(sol[:2] * jnp.pi * TRUE_PHASE))
+    plot_results(model, init_states[:2], switches[:2])
+
+    loss_fn = partial(loss_w_sol, time_info=time_info)
+
+    model = train(model=model, loss_fn=loss_fn, dl=dataloader)
+    print(sol[:2])
+    plot_results(model, init_states[:2], switches[:2])

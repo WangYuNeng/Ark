@@ -26,11 +26,13 @@ def loss_w_sol(
     y_raw = jax.vmap(model, in_axes=(None, 0, 0, None, None))(
         time_info, init_states, switches, 0, 0
     )
-    sine_y = jnp.sin(y_raw * jnp.pi)
+    # FIXME: Modular is too strict. E.g., because phase is periodic, 1.9 is close to 0
+    # and the loss should be small if the solution is 0.
+    y_modular = jnp.mod(y_raw, 2.0).reshape(sol.shape)
 
     # Convert the solution assignment to phase values
     sine_sol = jnp.sin(assignment_to_phase(sol) * jnp.pi)
 
     # Calculate the loss
-    loss = jnp.mean((sine_y - sine_sol) ** 2)
+    loss = jnp.mean((y_modular - sine_sol) ** 2)
     return loss

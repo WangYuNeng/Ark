@@ -2,10 +2,61 @@ from typing import Generator, Optional
 
 import jax.numpy as jnp
 import numpy as np
-from sat_utils import Clause, Problem, SATOscNetwork, create_3sat_graph
+from sat_utils import Assignment, Clause, Problem, SATOscNetwork
 
 
-def sat_3var7clauses_data() -> tuple[list[Problem], list[Clause]]:
+def sat_kvar_exact_assignment_clauses_with_redundant_data(
+    k: int, d: int
+) -> tuple[list[Problem], list[Assignment]]:
+    """
+    Generate a 3-SAT problem with k+d clauses and k variables.
+    Clause i is (xi or xi or xi).
+
+    d clauses are redundant clauses that do not affect the satisfiability of the problem.
+
+    Args:
+        k (int): # of variables and clauses in the 3-SAT problem.
+
+    Returns:
+        tuple[list[Problem], list[Clause]]: A tuple containing a list of SAT problems and a list of clauses
+        representing the exact satisfying assignment for each problem.
+    """
+
+    clauses = [Clause(-i, -i, -i) for i in range(1, k + 1)]
+    # Add redundant clauses
+    clauses += [
+        Clause(
+            *(
+                np.random.choice(
+                    [-i for i in range(1, k + 1)], size=3, replace=True
+                ).tolist()
+            )
+        )
+        for _ in range(d)
+    ]
+    solutions = [Assignment([-i for i in range(1, k + 1)])]
+    sat_prob = Problem(clauses)
+    return [sat_prob], solutions
+
+
+def sat_2var3clauses_data() -> tuple[list[Problem], list[Assignment]]:
+    """
+    Generate a 3-SAT problem with 3 clauses and 2 variables.
+    Enumerate all possible combinations of exactly 1 satisfying assignment.
+    """
+    sat_probs, solutions = [], []
+    for removed_clause_idx in range(3):
+        all_clauses = [Clause(i, j, j) for i in [-1, 1] for j in [-2, 2]]
+        # Remove the clause at the specified index
+        solutions.append(
+            Assignment([-var for var in all_clauses[removed_clause_idx][:-1]])
+        )
+        all_clauses.pop(removed_clause_idx)
+        sat_probs.append(Problem(all_clauses))
+    return sat_probs, solutions
+
+
+def sat_3var7clauses_data() -> tuple[list[Problem], list[Assignment]]:
     """
     Generate a 3-SAT problem with 7 clauses and 3 variables.
     Enumerate all possible combinations of exactly 1 satisfying assignment.
@@ -16,7 +67,7 @@ def sat_3var7clauses_data() -> tuple[list[Problem], list[Clause]]:
             Clause(i, j, k) for i in [-1, 1] for j in [-2, 2] for k in [-3, 3]
         ]
         # Remove the clause at the specified index
-        solutions.append(Clause(*[-var for var in all_clauses[removed_clause_idx]]))
+        solutions.append(Assignment([-var for var in all_clauses[removed_clause_idx]]))
         all_clauses.pop(removed_clause_idx)
         sat_probs.append(Problem(all_clauses))
     return sat_probs, solutions
@@ -83,6 +134,9 @@ class SATDataloader:
 
         while True:
             initial_states = np.random.rand(batch_size, n_oscillators) * 2
+            # initial states are equally spaced in [0, 2]
+            # initial_states = np.linspace(0, 2, n_oscillators, endpoint=False)
+            # initial_states = np.tile(initial_states, (batch_size, 1))
             sampled_prob_idx = np.random.choice(
                 len(self.sat_probs), batch_size, replace=True
             )

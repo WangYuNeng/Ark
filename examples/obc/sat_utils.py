@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 import jax.numpy as jnp
+import numpy as np
 import spec_optimization as opt_spec
 
 from ark.cdg.cdg import CDG, CDGEdge, CDGNode
@@ -39,6 +40,17 @@ class Problem:
 
     def __len__(self):
         return len(self.clauses)
+
+
+@dataclass
+class Assignment:
+    vars: list[int]
+
+    def __iter__(self):
+        return iter(self.vars)
+
+    def __getitem__(self, idx):
+        return self.vars[idx]
 
 
 @dataclass
@@ -151,34 +163,37 @@ def create_3sat_graph(n_vars: int, n_clauses: int, trainable_mgr: TrainableMgr):
     """
 
     sat_graph = CDG()
-
+    # Good solution found for 3 variables and 7 clauses
+    # weight_str = "0.83653987  1.20517709 -2.07106898  0.05542634  2.28063601  -0.1 -2.16215055 -2.08885618 -0.68421482"
+    weight_str = "1 1 -1 1 1 -1 -1 -1 -1"
+    ws = [float(w) for w in weight_str.strip("[]").split()]
     # Parameters for oscillators and couplings
     var_osc_args = {
         "lock_fn": locking_3x,
         "osc_fn": opt_spec.coupling_fn,
-        "lock_strength": 0.0,
-        "cpl_strength": trainable_mgr.new_analog(init_val=1.0),
+        "lock_strength": trainable_mgr.new_analog(init_val=ws[0]),
+        "cpl_strength": trainable_mgr.new_analog(init_val=ws[1]),
     }
     var_cpl_args = {
-        "k": trainable_mgr.new_analog(init_val=-1.0),
+        "k": trainable_mgr.new_analog(init_val=ws[2]),
     }
     clause_osc_args = {
         "lock_fn": locking_3x,
         "osc_fn": opt_spec.coupling_fn,
-        "lock_strength": 0.0,
-        "cpl_strength": trainable_mgr.new_analog(init_val=1.0),
+        "lock_strength": trainable_mgr.new_analog(init_val=ws[3]),
+        "cpl_strength": trainable_mgr.new_analog(init_val=ws[4]),
     }
     clause_cpl_args = {
-        "k": trainable_mgr.new_analog(init_val=-1.0),
+        "k": trainable_mgr.new_analog(init_val=ws[5]),
     }
     blue2var_cpl_args = {
-        "k": trainable_mgr.new_analog(init_val=-1.0),
+        "k": trainable_mgr.new_analog(init_val=ws[6]),
     }
     base2clause_cpl_args = {
-        "k": trainable_mgr.new_analog(init_val=-1.0),
+        "k": trainable_mgr.new_analog(init_val=ws[7]),
     }
     var2clause_cpl_args = {
-        "k": trainable_mgr.new_analog(init_val=-1.0),
+        "k": trainable_mgr.new_analog(init_val=ws[8]),
     }
 
     # Create True, False, Blue oscillators

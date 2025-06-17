@@ -31,7 +31,7 @@ def loss_w_sol(
     y_modular = jnp.mod(y_raw, 2.0).reshape(sol.shape)
 
     # Convert the solution assignment to phase values
-    sine_sol = jnp.sin(assignment_to_phase(sol) * jnp.pi)
+    sine_sol = assignment_to_phase(sol)
 
     # Calculate the loss
     loss = jnp.mean((y_modular - sine_sol) ** 2)

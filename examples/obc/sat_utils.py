@@ -164,7 +164,7 @@ def create_3sat_graph(n_vars: int, n_clauses: int, trainable_mgr: TrainableMgr):
 
     sat_graph = CDG()
     # Good solution found for 3 variables and 7 clauses
-    # weight_str = "0.83653987  1.20517709 -2.07106898  0.05542634  2.28063601  -0.1 -2.16215055 -2.08885618 -0.68421482"
+    # weight_str = "0.87295475  1.16870115 -2.10737176  0.15904553  2.25720177  0.0036878 -2.12575306 -2.0656077  -0.64780937"
     weight_str = "1 1 -1 1 1 -1 -1 -1 -1"
     ws = [float(w) for w in weight_str.strip("[]").split()]
     # Parameters for oscillators and couplings

@@ -1,8 +1,9 @@
+import os
 from typing import Generator, Optional
 
 import jax.numpy as jnp
 import numpy as np
-from sat_utils import Assignment, Clause, Problem, SATOscNetwork
+from sat_utils import Assignment, Clause, Problem, SATOscNetwork, parse_cnf_file
 
 
 def sat_kvar_exact_assignment_clauses_with_redundant_data(
@@ -73,6 +74,24 @@ def sat_3var7clauses_data() -> tuple[list[Problem], list[Assignment]]:
     return sat_probs, solutions
 
 
+def sat_from_cnf_dir(dir_path: str) -> list[Problem]:
+    """
+    Load SAT problems from a directory containing CNF files.
+
+    Args:
+        dir_path (str): The path to the directory containing CNF files.
+
+    Returns:
+        list[Problem]: A list of SAT problems, each represented as a Problem object.
+    """
+    sat_probs = []
+    for file_name in os.listdir(dir_path):
+        if file_name.endswith(".cnf"):
+            file_path = os.path.join(dir_path, file_name)
+            sat_probs.append(parse_cnf_file(file_path))
+    return sat_probs
+
+
 class SATDataloader:
     """
     A dataloader to prepare the SAT problem for the OBC.
@@ -110,9 +129,15 @@ class SATDataloader:
             osc_network.problem_to_switch_array(prob) for prob in sat_probs
         ]
 
+        self.probs_adjacency_matrices = [
+            osc_network.problem_to_adjacency_matrix(prob) for prob in sat_probs
+        ]
+
     def __iter__(
         self,
-    ) -> Generator[tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray], None, None]:
+    ) -> Generator[
+        tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray], None, None
+    ]:
         """Generate 1. random intial states for the OBC network, 2. the switch array for the SAT problem,
         3. the solution for the SAT problem if provided.
 
@@ -125,7 +150,8 @@ class SATDataloader:
             batch_size (int): The batch size for the dataloader.
 
         Returns:
-            Generator[tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]]: initial states, switch array, and solution.
+            Generator[tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]]: initial states, switch array, solution (if given), and
+            adjacency matrices.
         """
 
         osc_network = self.osc_network
@@ -151,8 +177,15 @@ class SATDataloader:
                     ]
                 )
                 solutions = solutions.reshape(batch_size, 2 * len(osc_network.var_oscs))
+            adj_matrices = np.array(
+                [
+                    self.probs_adjacency_matrices[prob_idx]
+                    for prob_idx in sampled_prob_idx
+                ]
+            )
             yield (
                 jnp.array(initial_states),
                 jnp.array(switch_arrs),
                 jnp.array(solutions) if self.sat_solutions else None,
+                jnp.array(adj_matrices),
             )

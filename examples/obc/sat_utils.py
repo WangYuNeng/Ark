@@ -15,6 +15,25 @@ def locking_3x(x, lock_strength: float):
     return lock_strength * jnp.sin(3 * jnp.pi * x)
 
 
+def flatten_nw_stateful_oscillators(
+    osc_network: "SATOscNetwork",
+) -> list[CDGNode]:
+    """Flatten all oscillators into a single list."""
+    clause_oscs = osc_network.clause_oscs
+    var_oscs = osc_network.var_oscs
+    return [osc for var in var_oscs for osc in var] + [
+        osc for clause in clause_oscs for osc in clause
+    ]
+
+
+def flatten_nw_oscillators(
+    osc_network: "SATOscNetwork",
+) -> list[CDGNode]:
+    """Flatten all oscillators into a single list."""
+    base_oscs = osc_network.base_oscs
+    return flatten_nw_stateful_oscillators(osc_network) + list(base_oscs)
+
+
 @dataclass
 class Clause:
     var0: int
@@ -149,6 +168,49 @@ class SATOscNetwork:
                 switch_arr[switch_idx] = 1
         return switch_arr
 
+    def problem_to_adjacency_matrix(self, problem: Problem):
+        """
+        Build the adjacency matrix based on the input clauses.
+
+        The adjacency matrix is a square matrix where the rows and columns correspond to the flattened variable oscillators,
+        clause oscillators, and the base oscillators (False, True, Blue).
+        The value at (i, j) is 1 if there is a clause that connects oscillator i and j, otherwise 0.
+
+        Args:
+            problem (Problem): The problem instance containing the clauses.
+        """
+        flatten_oscs = flatten_nw_oscillators(self)
+        osc_to_idx = {osc.name: idx for idx, osc in enumerate(flatten_oscs)}
+        n_oscs = len(flatten_oscs)
+        adj_matrix = np.zeros((n_oscs, n_oscs))
+
+        # Enumerate clause_cpls, var_cpls, base_to_clause_cpls, and blue_to_var_cpls
+        # and mark the connections in the adjacency matrix
+        flatten_cpls: list[CDGEdge] = []
+        for cpls in self.clause_cpls + self.base_to_clause_cpls + self.blue_to_var_cpls:
+            flatten_cpls.extend(list(cpls))
+        flatten_cpls.extend(self.var_cpls)
+
+        for edge in flatten_cpls:
+            src_idx = osc_to_idx[edge.src.name]
+            dst_idx = osc_to_idx[edge.dst.name]
+            adj_matrix[src_idx, dst_idx] = 1
+            adj_matrix[dst_idx, src_idx] = 1
+
+        # Enumerate the clauses in the problem and mark the connections in the adjacency matrix
+        for clause_id, clause in enumerate(problem):
+            for nth_var, signed_var in enumerate(clause):
+                # Get the index of the variable oscillator
+                var_idx = abs(signed_var) - 1
+                is_pos = signed_var > 0
+                cpl = self.var_clause_cpls[var_idx][clause_id][is_pos][nth_var]
+                src_idx = osc_to_idx[cpl.src.name]
+                dst_idx = osc_to_idx[cpl.dst.name]
+                adj_matrix[src_idx, dst_idx] = 1
+                adj_matrix[dst_idx, src_idx] = 1
+
+        return adj_matrix
+
 
 def create_3sat_graph(n_vars: int, n_clauses: int, trainable_mgr: TrainableMgr):
     """
@@ -164,8 +226,8 @@ def create_3sat_graph(n_vars: int, n_clauses: int, trainable_mgr: TrainableMgr):
 
     sat_graph = CDG()
     # Good solution found for 3 variables and 7 clauses
-    # weight_str = "0.87295475  1.16870115 -2.10737176  0.15904553  2.25720177  0.0036878 -2.12575306 -2.0656077  -0.64780937"
-    weight_str = "1 1 -1 1 1 -1 -1 -1 -1"
+    weight_str = "0.87295475  1.16870115 -2.10737176  0.15904553  2.25720177  0.0036878 -2.12575306 -2.0656077  -0.64780937"
+    # weight_str = "1 1 -1 1 1 -1 -1 -1 -1"
     ws = [float(w) for w in weight_str.strip("[]").split()]
     # Parameters for oscillators and couplings
     var_osc_args = {
@@ -303,3 +365,41 @@ def create_3sat_graph(n_vars: int, n_clauses: int, trainable_mgr: TrainableMgr):
     )
 
     return sat_graph, sat_network
+
+
+def parse_cnf_file(file_name: str) -> Problem:
+    """
+    Parse a CNF file and return a Problem object.
+
+    Args:
+        file_name (str): The name of the CNF file to parse.
+
+    Returns:
+        Problem: A Problem object containing the clauses parsed from the CNF file.
+    """
+    clauses = []
+    with open(file_name, "r") as f:
+        for line in f:
+            if line.startswith("p cnf"):
+                n_var, n_clause = map(int, line.strip().split()[2:4])
+                continue
+            if line.startswith("c"):
+                continue
+            if line.strip() == "":
+                continue
+            if line.startswith("%"):
+                break  # Stop parsing on a comment line
+            clause = list(map(int, line.strip().split()))
+            clause.pop()  # Remove the trailing 0
+            if len(clause) != 3:
+                raise ValueError(f"Invalid clause: {clause}. Expected 3 literals.")
+            clauses.append(Clause(*clause))
+    if len(clauses) != n_clause:
+        raise ValueError(
+            f"Number of clauses parsed ({len(clauses)}) does not match the expected number ({n_clause})."
+        )
+    if any(abs(var) > n_var for clause in clauses for var in clause):
+        raise ValueError(
+            f"Variable index out of bounds. Expected variables in range 1 to {n_var}."
+        )
+    return Problem(clauses)

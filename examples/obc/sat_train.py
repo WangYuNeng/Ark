@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Callable, Generator
+from typing import Callable, Generator, Optional
 
 import equinox as eqx
 import jax
@@ -10,14 +10,16 @@ import optax
 import spec_optimization as opt_spec
 from diffrax import Tsit5
 from jaxtyping import PyTree
-from sat_dataloader import (
-    SATDataloader,
-    sat_2var3clauses_data,
-    sat_3var7clauses_data,
-    sat_kvar_exact_assignment_clauses_with_redundant_data,
-)
+from sat_dataloader import SATDataloader, sat_3var7clauses_data, sat_from_cnf_dir
 from sat_loss import loss_w_sol
-from sat_utils import BLUE_PHASE, FALSE_PHASE, TRUE_PHASE, create_3sat_graph
+from sat_parser import parser
+from sat_utils import (
+    BLUE_PHASE,
+    FALSE_PHASE,
+    TRUE_PHASE,
+    create_3sat_graph,
+    flatten_nw_stateful_oscillators,
+)
 
 import wandb
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
@@ -25,18 +27,34 @@ from ark.optimization.opt_compiler import OptCompiler
 from ark.specification.trainable import Trainable, TrainableMgr
 
 jax.config.update("jax_enable_x64", True)
+args = parser.parse_args()
+
+SEED = args.seed
+
+T1 = args.t1
+DT0 = args.dt0
+
+BZ = args.batch_size
+STEPS = args.steps
+LR = args.lr
+
+TASK = args.task
+CNF_DIR: Optional[str] = args.cnf_dir
+
+USE_WANDB = args.wandb
+RUN_NAME = args.run_name
+TAG = args.tag
+
+N_PLOT = args.n_plots
+
 trainable_mgr = TrainableMgr()
-optim = optax.adam(learning_rate=1e-1)
-T1 = 10
+optim = optax.adam(learning_rate=LR)
 time_info = TimeInfo(
     t0=0.0,
     t1=T1,
-    dt0=0.01,
+    dt0=DT0,
     saveat=[T1],
 )
-
-BZ = 128
-STEPS = 60
 
 
 @eqx.filter_jit
@@ -63,7 +81,9 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator):
     return model
 
 
-def plot_results(model: BaseAnalogCkt, data: jax.Array, switches: jax.Array):
+def plot_results(
+    model: BaseAnalogCkt, data: jax.Array, switches: jax.Array, n_vars: int
+):
     """
     Plot the results of the model.
     """
@@ -74,8 +94,9 @@ def plot_results(model: BaseAnalogCkt, data: jax.Array, switches: jax.Array):
         saveat=jnp.arange(0, T1, 0.01),
     )
 
+    n_var_oscs = n_vars * 2
     n_plot = data.shape[0]
-    figs, axes = plt.subplots(nrows=n_plot, ncols=1, figsize=(8, 3 * n_plot))
+    figs, axes = plt.subplots(nrows=n_plot, ncols=1, figsize=(6, 2 * n_plot))
     if n_plot == 1:
         axes = [axes]
     for i in range(n_plot):
@@ -83,8 +104,7 @@ def plot_results(model: BaseAnalogCkt, data: jax.Array, switches: jax.Array):
         axes[i].set_xlabel("Time")
         axes[i].set_ylabel("Phase")
         model_out = model(ti, data[i], switches[i], 0, 0).T
-        print(jnp.mod(model_out[:, -1], 2.0))
-        for osc_id, trace in enumerate(model_out):
+        for osc_id, trace in enumerate(model_out[:n_var_oscs]):
             sign = "-" if osc_id % 2 == 0 else "+"
             label = f"{sign}x{osc_id // 2 + 1}"
             axes[i].plot(ti.saveat, trace, label=label)
@@ -117,20 +137,28 @@ def plot_results(model: BaseAnalogCkt, data: jax.Array, switches: jax.Array):
 
 
 if __name__ == "__main__":
-    np.random.seed(428)
+    np.random.seed(SEED)
 
-    graph, nw = create_3sat_graph(n_vars=3, n_clauses=7, trainable_mgr=trainable_mgr)
-    # n_var = 2
-    # d = 4
-    # graph, nw = create_3sat_graph(
-    #     n_vars=n_var, n_clauses=n_var + d, trainable_mgr=trainable_mgr
-    # )
+    if TASK == "3sat7clauses":
+        graph, nw = create_3sat_graph(
+            n_vars=3, n_clauses=7, trainable_mgr=trainable_mgr
+        )
+        sat_probs, sat_solutions = sat_3var7clauses_data()
+        loss_fn = partial(loss_w_sol, time_info=time_info)
+
+    elif TASK == "from_cnf":
+        sat_probs = sat_from_cnf_dir(dir_path=CNF_DIR)
+        prob = sat_probs[0]
+        n_vars = max(abs(var) for clause in prob for var in clause)
+        n_clauses = len(prob)
+        graph, nw = create_3sat_graph(
+            n_vars=n_vars, n_clauses=n_clauses, trainable_mgr=trainable_mgr
+        )
+        sat_solutions = None
 
     # flatten the var_oscs
-    nodes_flat = []
-    for var_osc in nw.var_oscs:
-        nodes_flat.extend(list(var_osc))
-
+    n_vars = len(nw.var_oscs)
+    nodes_flat = flatten_nw_stateful_oscillators(nw)
     ckt_class = OptCompiler().compile(
         prog_name="3sat",
         cdg=graph,
@@ -150,21 +178,21 @@ if __name__ == "__main__":
     )
     nw.set_var_clause_cpls_args_idx(model=model)
 
-    sat_probs, sat_solutions = sat_3var7clauses_data()
-    # sat_probs, sat_solutions = sat_kvar_exact_assignment_clauses_with_redundant_data(
-    #     k=n_var, d=d
-    # )
     dataloader = SATDataloader(BZ, sat_probs, nw, sat_solutions)
-    init_states, switches, sol = dataloader.__iter__().__next__()
+    init_states, switches, sol, adj_mat = dataloader.__iter__().__next__()
 
-    n_plot = 1
+    n_plot = N_PLOT
     print("Assignment solution:")
     print(sol[:n_plot])
     print("Solution in phase:")
     print(jnp.sin(jnp.where(sol[:n_plot], TRUE_PHASE, FALSE_PHASE) * jnp.pi))
+    plot_results(model, init_states[:n_plot], switches[:n_plot], n_vars)
+
+    model = train(model=model, loss_fn=loss_fn, dl=dataloader)
+    plot_results(model, init_states[:n_plot], switches[:n_plot])
     plot_results(model, init_states[:n_plot], switches[:n_plot])
 
     loss_fn = partial(loss_w_sol, time_info=time_info)
 
     model = train(model=model, loss_fn=loss_fn, dl=dataloader)
-    plot_results(model, init_states[:n_plot], switches[:n_plot])
+    plot_results(model, init_states[:n_plot], switches[:n_plot], n_vars)

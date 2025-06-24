@@ -92,6 +92,34 @@ def sat_from_cnf_dir(dir_path: str) -> list[Problem]:
     return sat_probs
 
 
+def sat_random_clauses(n_vars: int, n_clauses: int, n_prob: int) -> list[Problem]:
+    """
+    Generate a list of random SAT problems with a specified number of variables and clauses.
+
+    Args:
+        n_vars (int): Number of variables in each SAT problem.
+        n_clauses (int): Number of clauses in each SAT problem.
+        n_prob (int): Number of SAT problems to generate.
+
+    Returns:
+        list[Problem]: A list of randomly generated SAT problems.
+    """
+    sat_probs = []
+    for _ in range(n_prob):
+        clauses = [
+            Clause(
+                *np.random.choice(
+                    [i for i in range(-n_vars, 0)] + [i for i in range(1, n_vars + 1)],
+                    size=3,
+                    replace=True,
+                ).tolist()
+            )
+            for _ in range(n_clauses)
+        ]
+        sat_probs.append(Problem(clauses))
+    return sat_probs
+
+
 class SATDataloader:
     """
     A dataloader to prepare the SAT problem for the OBC.
@@ -136,7 +164,9 @@ class SATDataloader:
     def __iter__(
         self,
     ) -> Generator[
-        tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray], None, None
+        tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, int, jnp.ndarray],
+        None,
+        None,
     ]:
         """Generate 1. random intial states for the OBC network, 2. the switch array for the SAT problem,
         3. the solution for the SAT problem if provided.
@@ -157,6 +187,7 @@ class SATDataloader:
         osc_network = self.osc_network
         batch_size = self.batch_size
         n_oscillators = 2 * len(osc_network.var_oscs) + 6 * len(osc_network.clause_oscs)
+        n_vars = len(osc_network.var_oscs)
 
         while True:
             initial_states = np.random.rand(batch_size, n_oscillators) * 2
@@ -183,9 +214,14 @@ class SATDataloader:
                     for prob_idx in sampled_prob_idx
                 ]
             )
+            probs = [
+                self.sat_probs[prob_idx].to_list() for prob_idx in sampled_prob_idx
+            ]
             yield (
                 jnp.array(initial_states),
                 jnp.array(switch_arrs),
                 jnp.array(solutions) if self.sat_solutions else None,
                 jnp.array(adj_matrices),
+                n_vars,
+                jnp.array(probs),
             )

@@ -34,6 +34,27 @@ def flatten_nw_oscillators(
     return flatten_nw_stateful_oscillators(osc_network) + list(base_oscs)
 
 
+def n_sat_clauses(clauses: list[list[int]], bool_assignment: list[bool]):
+    """Count the number of satisfied clauses in the assignment.
+    Args:
+        clauses (list[list[int]]): List of clauses, where each clause is a list of integers representing the variables.
+        bool_assignment (list[bool]): List of boolean values representing the assignment of variables.
+            The index corresponds to the variable index (1-indexed), where True means the variable is True and False means the variable is False.
+    Returns:
+        int: Number of satisfied clauses.
+    """
+    cnt = 0
+    for clause in clauses:
+        for var in clause:
+            if var > 0 and bool_assignment[var - 1]:
+                cnt += 1
+                break
+            elif var < 0 and not bool_assignment[-var - 1]:
+                cnt += 1
+                break
+    return cnt
+
+
 @dataclass
 class Clause:
     var0: int
@@ -45,6 +66,13 @@ class Clause:
 
     def __getitem__(self, idx):
         return (self.var0, self.var1, self.var2)[idx]
+
+    def __hash__(self):
+        return hash((self.var0, self.var1, self.var2))
+
+    def to_list(self) -> list[int]:
+        """Convert the clause to a list of integers."""
+        return [self.var0, self.var1, self.var2]
 
 
 @dataclass
@@ -60,9 +88,30 @@ class Problem:
     def __len__(self):
         return len(self.clauses)
 
+    def to_list(self) -> list[list[int]]:
+        """Convert the problem to a list of clauses, where each clause is a list of integers."""
+        return [clause.to_list() for clause in self.clauses]
+
+    def n_sat_clauses(self, bool_assignment: list[bool]) -> int:
+        """Count the number of satisfied clauses in the assignment."""
+        return n_sat_clauses(self.to_list(), bool_assignment)
+
+    def is_satisfied(self, bool_assignment: list[bool]) -> bool:
+        """Check if the assignment satisfies all clauses."""
+        return self.n_sat_clauses(bool_assignment) == len(self.clauses)
+
+    def __hash__(self):
+        return hash(tuple(self.clauses))
+
 
 @dataclass
 class Assignment:
+    """Wrapper class for the assignment of variables in a SAT problem.
+
+    The assignment is a list of integers, where each integer represents the value of a variable.
+    E.g., [2, -1, 3, -4] means variable (1, 2, 3, 4) are assigned values (F, T, T, F), respectively.
+    """
+
     vars: list[int]
 
     def __iter__(self):
@@ -70,6 +119,16 @@ class Assignment:
 
     def __getitem__(self, idx):
         return self.vars[idx]
+
+    def to_bool_list(self) -> list[bool]:
+        """Convert the assignment to a list of booleans."""
+        bool_vars = [None for _ in self.vars]
+        for var in self.vars:
+            if var > 0:
+                bool_vars[var - 1] = True
+            elif var < 0:
+                bool_vars[-var - 1] = False
+        return bool_vars
 
 
 @dataclass

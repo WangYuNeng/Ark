@@ -38,11 +38,11 @@ parser.add_argument(
 parser.add_argument(
     "--task",
     type=str,
-    choices=["3sat7clauses", "from_cnf"],
+    choices=["3var7clauses", "from_cnf", "random"],
     required=True,
-    help="The task to run: '3sat7clauses' for a predefined 3-SAT problem with 7"
-    " clauses with exact one solution, or 'from_cnf' to load SAT problems from a directory"
-    " of CNF files.",
+    help="The task to run: '3var7clauses' for a predefined 3-SAT problem with 7"
+    " clauses with exact one solution, 'from_cnf' to load SAT problems from a directory"
+    " of CNF files., or 'random' to generate random SAT problems.",
 )
 parser.add_argument(
     "--cnf_dir",
@@ -50,7 +50,31 @@ parser.add_argument(
     default=None,
     help="Directory containing CNF files for the 'from_cnf' task.",
 )
+parser.add_argument(
+    "--n_vars",
+    type=int,
+    default=None,
+    help="Number of variables in the SAT problem (only used for 'random' task).",
+)
+parser.add_argument(
+    "--n_clauses",
+    type=int,
+    default=None,
+    help="Number of clauses in the SAT problem (only used for 'random' task).",
+)
 
+parser.add_argument(
+    "--load_path",
+    type=str,
+    default=None,
+    help="Path to load the model from. If provided, the model will be loaded from this path.",
+)
+parser.add_argument(
+    "--save_path",
+    type=str,
+    default=None,
+    help="Path to save the model. If provided, the model will be saved to this path.",
+)
 
 parser.add_argument(
     "--wandb",

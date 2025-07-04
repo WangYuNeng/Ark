@@ -74,6 +74,18 @@ class Clause:
         """Convert the clause to a list of integers."""
         return [self.var0, self.var1, self.var2]
 
+    def to_transform_matrix(self, n_vars: int) -> jnp.ndarray:
+        """Convert the clause to a transformation matrix.
+
+        The transformation matrix is 3 x n_vars, where each row is signed one-hot encoded
+        representation of the variables in the clause.
+        """
+
+        mat = np.zeros((3, n_vars), dtype=float)
+        for i, var in enumerate(self):
+            mat[i, abs(var) - 1] = 1.0 if var > 0 else -1.0
+        return jnp.array(mat)
+
 
 @dataclass
 class Problem:
@@ -99,6 +111,15 @@ class Problem:
     def is_satisfied(self, bool_assignment: list[bool]) -> bool:
         """Check if the assignment satisfies all clauses."""
         return self.n_sat_clauses(bool_assignment) == len(self.clauses)
+
+    def to_transform_matrix(self, n_vars: int) -> jnp.ndarray:
+        """Convert the problem to a transformation matrix.
+
+        The transformation matrix is n_clause x 3 x n_vars.
+        """
+
+        mat = [clause.to_transform_matrix(n_vars) for clause in self.clauses]
+        return jnp.array(mat)
 
     def __hash__(self):
         return hash(tuple(self.clauses))
@@ -285,8 +306,8 @@ def create_3sat_graph(n_vars: int, n_clauses: int, trainable_mgr: TrainableMgr):
 
     sat_graph = CDG()
     # Good solution found for 3 variables and 7 clauses
-    weight_str = "0.87295475  1.16870115 -2.10737176  0.15904553  2.25720177  0.0036878 -2.12575306 -2.0656077  -0.64780937"
-    # weight_str = "1 1 -1 1 1 -1 -1 -1 -1"
+    # weight_str = "0.87295475  1.16870115 -2.10737176  0.15904553  2.25720177  0.0036878 -2.12575306 -2.0656077  -0.64780937"
+    weight_str = "1 1 -1 1 1 -1 -1 -1 -1"
     ws = [float(w) for w in weight_str.strip("[]").split()]
     # Parameters for oscillators and couplings
     var_osc_args = {

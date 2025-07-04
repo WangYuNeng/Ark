@@ -1,3 +1,4 @@
+import interpax
 import jax
 import jax.numpy as jnp
 from sat_utils import (
@@ -10,6 +11,11 @@ from sat_utils import (
 )
 
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
+
+phase_x = jnp.array([0, 2 / 3, 4 / 3, 2])
+bool_value = jnp.array([-1, 1, 0, -1])
+
+phase_to_bool_fit = interpax.Akima1DInterpolator(phase_x, bool_value, check=False)
 
 
 def assignment_to_phase(assignment: jax.Array) -> jax.Array:
@@ -30,8 +36,48 @@ def phase_to_bool_assignments(assignment_phase: jax.Array) -> list[bool]:
     modular_phase = jnp.mod(assignment_phase, 2.0)
     threshold = (TRUE_PHASE - FALSE_PHASE) / 2
     return jnp.array(
-        [jnp.abs(phase - TRUE_PHASE) < threshold for phase in assignment_phase]
+        [jnp.abs(phase - TRUE_PHASE) < threshold for phase in modular_phase]
     )
+
+
+def phase_to_assignment_ste(assignment_phase: jax.Array) -> jax.Array:
+    """Convert phase values to variable assignments with a straight-through estimator
+
+    Args:
+        assignment_phase (jax.Array): Phase values of the variables, shape (n_vars,).
+
+    Returns:
+        jax.Array: Array of variable assignments.
+    """
+    modular_phase = jnp.mod(assignment_phase, 2.0)
+
+    assignment = jnp.where(
+        modular_phase
+        < (TRUE_PHASE + FALSE_PHASE) / 2,  # If phase is closer to FALSE_PHASE
+        -1,
+        jnp.where(
+            modular_phase
+            < (TRUE_PHASE + BLUE_PHASE) / 2,  # If phase is closer to TRUE_PHASE
+            1,
+            jnp.where(
+                modular_phase
+                < (BLUE_PHASE + 2) / 2,  # If phase is closer to BLUE_PHASE
+                0,
+                -1,  # If phase is closer to FALSE_PHASE again
+            ),
+        ),
+    )
+
+    assignment_approx = jnp.interp(modular_phase, phase_x, bool_value)
+
+    # Use straight-through estimator to allow gradients to pass through
+    assignment_ste = (
+        jax.lax.stop_gradient(assignment)
+        + assignment_approx
+        - jax.lax.stop_gradient(assignment_approx)
+    )
+
+    return assignment_ste
 
 
 def loss_w_sol(
@@ -42,6 +88,7 @@ def loss_w_sol(
     adj_matrix: jax.Array,
     n_vars: int,
     problems: jax.Array,
+    trasform_mats: jax.Array,
     time_info: TimeInfo,
 ):
     """
@@ -75,6 +122,7 @@ def system_energy_loss(
     adj_matrix: jax.Array,
     n_vars: int,
     problems: jax.Array,
+    trasform_mats: jax.Array,
     time_info: TimeInfo,
 ) -> tuple[jax.Array, jax.Array]:
     """Calculate the oscillator system energy as the loss function.
@@ -99,6 +147,42 @@ def system_energy_loss(
 
     # Return the mean energy as the loss, satisfied clauses ratio as a metric
     return jnp.mean(energy), y_raw
+
+
+def approx_sat_loss(
+    model: BaseAnalogCkt,
+    init_states: jax.Array,
+    switches: jax.Array,
+    sol: jax.Array,
+    adj_matrix: jax.Array,
+    n_vars: int,
+    problems: jax.Array,
+    trasform_mats: jax.Array,
+    time_info: TimeInfo,
+) -> tuple[jax.Array, jax.Array]:
+    """Calculate the oscillator system energy as the loss function.
+
+    Return:
+        tuple[jax.Array, jax.Array]: Mean energy of the system and the raw phase values.
+    """
+    # Get the output of the model, the first n_var output is a 1D array of shape (2n,) representing
+    # the phase values of -var[0], var[0], -var[1], var[1], -var[2], var[2], ..., -var[n], var[n]
+    y_raw = jax.vmap(model, in_axes=(None, 0, 0, None, None))(
+        time_info, init_states, switches, 0, 0
+    )
+
+    # y_raw: (batch_size, 1, len(adj_matrix) - 3)
+    # Squeeze y_raw to remove the second dimension
+    y_raw = jnp.squeeze(y_raw, axis=1)  # Shape: (batch_size, len(adj_matrix) - 3)
+
+    sat_loss = phase_to_approx_sat_loss(
+        n_vars=n_vars,
+        phase_raw=y_raw,
+        transform_mats=trasform_mats,
+    )  # Shape: (batch_size,)
+
+    # Return the mean energy as the loss, satisfied clauses ratio as a metric
+    return jnp.mean(sat_loss), y_raw
 
 
 def phase_to_energy(
@@ -137,7 +221,7 @@ def phase_to_sat_clause_rate(
     """Calculate the number of satisfied clauses in the SAT problems.
     Args:
         n_vars (int): Number of variables in the SAT problem.
-        phase_raw (jax.Array): Phase values of the variables, shape (n_oscs,).
+        phase_raw (jax.Array): Phase values of the variables, shape (n_problmes, n_oscs).
         problems (list[Problem]): List of SAT problems.
 
     Returns:
@@ -162,3 +246,45 @@ def phase_to_sat_clause_rate(
     n_clauses = jnp.array([len(prob) for prob in problems])
     ratio_satisfied = n_satisfied_clauses / n_clauses
     return ratio_satisfied
+
+
+def phase_to_approx_sat_loss(
+    n_vars: int,
+    phase_raw: jax.Array,
+    transform_mats: jax.Array,
+) -> jax.Array:
+    """Calculate the differentiable SAT loss based on the phase values.
+
+    Args:
+        n_vars (int): Number of variables in the SAT problem.
+        phase_raw (jax.Array): Phase values of the variables, shape (n_problems, n_oscs).
+        transform_mats (jax.Array): Transformation matrices for the SAT problems, shape (n_problems (batch_size),
+        n_clauses, 3, n_vars).
+
+    Returns:
+        jax.Array: Differentiable SAT loss.
+    """
+    # Take the POSITIVE oscillators' phases
+    var_phases = phase_raw[:, 1 : n_vars * 2 : 2]
+    var_bools = phase_to_assignment_ste(var_phases)  # Shape: (batch_size, n_vars)
+
+    var_vals_in_clauses = jax.vmap(
+        lambda var_bools, transform_mat: transform_mat @ var_bools, in_axes=(0, 0)
+    )(
+        var_bools, transform_mats
+    )  # Shape: (batch_size, n_clauses, 3)
+
+    # map [-1, 1] to [0, -] using softplus
+    # This penalizes values around 0 so that phases synchronize to blue or
+    # between true and false are penalized
+    alpha = 0.1  # Small positive constant to avoid zero
+    shifted_var_vals = (
+        jax.nn.leaky_relu(var_vals_in_clauses, negative_slope=alpha) + alpha
+    )
+
+    # Sum up along the last dimension to get the clause values and clip
+    clause_vals = jax.nn.tanh(
+        jnp.sum(shifted_var_vals, axis=-1)
+    )  # Shape: (batch_size, n_clauses)
+
+    return -jnp.mean(clause_vals, axis=-1)  # Mean over clauses for each problem

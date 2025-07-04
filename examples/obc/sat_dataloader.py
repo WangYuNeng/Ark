@@ -131,6 +131,13 @@ class SATDataloader:
             clauses as the SAT problem.
     """
 
+    batch_size: int
+    sat_probs: list[Problem]
+    osc_network: SATOscNetwork
+    sat_solutions: Optional[list[Clause]] = None
+    probs_switch_arrs: list[jnp.ndarray]
+    probs_adjacency_matrices: list[jnp.ndarray]
+
     def __init__(
         self,
         batch_size: int,
@@ -164,7 +171,15 @@ class SATDataloader:
     def __iter__(
         self,
     ) -> Generator[
-        tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, int, jnp.ndarray],
+        tuple[
+            jnp.ndarray,
+            jnp.ndarray,
+            jnp.ndarray,
+            jnp.ndarray,
+            int,
+            jnp.ndarray,
+            jnp.ndarray,
+        ],
         None,
         None,
     ]:
@@ -180,8 +195,8 @@ class SATDataloader:
             batch_size (int): The batch size for the dataloader.
 
         Returns:
-            Generator[tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]]: initial states, switch array, solution (if given), and
-            adjacency matrices.
+            Generator[tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]]: initial states, switch array, solution (if given),
+            adjacency matrices, number of variables, sat problems, and sat transformation matrices.
         """
 
         osc_network = self.osc_network
@@ -217,6 +232,10 @@ class SATDataloader:
             probs = [
                 self.sat_probs[prob_idx].to_list() for prob_idx in sampled_prob_idx
             ]
+            transform_mats = [
+                self.sat_probs[prob_idx].to_transform_matrix(n_vars=n_vars)
+                for prob_idx in sampled_prob_idx
+            ]
             yield (
                 jnp.array(initial_states),
                 jnp.array(switch_arrs),
@@ -224,4 +243,5 @@ class SATDataloader:
                 jnp.array(adj_matrices),
                 n_vars,
                 jnp.array(probs),
+                jnp.array(transform_mats),
             )

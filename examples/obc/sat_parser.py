@@ -36,6 +36,12 @@ parser.add_argument(
     help="Number of training steps.",
 )
 parser.add_argument(
+    "--loss_fn",
+    type=str,
+    choices=["energy", "approx_sat"],
+    default="approx_sat",
+)
+parser.add_argument(
     "--task",
     type=str,
     choices=["3var7clauses", "from_cnf", "random"],

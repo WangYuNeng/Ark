@@ -31,8 +31,11 @@ Osc_modified = NodeType(
         "attr_def": {
             "lock_fn": AttrDef(attr_type=FunctionAttr(nargs=2)),
             "osc_fn": AttrDef(attr_type=FunctionAttr(nargs=2)),
-            "lock_strength": AttrDef(attr_type=AnalogAttr((0, 10))),
-            "cpl_strength": AttrDef(attr_type=AnalogAttr((0, 10))),
+            "lock_strength": AttrDef(attr_type=AnalogAttr((-10, 10))),
+            "cpl_strength": AttrDef(attr_type=AnalogAttr((-10, 10))),
+            # Custom range for obc SAT
+            # "lock_strength": AttrDef(attr_type=AnalogAttr((0, 10))),
+            # "cpl_strength": AttrDef(attr_type=AnalogAttr((0, 10))),
         },
     },
 )

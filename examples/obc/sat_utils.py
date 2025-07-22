@@ -1,0 +1,485 @@
+from dataclasses import dataclass
+
+import jax.numpy as jnp
+import numpy as np
+import spec_optimization as opt_spec
+
+from ark.cdg.cdg import CDG, CDGEdge, CDGNode
+from ark.optimization.base_module import BaseAnalogCkt
+from ark.specification.trainable import Trainable, TrainableMgr
+
+(FALSE_PHASE, TRUE_PHASE, BLUE_PHASE) = (0, 2 / 3, 4 / 3)
+
+
+def locking_3x(x, lock_strength: float):
+    return lock_strength * jnp.sin(3 * jnp.pi * x)
+
+
+def flatten_nw_stateful_oscillators(
+    osc_network: "SATOscNetwork",
+) -> list[CDGNode]:
+    """Flatten all oscillators into a single list."""
+    clause_oscs = osc_network.clause_oscs
+    var_oscs = osc_network.var_oscs
+    return [osc for var in var_oscs for osc in var] + [
+        osc for clause in clause_oscs for osc in clause
+    ]
+
+
+def flatten_nw_oscillators(
+    osc_network: "SATOscNetwork",
+) -> list[CDGNode]:
+    """Flatten all oscillators into a single list."""
+    base_oscs = osc_network.base_oscs
+    return flatten_nw_stateful_oscillators(osc_network) + list(base_oscs)
+
+
+def n_sat_clauses(clauses: list[list[int]], bool_assignment: list[bool]):
+    """Count the number of satisfied clauses in the assignment.
+    Args:
+        clauses (list[list[int]]): List of clauses, where each clause is a list of integers representing the variables.
+        bool_assignment (list[bool]): List of boolean values representing the assignment of variables.
+            The index corresponds to the variable index (1-indexed), where True means the variable is True and False means the variable is False.
+    Returns:
+        int: Number of satisfied clauses.
+    """
+    cnt = 0
+    for clause in clauses:
+        for var in clause:
+            if var > 0 and bool_assignment[var - 1]:
+                cnt += 1
+                break
+            elif var < 0 and not bool_assignment[-var - 1]:
+                cnt += 1
+                break
+    return cnt
+
+
+@dataclass
+class Clause:
+    var0: int
+    var1: int
+    var2: int
+
+    def __iter__(self):
+        return iter((self.var0, self.var1, self.var2))
+
+    def __getitem__(self, idx):
+        return (self.var0, self.var1, self.var2)[idx]
+
+    def __hash__(self):
+        return hash((self.var0, self.var1, self.var2))
+
+    def to_list(self) -> list[int]:
+        """Convert the clause to a list of integers."""
+        return [self.var0, self.var1, self.var2]
+
+    def to_transform_matrix(self, n_vars: int) -> jnp.ndarray:
+        """Convert the clause to a transformation matrix.
+
+        The transformation matrix is 3 x n_vars, where each row is signed one-hot encoded
+        representation of the variables in the clause.
+        """
+
+        mat = np.zeros((3, n_vars), dtype=float)
+        for i, var in enumerate(self):
+            mat[i, abs(var) - 1] = 1.0 if var > 0 else -1.0
+        return jnp.array(mat)
+
+
+@dataclass
+class Problem:
+    clauses: list[Clause]
+
+    def __iter__(self):
+        return iter(self.clauses)
+
+    def __getitem__(self, idx):
+        return self.clauses[idx]
+
+    def __len__(self):
+        return len(self.clauses)
+
+    def to_list(self) -> list[list[int]]:
+        """Convert the problem to a list of clauses, where each clause is a list of integers."""
+        return [clause.to_list() for clause in self.clauses]
+
+    def n_sat_clauses(self, bool_assignment: list[bool]) -> int:
+        """Count the number of satisfied clauses in the assignment."""
+        return n_sat_clauses(self.to_list(), bool_assignment)
+
+    def is_satisfied(self, bool_assignment: list[bool]) -> bool:
+        """Check if the assignment satisfies all clauses."""
+        return self.n_sat_clauses(bool_assignment) == len(self.clauses)
+
+    def to_transform_matrix(self, n_vars: int) -> jnp.ndarray:
+        """Convert the problem to a transformation matrix.
+
+        The transformation matrix is n_clause x 3 x n_vars.
+        """
+
+        mat = [clause.to_transform_matrix(n_vars) for clause in self.clauses]
+        return jnp.array(mat)
+
+    def __hash__(self):
+        return hash(tuple(self.clauses))
+
+
+@dataclass
+class Assignment:
+    """Wrapper class for the assignment of variables in a SAT problem.
+
+    The assignment is a list of integers, where each integer represents the value of a variable.
+    E.g., [2, -1, 3, -4] means variable (1, 2, 3, 4) are assigned values (F, T, T, F), respectively.
+    """
+
+    vars: list[int]
+
+    def __iter__(self):
+        return iter(self.vars)
+
+    def __getitem__(self, idx):
+        return self.vars[idx]
+
+    def to_bool_list(self) -> list[bool]:
+        """Convert the assignment to a list of booleans."""
+        bool_vars = [None for _ in self.vars]
+        for var in self.vars:
+            if var > 0:
+                bool_vars[var - 1] = True
+            elif var < 0:
+                bool_vars[-var - 1] = False
+        return bool_vars
+
+
+@dataclass
+class SATOscNetwork:
+    """Class to store all the nodes and edges of the 3-SAT graph.
+
+    Attributes:
+        clause_oscs: list[list[CDGNode]], Clause oscillators. Length is the number of clauses and each entry is a list of 6 oscillators.
+        var_oscs: list[tuple[CDGNode, CDGNode]],Variable oscillators. Length is the number of variables and each entry is a tuple of 2 oscillators,
+            representing the negative and positive variable oscillators.
+        base_oscs: tuple[CDGNode, CDGNode, CDGNode], Base oscillators. Tuple of 3 oscillators representing the False, True and Blue oscillators.
+        clause_cpls: list[list[CDGEdge]], Clause coupling edges. Length is the number of clauses and each entry is a list of 5 coupling edges
+            within each one of the clause oscillators.
+        var_cpls: list[CDGEdge], Variable coupling edges. Length is the number of variables and each entry is the coupling edge between the negative
+            and positive variable oscillators.
+        base_to_clause_cpls: list[list[CDGEdge]], Coupling edges between the base oscillators and the clause oscillators. Length is the number of clauses
+            and each entry is a list of 5 coupling edges. The first 4 edges are from True oscillator to the 1st, 2nd, 4th and 6th oscillators of the clause
+            and the last edge is from False oscillator to the 5th oscillator of the clause.
+        blue_to_var_cpls: list[tuple[CDGEdge, CDGEdge]], Coupling edges between the Blue oscillator and the variable oscillators. Length is the number of variables
+            and each entry is a tuple of 2 coupling edges, from the Blue oscillator to the negative and positive variable oscillators, respectively.
+        var_clause_cpls: list[list[tuple[tuple[CDGEdge, CDGEdge, CDGEdge], tuple[CDGEdge, CDGEdge, CDGEdge]]]], Coupling edges between the variable oscillators and
+            the clause oscillators. Length is the number of variables and each entry is a list of length # of clauses. Each entry of the list is a 2-tuple of
+            switchable coupling edges, from the negative and positive variable oscillators to the 1st, 4th and 6th oscillators of the clause, respectively.
+        clause_lock_cpls: list[list[CDGEdge]], Coupling edges for locking the clause oscillators. Length is the number of clauses and each entry is a list of 6 coupling
+            edges within each one of the clause oscillators.
+        var_lock_cpls: list[tuple[CDGEdge, CDGEdge]], Coupling edges for locking the variable oscillators. Length is the number of variables and each entry is a tuple
+            of 2 coupling edges, from the negative and positive variable oscillators to themselves.
+        var_clause_cpls_args_idx: list[list[tuple[tuple[int, int, int], tuple[int, int, int]]]], The indexes of the switches between the variable oscillators and
+            the clause oscillators in the arguments passing to the optimizer.
+    """
+
+    clause_oscs: list[list[CDGNode]]
+    var_oscs: list[tuple[CDGNode, CDGNode]]
+    base_oscs: tuple[CDGNode, CDGNode, CDGNode]
+
+    clause_cpls: list[list[CDGEdge]]
+    var_cpls: list[CDGEdge]
+    base_to_clause_cpls: list[list[CDGEdge]]
+    blue_to_var_cpls: list[tuple[CDGEdge, CDGEdge]]
+    var_clause_cpls: list[
+        list[tuple[tuple[CDGEdge, CDGEdge, CDGEdge], tuple[CDGEdge, CDGEdge, CDGEdge]]]
+    ]
+    clause_lock_cpls: list[list[CDGEdge]]
+    var_lock_cpls: list[tuple[CDGEdge, CDGEdge]]
+
+    var_clause_cpls_args_idx: list[
+        list[tuple[tuple[int, int, int], tuple[int, int, int]]]
+    ]
+
+    def set_var_clause_cpls_args_idx(self, model: BaseAnalogCkt):
+        self.var_clause_cpls_args_idx = [
+            [
+                tuple(
+                    [
+                        tuple(
+                            [model.switch_to_args_id(sw.name) for sw in neg_switches]
+                        ),
+                        tuple(
+                            [model.switch_to_args_id(sw.name) for sw in pos_switches]
+                        ),
+                    ]
+                )
+                for neg_switches, pos_switches in clauses
+            ]
+            for clauses in self.var_clause_cpls
+        ]
+
+    def problem_to_switch_array(self, problem: Problem):
+        """
+        Build the swtich array based on the input clauses.
+
+        All switches are initialized to False, and only turned on for the the variable oscillators connecting
+        to the clause oscillators.
+
+        Args:
+            clauses (list[tuple[int, int, int]]): List of clauses, each clause is a tuple of 3 integers
+                representing the variable indices (1-indexed) in the clause.
+        """
+        assert (
+            self.var_clause_cpls_args_idx is not None
+        ), "mapping from switches to arguments indexes is not set"
+        assert len(problem) == len(
+            self.clause_oscs
+        ), "Number of clauses must match the number of clause oscillators"
+        len_switch_args = 6 * len(self.var_oscs) * len(self.clause_oscs)
+        switch_arr = [0 for _ in range(len_switch_args)]
+        for clause_id, clause in enumerate(problem):
+            for nth_var, signed_var in enumerate(clause):
+                # Get the index of the variable oscillator
+                var_idx = abs(signed_var) - 1
+                is_pos = signed_var > 0
+                switch_idx = self.var_clause_cpls_args_idx[var_idx][clause_id][is_pos][
+                    nth_var
+                ]
+                # Set the switch to True
+                switch_arr[switch_idx] = 1
+        return switch_arr
+
+    def problem_to_adjacency_matrix(self, problem: Problem):
+        """
+        Build the adjacency matrix based on the input clauses.
+
+        The adjacency matrix is a square matrix where the rows and columns correspond to the flattened variable oscillators,
+        clause oscillators, and the base oscillators (False, True, Blue).
+        The value at (i, j) is 1 if there is a clause that connects oscillator i and j, otherwise 0.
+
+        Args:
+            problem (Problem): The problem instance containing the clauses.
+        """
+        flatten_oscs = flatten_nw_oscillators(self)
+        osc_to_idx = {osc.name: idx for idx, osc in enumerate(flatten_oscs)}
+        n_oscs = len(flatten_oscs)
+        adj_matrix = np.zeros((n_oscs, n_oscs))
+
+        # Enumerate clause_cpls, var_cpls, base_to_clause_cpls, and blue_to_var_cpls
+        # and mark the connections in the adjacency matrix
+        flatten_cpls: list[CDGEdge] = []
+        for cpls in self.clause_cpls + self.base_to_clause_cpls + self.blue_to_var_cpls:
+            flatten_cpls.extend(list(cpls))
+        flatten_cpls.extend(self.var_cpls)
+
+        for edge in flatten_cpls:
+            src_idx = osc_to_idx[edge.src.name]
+            dst_idx = osc_to_idx[edge.dst.name]
+            adj_matrix[src_idx, dst_idx] = 1
+            adj_matrix[dst_idx, src_idx] = 1
+
+        # Enumerate the clauses in the problem and mark the connections in the adjacency matrix
+        for clause_id, clause in enumerate(problem):
+            for nth_var, signed_var in enumerate(clause):
+                # Get the index of the variable oscillator
+                var_idx = abs(signed_var) - 1
+                is_pos = signed_var > 0
+                cpl = self.var_clause_cpls[var_idx][clause_id][is_pos][nth_var]
+                src_idx = osc_to_idx[cpl.src.name]
+                dst_idx = osc_to_idx[cpl.dst.name]
+                adj_matrix[src_idx, dst_idx] = 1
+                adj_matrix[dst_idx, src_idx] = 1
+
+        return adj_matrix
+
+
+def create_3sat_graph(n_vars: int, n_clauses: int, trainable_mgr: TrainableMgr):
+    """
+    Create a configurable 3-SAT graph with the given # of variables and clauses.
+
+    variable oscillators have switchable coupling to the 1st, 4th and 6th oscillators of each
+    clause.
+
+    Args:
+        n_vars (int): Number of variables.
+        n_clauses (int): Number of clauses.
+    """
+
+    sat_graph = CDG()
+    # Good solution found for 3 variables and 7 clauses
+    # weight_str = "0.87295475  1.16870115 -2.10737176  0.15904553  2.25720177  0.0036878 -2.12575306 -2.0656077  -0.64780937"
+    weight_str = "1 1 -1 1 1 -1 -1 -1 -1"
+    ws = [float(w) for w in weight_str.strip("[]").split()]
+    # Parameters for oscillators and couplings
+    var_osc_args = {
+        "lock_fn": locking_3x,
+        "osc_fn": opt_spec.coupling_fn,
+        "lock_strength": trainable_mgr.new_analog(init_val=ws[0]),
+        "cpl_strength": trainable_mgr.new_analog(init_val=ws[1]),
+    }
+    var_cpl_args = {
+        "k": trainable_mgr.new_analog(init_val=ws[2]),
+    }
+    clause_osc_args = {
+        "lock_fn": locking_3x,
+        "osc_fn": opt_spec.coupling_fn,
+        "lock_strength": trainable_mgr.new_analog(init_val=ws[3]),
+        "cpl_strength": trainable_mgr.new_analog(init_val=ws[4]),
+    }
+    clause_cpl_args = {
+        "k": trainable_mgr.new_analog(init_val=ws[5]),
+    }
+    blue2var_cpl_args = {
+        "k": trainable_mgr.new_analog(init_val=ws[6]),
+    }
+    base2clause_cpl_args = {
+        "k": trainable_mgr.new_analog(init_val=ws[7]),
+    }
+    var2clause_cpl_args = {
+        "k": trainable_mgr.new_analog(init_val=ws[8]),
+    }
+
+    # Create True, False, Blue oscillators
+    f_osc, t_osc, b_osc = (
+        opt_spec.FixedSource(phase=FALSE_PHASE),
+        opt_spec.FixedSource(phase=TRUE_PHASE),
+        opt_spec.FixedSource(phase=BLUE_PHASE),
+    )
+    base_oscs = (f_osc, t_osc, b_osc)
+
+    # Create varaible oscillators var_oscs[i][0] for -(i+1) and var_oscs[i][1] for +(i+1)
+    # var_cpls[i][0] for -(i+1) to Blue, var_cpls[i][1] for +(i+1) to Blue, and var_cpls[i][2]
+    # for -(i+1) to +(i+1)
+    var_oscs, var_cpls, var_lock_cpls = [], [], []
+    blue_to_var_cpls = []
+    for _ in range(n_vars):
+        oscs = tuple([opt_spec.Osc_modified(**var_osc_args) for _ in range(2)])
+        self_cpls = tuple([opt_spec.SelfCpl() for _ in range(2)])
+        osc_cpl = opt_spec.Coupling(**var_cpl_args)
+        blue_cpls = tuple([opt_spec.Coupling(**blue2var_cpl_args) for _ in range(2)])
+
+        # Self connection for locking
+        for osc, cpl in zip(oscs, self_cpls):
+            sat_graph.connect(cpl, osc, osc)
+
+        # Negative coupling between pos and neg variable oscillators
+        # Two variable oscillators should be out of phase
+        sat_graph.connect(osc_cpl, oscs[0], oscs[1])
+
+        # Connect Blue oscillator to variable oscillators
+        sat_graph.connect(blue_cpls[0], b_osc, oscs[0])
+        sat_graph.connect(blue_cpls[1], b_osc, oscs[1])
+
+        var_oscs.append(oscs)
+        var_cpls.append(osc_cpl)
+        var_lock_cpls.append(self_cpls)
+        blue_to_var_cpls.append(blue_cpls)
+
+    # Create clause oscillators and connect them to the variable oscillators
+    clause_oscs, clause_cpls, clause_lock_cpls = [], [], []
+    base_to_clause_cpls = []
+    var_clause_cpls = [[] for _ in range(n_vars)]
+    clause_var_conn_idx = [0, 3, 5]
+    for _ in range(n_clauses):
+        oscs = [opt_spec.Osc_modified(**clause_osc_args) for _ in range(6)]
+        cpls = [opt_spec.Coupling(**clause_cpl_args) for _ in range(5)]
+        b2c_cpls = [opt_spec.Coupling(**base2clause_cpl_args) for _ in range(5)]
+        self_cpls = [opt_spec.SelfCpl() for _ in range(6)]
+
+        # Connect internal clause oscillators
+        sat_graph.connect(cpls[0], oscs[0], oscs[1])
+        sat_graph.connect(cpls[1], oscs[1], oscs[2])
+        sat_graph.connect(cpls[2], oscs[2], oscs[3])
+        sat_graph.connect(cpls[3], oscs[2], oscs[4])
+        sat_graph.connect(cpls[4], oscs[4], oscs[5])
+
+        # Connect base oscillators to clause oscillators
+        sat_graph.connect(b2c_cpls[0], t_osc, oscs[0])
+        sat_graph.connect(b2c_cpls[1], t_osc, oscs[1])
+        sat_graph.connect(b2c_cpls[2], t_osc, oscs[3])
+        sat_graph.connect(b2c_cpls[3], t_osc, oscs[5])
+        sat_graph.connect(b2c_cpls[4], f_osc, oscs[4])
+
+        # Connect clause oscillators to themselves for locking
+        for osc, cpl in zip(oscs, self_cpls):
+            sat_graph.connect(cpl, osc, osc)
+
+        clause_oscs.append(oscs)
+        clause_cpls.append(cpls)
+        base_to_clause_cpls.append(b2c_cpls)
+        clause_lock_cpls.append(self_cpls)
+
+        # Connect variable oscillators to clause oscillators
+        # Both the positive and negative variable oscillators connect to the 1st, 4th and 6th
+        # oscillators of the clause with switchable coupling
+        for i in range(n_vars):
+            v2c_edges = tuple(
+                [
+                    tuple(
+                        [
+                            opt_spec.Coupling(switchable=True, **var2clause_cpl_args)
+                            for _ in range(3)
+                        ]
+                    )
+                    for _ in range(2)
+                ]
+            )
+            for j, idx in enumerate(clause_var_conn_idx):
+                # Connect the negative variable oscillator to the clause oscillator
+                sat_graph.connect(v2c_edges[0][j], var_oscs[i][0], oscs[idx])
+                # Connect the positive variable oscillator to the clause oscillator
+                sat_graph.connect(v2c_edges[1][j], var_oscs[i][1], oscs[idx])
+            var_clause_cpls[i].append(v2c_edges)
+
+    sat_network = SATOscNetwork(
+        clause_oscs=clause_oscs,
+        var_oscs=var_oscs,
+        base_oscs=base_oscs,
+        clause_cpls=clause_cpls,
+        var_cpls=var_cpls,
+        base_to_clause_cpls=base_to_clause_cpls,
+        blue_to_var_cpls=blue_to_var_cpls,
+        var_clause_cpls=var_clause_cpls,
+        clause_lock_cpls=clause_lock_cpls,
+        var_lock_cpls=var_lock_cpls,
+        var_clause_cpls_args_idx=None,
+    )
+
+    return sat_graph, sat_network
+
+
+def parse_cnf_file(file_name: str) -> Problem:
+    """
+    Parse a CNF file and return a Problem object.
+
+    Args:
+        file_name (str): The name of the CNF file to parse.
+
+    Returns:
+        Problem: A Problem object containing the clauses parsed from the CNF file.
+    """
+    clauses = []
+    with open(file_name, "r") as f:
+        for line in f:
+            if line.startswith("p cnf"):
+                n_var, n_clause = map(int, line.strip().split()[2:4])
+                continue
+            if line.startswith("c"):
+                continue
+            if line.strip() == "":
+                continue
+            if line.startswith("%"):
+                break  # Stop parsing on a comment line
+            clause = list(map(int, line.strip().split()))
+            clause.pop()  # Remove the trailing 0
+            if len(clause) != 3:
+                raise ValueError(f"Invalid clause: {clause}. Expected 3 literals.")
+            clauses.append(Clause(*clause))
+    if len(clauses) != n_clause:
+        raise ValueError(
+            f"Number of clauses parsed ({len(clauses)}) does not match the expected number ({n_clause})."
+        )
+    if any(abs(var) > n_var for clause in clauses for var in clause):
+        raise ValueError(
+            f"Variable index out of bounds. Expected variables in range 1 to {n_var}."
+        )
+    return Problem(clauses)

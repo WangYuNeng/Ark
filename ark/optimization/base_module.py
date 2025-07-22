@@ -160,8 +160,8 @@ class BaseAnalogCkt(eqx.Module):
 
         raise NotImplementedError
 
-    def switch_to_args_id(self, switch: int) -> int:
-        """Map the switch value to the args id."""
+    def switch_to_args_id(self, switch: str) -> int:
+        """Map the switch name to the args id."""
 
         raise NotImplementedError
 

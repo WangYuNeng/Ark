@@ -33,10 +33,28 @@ Osc_modified = NodeType(
             "osc_fn": AttrDef(attr_type=FunctionAttr(nargs=2)),
             "lock_strength": AttrDef(attr_type=AnalogAttr((-10, 10))),
             "cpl_strength": AttrDef(attr_type=AnalogAttr((-10, 10))),
+            # Custom range for obc SAT
+            # "lock_strength": AttrDef(attr_type=AnalogAttr((0, 10))),
+            # "cpl_strength": AttrDef(attr_type=AnalogAttr((0, 10))),
         },
     },
 )
 
+FixedSource = NodeType(
+    "FixedSource",
+    attrs={
+        "order": 0,
+        "attr_def": {
+            "phase": AttrDef(attr_type=AnalogAttr((-10, 10))),
+        },
+    },
+)
+
+SelfCpl = EdgeType(
+    "SelfCpl",
+)
+
+obc_spec.add_cdg_types([Osc_modified, FixedSource])
 # Digital coupling with 3 bit resolution -2**(n_bit-1) to 2**(n_bit-1) -1
 # Rescale to between +/- 1
 if args.weight_bits is None:
@@ -89,4 +107,28 @@ modified_cp_self = ProdRule(
     -EDGE.k * SRC.lock_fn(VAR(SRC), SRC.lock_strength),
 )
 
-obc_spec.add_production_rules([modified_cp_src, modified_cp_dst, modified_cp_self])
+modified_cp_self_no_k = ProdRule(
+    SelfCpl,
+    Osc_modified,
+    Osc_modified,
+    SELF,
+    -SRC.lock_fn(VAR(SRC), SRC.lock_strength),
+)
+
+source_cp_osc = ProdRule(
+    Coupling,
+    FixedSource,
+    Osc_modified,
+    DST,
+    -EDGE.k * DST.osc_fn(VAR(DST) - SRC.phase, DST.cpl_strength),
+)
+
+obc_spec.add_production_rules(
+    [
+        modified_cp_src,
+        modified_cp_dst,
+        modified_cp_self,
+        source_cp_osc,
+        modified_cp_self_no_k,
+    ]
+)

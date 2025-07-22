@@ -1,6 +1,8 @@
+import os
 from functools import partial
 from typing import Callable, Generator, Optional
 
+os.environ["EQX_ON_ERROR"] = "nan"
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -37,6 +39,10 @@ import wandb
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
 from ark.specification.trainable import Trainable, TrainableMgr
+
+jax.config.update("jax_compilation_cache_dir", "jax_cache")
+jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
+jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 
 jax.config.update("jax_enable_x64", True)
 args = parser.parse_args()

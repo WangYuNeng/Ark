@@ -1,5 +1,8 @@
+import os
 from functools import partial
 from typing import Callable, Generator
+
+os.environ["EQX_ON_ERROR"] = "nan"
 
 import equinox as eqx
 import jax
@@ -7,7 +10,6 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
-import wandb
 from diffrax import Heun
 from jaxtyping import PyTree
 from pattern_recog_dataloader import NUMBERS_5x3, NUMBERS_10x6, dataloader, dataloader2
@@ -30,10 +32,15 @@ from spec_optimization import (
     obc_spec,
 )
 
+import wandb
 from ark.cdg.cdg import CDG
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
 from ark.specification.trainable import Trainable, TrainableMgr
+
+jax.config.update("jax_compilation_cache_dir", "jax_cache")
+jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
+jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 
 jax.config.update("jax_enable_x64", True)
 

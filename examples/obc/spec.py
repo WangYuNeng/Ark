@@ -71,7 +71,7 @@ cpl_range = (-10, 10)
 
 # For OSC SAT solving, we force the coupling strength to be negative
 # commented out if for other applications
-cpl_range = (-10, -0.1)
+# cpl_range = (-10, -0.1)
 Coupling = EdgeType(
     name="Coupling", attrs={"attr_def": {"k": AttrDef(attr_type=AnalogAttr(cpl_range))}}
 )

@@ -1,4 +1,7 @@
+import os
 import random
+
+os.environ["EQX_ON_ERROR"] = "nan"
 
 import diffrax
 import equinox as eqx
@@ -8,7 +11,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import optax
 import torch
-import wandb
 from classifier_dataloader import get_dataloader
 from classifier_parser import args
 from jaxtyping import Array, PyTree
@@ -16,7 +18,12 @@ from model import NACSysClassifier, NACSysGrid
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+import wandb
 from ark.optimization.base_module import TimeInfo
+
+jax.config.update("jax_compilation_cache_dir", "jax_cache")
+jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
+jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 
 jax.config.update("jax_enable_x64", True)
 

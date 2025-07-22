@@ -1,8 +1,11 @@
 import argparse
+import os
 import time
 from functools import partial
 from types import FunctionType
 from typing import Generator
+
+os.environ["EQX_ON_ERROR"] = "nan"
 
 import equinox as eqx
 import jax
@@ -10,7 +13,6 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
-import wandb
 from diffrax import Heun, Tsit5
 from jaxtyping import Array, PyTree
 from puf import PUFParams, create_switchable_star_cdg
@@ -28,10 +30,16 @@ from spec import (
     w_range,
 )
 
+import wandb
 from ark.cdg.cdg import CDG, CDGEdge
 from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
 from ark.specification.trainable import Trainable
+
+jax.config.update("jax_compilation_cache_dir", "jax_cache")
+jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
+jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
+
 
 plt.rcParams["text.usetex"] = True
 parser = argparse.ArgumentParser()

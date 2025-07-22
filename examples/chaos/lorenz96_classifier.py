@@ -1,3 +1,7 @@
+import os
+
+os.environ["EQX_ON_ERROR"] = "nan"
+
 import diffrax
 import equinox as eqx
 import jax
@@ -5,20 +9,23 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
-from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
-from ark.optimization.opt_compiler import OptCompiler
-from ark.specification.trainable import TrainableMgr
+from classifier_dataloader import get_dataloader
+from classifier_parser import args
 from diffrax import Tsit5
 from jaxtyping import Array, PyTree
+from spec import build_lorenz96_sys, lorenz96_spec
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 import wandb
-from classifier_dataloader import get_dataloader
-from classifier_parser import args
-from spec import build_lorenz96_sys, lorenz96_spec
+from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
+from ark.optimization.opt_compiler import OptCompiler
+from ark.specification.trainable import TrainableMgr
 
 jax.config.update("jax_enable_x64", True)
+jax.config.update("jax_compilation_cache_dir", "jax_cache")
+jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
+jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 
 SEED = args.seed
 np.random.seed(SEED)

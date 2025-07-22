@@ -1,9 +1,5 @@
 import ast
-import os
-from copy import copy
-from typing import Callable, Iterable
-
-os.environ["JAX_COMPILATION_CACHE_DIR"] = "/tmp/jax_cache"
+from typing import Callable
 
 import jax
 import jax.numpy as jnp
@@ -29,9 +25,6 @@ from ark.util import (
 )
 
 jax.config.update("jax_enable_x64", True)
-jax.config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
-jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
-jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 
 ark_compiler = ArkCompiler()
 

@@ -1259,7 +1259,7 @@ class ArkCompiler:
 
         # Iterate all stateful nodes and their edges
         for node in cdg.nodes:
-            for edge in node.edges:
+            for edge in sorted(node.edges, key=lambda e: e.name):
                 # Find the production rule that matches the edge
                 src, dst = edge.src, edge.dst
                 gen_rule = match_prod_rule(

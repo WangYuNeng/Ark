@@ -7,8 +7,11 @@ if True:  # Temporarily solution to avoid the libomp.dylib error
         SimpleShapeDataloader,
     )
 
+import os
 from functools import partial
 from typing import Callable, Generator
+
+os.environ["EQX_ON_ERROR"] = "nan"
 
 import equinox as eqx
 import jax
@@ -39,6 +42,12 @@ from ark.optimization.base_module import BaseAnalogCkt, TimeInfo
 from ark.optimization.opt_compiler import OptCompiler
 from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.trainable import TrainableMgr
+
+jax.config.update("jax_compilation_cache_dir", "jax_cache")
+jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
+jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
+jax.config.update("jax_enable_x64", True)
+
 
 plt.rcParams["text.usetex"] = True
 mgr = TrainableMgr()

@@ -29,6 +29,7 @@ from ark.util import (
     mk_jnp_call,
     mk_jnp_scatter_gather,
     mk_list,
+    mk_tuple,
     set_ctx,
 )
 
@@ -489,21 +490,42 @@ class ArkCompiler:
             self._ode_fn_io_names,
             self._switch_mapping,
             self._attr_mapping,
+            n_args_for_type_attr,
         ) = self._collect_ode_fn_io(cdg, separate_fn_attr=True)
+
+        # The args will be arranged as
+        # switches = args[:len(self._switch_mapping)]
+        # type_name_attr0 = args[len(self._switch_mapping):len(self._switch_mapping) + n_args_for_type_attr[type_name][attr0]]
+        # type_name_attr1 = args[len(self._switch_mapping) + n_args_for_type_attr[type_name][attr0]:...
+        # Count the offset for each type attribute here
+        type_attr_args_offsets = {
+            type_name: {attr_name: 0 for attr_name in attrs}
+            for type_name, attrs in n_args_for_type_attr.items()
+        }
+        offset = len(self._switch_mapping)
+        for type_name, attrs in n_args_for_type_attr.items():
+            for attr_name, cnt in attrs.items():
+                type_attr_args_offsets[type_name][attr_name] = offset
+                offset += cnt
 
         # Count the numerical value attributes index from the switch mapping
         # Isolate the function attributes mapping
-        num_attr_mapping, num_attr_idx = {}, len(self._switch_mapping)
+        num_attr_mapping = {}
         fn_attr_mapping, fn_attr_idx = {}, 0
         for ele_name, attrs in self._attr_mapping.items():
             num_attr_mapping[ele_name], fn_attr_mapping[ele_name] = {}, {}
-            for attr_name, is_num in attrs.items():
-                if not is_num:
+
+        for ele in cdg.nodes + cdg.edges:
+            ele_name = ele.name
+            ele_type_name = ele.cdg_type.name
+            for attr_name in ele.attrs.keys():
+                idx = self._attr_mapping[ele_name][attr_name]
+                if isinstance(idx, bool):
                     fn_attr_mapping[ele_name][attr_name] = fn_attr_idx
                     fn_attr_idx += 1
                 else:
-                    num_attr_mapping[ele_name][attr_name] = num_attr_idx
-                    num_attr_idx += 1
+                    offset = type_attr_args_offsets[ele_type_name][attr_name]
+                    num_attr_mapping[ele_name][attr_name] = idx + offset
         self._num_attr_mapping, self._fn_attr_mapping = (
             num_attr_mapping,
             fn_attr_mapping,
@@ -521,24 +543,62 @@ class ArkCompiler:
             None for _ in range(sum(len(attrs) for attrs in fn_attr_mapping.values()))
         ]
 
-        for name, idx in self._switch_mapping.items():
-            args_names[idx] = mk_var(switch_attr(name))
-        for ele_name, attrs in num_attr_mapping.items():
-            for attr_name, idx in attrs.items():
-                args_names[idx] = mk_var(rn_attr(ele_name, attr_name))
-        for ele_name, attrs in fn_attr_mapping.items():
-            for attr_name, idx in attrs.items():
-                fn_args_names[idx] = mk_var(rn_attr(ele_name, attr_name))
-
         # Generate the Assignment statements
-        if args_names and not vectorize:
-            stmts.append(
-                mk_list_assign(
-                    targets=args_names,
-                    value=mk_var(self.ARGS),
+        if args_names:
+            if not vectorize:
+                for name, idx in self._switch_mapping.items():
+                    args_names[idx] = mk_var(switch_attr(name))
+                for ele_name, attrs in num_attr_mapping.items():
+                    for attr_name, idx in attrs.items():
+                        args_names[idx] = mk_var(rn_attr(ele_name, attr_name))
+                stmts.append(
+                    mk_list_assign(
+                        targets=args_names,
+                        value=mk_var(self.ARGS),
+                    )
                 )
-            )
+            else:
+                var_name_arr = ["switches"] + [
+                    rn_attr(type_name, attr_name)
+                    for type_name, attrs in n_args_for_type_attr.items()
+                    for attr_name in attrs
+                ]
+                var_idxs_arr = [(0, len(self._switch_mapping))] + [
+                    (
+                        type_attr_args_offsets[type_name][attr_name],
+                        type_attr_args_offsets[type_name][attr_name]
+                        + n_args_for_type_attr[type_name][attr_name],
+                    )
+                    for type_name, attrs in n_args_for_type_attr.items()
+                    for attr_name in attrs
+                ]
+                # Create the argument assignment statement
+                # switches, type_name_attr0, type_name_attr1, ... = args[0:len(self._switch_mapping)], \
+                #     args[len(self._switch_mapping):len(self._switch_mapping) + n_args_for_type_attr[type_name][attr0]], ...
+                targets = []
+                values = []
+                for var_name, (start, end) in zip(var_name_arr, var_idxs_arr):
+                    targets.append(mk_var(var_name))
+                    values.append(
+                        mk_arr_access(
+                            mk_var(self.ARGS),
+                            ast.Slice(
+                                lower=ast.Constant(start), upper=ast.Constant(end)
+                            ),
+                        )
+                    )
+                stmts.append(
+                    mk_list_assign(
+                        targets=targets,
+                        value=mk_tuple(values),
+                    )
+                )
+
         if fn_args_names:
+            for ele_name, attrs in fn_attr_mapping.items():
+                for attr_name, idx in attrs.items():
+                    fn_args_names[idx] = mk_var(rn_attr(ele_name, attr_name))
+
             stmts.append(
                 mk_list_assign(
                     targets=fn_args_names,
@@ -580,6 +640,8 @@ class ArkCompiler:
             module = ast.Module([func_def], type_ignores=[])
             module = ast.fix_missing_locations(module)
             self._ode_term_ast = module
+            # print(ast.unparse(module))
+            # exit()
 
             code = compile(source=module, filename=self.tmp_file_name, mode="exec")
             exec(code, self._namespace)
@@ -726,7 +788,7 @@ class ArkCompiler:
                 # If the attribute is a numerical attribute, record the index
                 # of it in `args`
                 if attr_name in self._num_attr_mapping[cdg_element.name]:
-                    idx = self._num_attr_mapping[cdg_element.name][attr_name]
+                    idx = self._attr_mapping[cdg_element.name][attr_name]
                     ele_attr_to_coord[attr_name] = [idx]
             return ele_attr_to_coord
 
@@ -844,10 +906,14 @@ class ArkCompiler:
 
             # edge_attr_to_mat_ast, src_attr_to_mat_ast, dst_attr_to_mat_ast
             attr_to_mat_ast_list = [{}, {}, {}]
-            for i, a2c in enumerate(attr_to_coord_list):
+            for i, (a2c, element) in enumerate(
+                zip(attr_to_coord_list, [edge, edge.src, edge.dst])
+            ):
+                element_type_name = element.cdg_type.name
                 for attr, coord in a2c.items():
                     attr_to_mat_ast_list[i][attr] = mk_arr_access(
-                        lst=mk_var(self.ARGS), idx=self._mk_named_jnp_arr(coord)
+                        lst=mk_var(rn_attr(element_type_name, attr)),
+                        idx=self._mk_named_jnp_arr(coord),
                     )
 
             # Set up the mapping for the production rule rewrite
@@ -892,7 +958,7 @@ class ArkCompiler:
                 ]
                 # choose the switches used in the prod rule
                 switch_args_expr = mk_arr_access(
-                    lst=mk_var(self.ARGS), idx=self._mk_named_jnp_arr(sw_args_idx)
+                    lst=mk_var("switches"), idx=self._mk_named_jnp_arr(sw_args_idx)
                 )
 
                 # Map the switches to the corresponding production rule
@@ -1012,9 +1078,13 @@ class ArkCompiler:
             )
         return stmts
 
-    def _collect_ode_fn_io(
-        self, cdg: CDG, separate_fn_attr: bool = False
-    ) -> tuple[dict[str, int], list[str], dict[str, int], dict[str, dict[str, int]]]:
+    def _collect_ode_fn_io(self, cdg: CDG, separate_fn_attr: bool = False) -> tuple[
+        dict[str, int],
+        list[str],
+        dict[str, int],
+        dict[str, dict[str, int]],
+        dict[str, dict[str, int]],
+    ]:
         """Collect the input/output node mapping and var names of the ode function
 
         Args:
@@ -1035,6 +1105,11 @@ class ArkCompiler:
             corresponding index in the attribute variables. The `attr_mapping[name][attr]`
             points to the index of the attribute if `separate_fn_attr` is false. Otherwise,
             it denote whether the attribute is a float/int attribute or not.
+
+            n_args_for_type_attr (dict[str, dict[str, int]]): map the name of CDGType and the
+            attribute name to the number of arguments. I.e., The
+            `n_args_for_type_attr[type_name][attr_name]` points to the number of arguments for
+            the attribute of that type.
         """
 
         # Go through the nodes to collect the state variables
@@ -1049,24 +1124,34 @@ class ArkCompiler:
 
         # Go through the edges to collect the switch variables
         switch_mapping = {edge.name: i for i, edge in enumerate(cdg.switches)}
-        attr_mapping, attr_idx = {}, 0
+
+        # Collect the attributes based on the type and attribute name
+        n_args_for_type_attr = {}  # number of arguments for the arrtibute of each type
+        attr_mapping = {}
         for ele in cdg.nodes + cdg.edges:
             attr_mapping[ele.name] = {}
+            ele_type_name = ele.cdg_type.name
+            if ele_type_name not in n_args_for_type_attr:
+                n_args_for_type_attr[ele_type_name] = {}
             for attr_name, attr in ele.attrs.items():
-                if separate_fn_attr:
-                    if isinstance(attr, Callable) or isinstance(attr, partial):
-                        attr_mapping[ele.name][attr_name] = False
-                    else:
-                        attr_mapping[ele.name][attr_name] = True
+                if separate_fn_attr and (
+                    isinstance(attr, Callable) or isinstance(attr, partial)
+                ):
+                    attr_mapping[ele.name][attr_name] = False
                 else:
-                    attr_mapping[ele.name][attr_name] = attr_idx
-                    attr_idx += 1
+                    if attr_name not in n_args_for_type_attr[ele_type_name]:
+                        n_args_for_type_attr[ele_type_name][attr_name] = 0
+                    attr_mapping[ele.name][attr_name] = n_args_for_type_attr[
+                        ele_type_name
+                    ][attr_name]
+                    n_args_for_type_attr[ele_type_name][attr_name] += 1
 
         return (
             node_to_state_var,
             ode_input_return_names,
             switch_mapping,
             attr_mapping,
+            n_args_for_type_attr,
         )
 
     def _compile_ode_fn(

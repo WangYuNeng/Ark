@@ -9,8 +9,13 @@ To setup the environment, please have `graphviz`, and a SMT solver in the system
 ```bash
 conda create -n ark python=3.11
 conda activate ark
+pip install -r requirement_torch.txt
+pip install -r requirement_benchmark.txt # if you want to run the benchmarking experiments
+pip install -r requirement.txt
 pip install -e .
 ```
+
+The order is important, as `torch` depends on an older version of `cudnn` and `jax` depends on a newer version. Install `torch` first and ignore the error message about `cudnn` when installing `jax` as `cudnn` is usually backward compatible.
 
 If you are on macOS and use `brew` to install `z3`, it is possible that z3 solver failed to find the `libz3.dylib` even when z3 is installed with brew. This because somehow z3 looks for librariesin `/op/how/bin/` instead of `/opt/homebrew/lib`. You can get around by running:
 

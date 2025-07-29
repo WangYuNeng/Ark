@@ -23,6 +23,14 @@ If you are on macOS and use `brew` to install `z3`, it is possible that z3 solve
 cp /opt/homebrew/lib/libz3.dylib /Users/{username}/miniconda3/envs/ark/lib
 ```
 
+# Run the Docker image
+
+Alternatively, you can run the docker image.
+```bash
+bash build_image.sh
+bash run_image.sh
+```
+
 ## RUNME Example
 
 Let's start with an example in oscillator-based computing. Run the following command to optimize oscillator-based pattern recognizer with uniform noise injected to the images.

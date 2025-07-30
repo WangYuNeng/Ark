@@ -88,6 +88,60 @@ time_info = TimeInfo(
     saveat=[T1],
 )
 
+readout_to_init_idx_mapping = None  # This will be set later after the model is created
+
+
+def energy_grad_hessian(
+    model: BaseAnalogCkt,
+    init_states: jax.Array,
+    switches: jax.Array,
+    t: jax.typing.DTypeLike,
+):
+    """
+    ∂²E/∂θ² = ∂(dθ/dt)/∂θ
+    """
+
+    def one_step(model: BaseAnalogCkt, init_states: jax.Array, switches: jax.Array):
+        """
+        Run one step of the model with the given initial states and switches.
+        """
+        args = model.make_args(switches, 0, 0, False)
+        dtheta_dt = model.ode_fn(t, init_states, args)
+        return dtheta_dt
+
+    # Compute the Hessian of the energy with respect to the initial states
+    fw_fn = lambda init_states: one_step(model, init_states, switches)
+    return fw_fn(init_states), jax.jacfwd(fw_fn)(init_states)
+
+
+def trace_grad_hessian(
+    model: BaseAnalogCkt,
+    init_states: jax.Array,
+    switches: jax.Array,
+    adj_mat: jax.Array,
+):
+    """
+    Compute the trace, the gradient, and the Hessian of the oscillator network.
+    """
+    time_info = TimeInfo(
+        t0=0.0,
+        t1=T1,
+        dt0=DT0,
+        saveat=jnp.linspace(0, T1, 100),
+    )
+    trace = model(time_info, init_states, switches, 0, 0)
+    grads, hessians = [], []
+    energys = []
+    for t, trace_at_t in zip(time_info.saveat, trace):
+        grad, hessian = energy_grad_hessian(
+            model, trace_at_t[readout_to_init_idx_mapping], switches, t
+        )
+        energy = phase_to_energy(trace_at_t.reshape(1, -1), adj_mat)
+        grads.append(grad)
+        hessians.append(hessian)
+        energys.append(energy)
+    return trace, jnp.array(grads), jnp.array(hessians), jnp.array(energys)
+
 
 @eqx.filter_jit
 def make_step(model: BaseAnalogCkt, opt_state: PyTree, loss_fn: Callable, data):
@@ -224,25 +278,47 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator):
     for step, data in zip(range(STEPS), dl):
 
         if step == 0:
-            # Visualize the initial energy and clause SAT rate
-            figs = profile_nw_performance(
-                model=model,
-                dl=dl,
-                loss_fn=loss_fn,
+            init_states = data[0][0]
+            switches = data[1][0]
+            adj_mats = data[3][0:1]
+            # Calculate the Hessian of the energy function
+            trace, grad, hessian, energy = trace_grad_hessian(
+                model, init_states, switches, adj_mats
             )
+            print(trace)
+            print(grad)
+            print(hessian)
 
-            if USE_WANDB:
-                for fig, title in zip(figs, fig_titles):
-                    wandb.log({title: wandb.Image(fig)})
-                    plt.close(fig)
-            else:
-                for fig in figs:
-                    plt.show()
-                    plt.close(fig)
+            # Save the trace, grad, and hessian
+            jnp.savez(
+                "trace_grad_hessian.npz",
+                trace=trace,
+                grad=grad,
+                hessian=hessian,
+                energy=energy,
+            )
+            exit()
+
+        #     # Visualize the initial energy and clause SAT rate
+        #     figs = profile_nw_performance(
+        #         model=model,
+        #         dl=dl,
+        #         loss_fn=loss_fn,
+        #     )
+
+        #     if USE_WANDB:
+        #         for fig, title in zip(figs, fig_titles):
+        #             wandb.log({title: wandb.Image(fig)})
+        #             plt.close(fig)
+        #     else:
+        #         for fig in figs:
+        #             plt.show()
+        #             plt.close(fig)
 
         model, opt_state, train_loss, phase_raw = make_step(
             model, opt_state, loss_fn, data
         )
+
         sat_rate = phase_to_sat_clause_rate(data[4], phase_raw, data[5])
 
         print(
@@ -410,6 +486,12 @@ if __name__ == "__main__":
 
     # n_plot = N_PLOT
     # plot_results(model, init_states[:n_plot], switches[:n_plot], n_vars)
+
+    nodes_flat_init_state_id = [model.node_to_init_state_id(n.name) for n in nodes_flat]
+    readout_to_init_idx_mapping = [0 for _ in nodes_flat]
+    for i, id in enumerate(nodes_flat_init_state_id):
+        readout_to_init_idx_mapping[id] = i
+    readout_to_init_idx_mapping = jnp.array(readout_to_init_idx_mapping)
 
     model = train(model=model, loss_fn=loss_fn, dl=dataloader)
     # plot_results(model, init_states[:n_plot], switches[:n_plot])

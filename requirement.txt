@@ -1,0 +1,14 @@
+jax[cuda12]==0.7.0
+diffrax==0.7.0
+equinox==0.13.0
+graphviz==0.21
+jaxtyping==0.3.2
+matplotlib==3.10.3
+networkx==3.5
+numpy==2.3.2
+optax==0.2.5
+PySMT==0.9.6
+scipy==1.16.1
+sympy==1.14.0
+tqdm==4.67.1
+wandb==0.21.0

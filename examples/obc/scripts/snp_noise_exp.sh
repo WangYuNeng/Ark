@@ -11,19 +11,19 @@ tag=snp-noise-exp
 l1_norm_weight=1e-4
 trans_noise_std=0.01
 weight_init=hebbian
-for seed in {0..3}
+for connection in "all" "neighbor" 
 do
     dir=weights/$tag
     mkdir -p $dir
-    for connection in "all" "neighbor" 
+    if [[ $connection == "all" ]]; then
+        locking_strength=4.0
+    else
+        locking_strength=1.0
+        l1_norm_weight=0.0
+    fi
+    for fcw in "" "--fix_coupling_weight"
     do
-        if [[ $connection == "all" ]]; then
-            locking_strength=4.0
-        else
-            locking_strength=1.0
-            l1_norm_weight=0.0
-        fi
-        for fcw in "" "--fix_coupling_weight"
+        for seed in {0..5}
         do
             run_name=seed$seed-conn-$connection$fcw
             save_path=$dir/$run_name.npz
@@ -32,7 +32,28 @@ do
             --pattern_shape 10x6 --save_weight $save_path --weight_init $weight_init --run_name $run_name --no_noiseless \
             --trainable_locking --trainable_coupling $fcw --l1_norm_weight $l1_norm_weight --snp_prob $snp_prob \
             --locking_strength $locking_strength
-            
+        done
+    done
+done
+
+
+for connection in "all" "neighbor" 
+do
+    dir=weights/$tag
+    mkdir -p $dir
+    if [[ $connection == "all" ]]; then
+        locking_strength=4.0
+    else
+        locking_strength=1.0
+        l1_norm_weight=0.0
+    fi
+    for fcw in "" "--fix_coupling_weight"
+    do
+        for seed in {0..5}
+        do
+            run_name=seed$seed-conn-$connection$fcw
+            save_path=$dir/$run_name.npz
+
             # Test the model
             python3 pattern_recog_main.py --n_class $n_class --diff_fn $diff_fn  --vectorize --connection $connection --test \
             --trans_noise_std $trans_noise_std --steps $test_steps --bz $bz  --seed $seed  --wandb --tag $tag \
@@ -51,6 +72,32 @@ do
                     --trainable_locking --trainable_coupling $fcw --l1_norm_weight $l1_norm_weight --snp_prob $snp_prob --weight_drop_ratio $weight_drop_ratio
                 done
             fi
+        done
+    done
+done
+
+# No vectorization
+for connection in "all" "neighbor" 
+do
+    dir=weights/$tag
+    mkdir -p $dir
+    if [[ $connection == "all" ]]; then
+        locking_strength=4.0
+    else
+        locking_strength=1.0
+        l1_norm_weight=0.0
+    fi
+    for fcw in "" "--fix_coupling_weight"
+    do
+        for seed in {0..0}
+        do
+            run_name=seed$seed-conn-$connection$fcw-novect
+            save_path=$dir/$run_name.npz
+            python3 pattern_recog_main.py --n_class $n_class --diff_fn $diff_fn --connection $connection \
+            --trans_noise_std $trans_noise_std --steps $steps --bz $bz --lr $lr --optimizer $optimizer --seed $seed  --wandb --tag $tag \
+            --pattern_shape 10x6  --weight_init $weight_init --run_name $run_name --no_noiseless \
+            --trainable_locking --trainable_coupling $fcw --l1_norm_weight $l1_norm_weight --snp_prob $snp_prob \
+            --locking_strength $locking_strength
         done
     done
 done

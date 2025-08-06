@@ -75,10 +75,10 @@ def train_ax(
     # Initial point for optimization
     a_trainable = model.a_trainable
     initial_points = {"lc0": a_trainable[0].item(), "gr0": a_trainable[1].item()}
-    initial_points.update({f"lc{i}": a_trainable[i + 2].item() for i in range(1, 5)})
-    initial_points.update({f"gr{i}": a_trainable[i + 6].item() for i in range(1, 5)})
-    initial_points.update({f"lc{i}": a_trainable[i + 10].item() for i in range(5, 9)})
-    initial_points.update({f"gr{i}": a_trainable[i + 14].item() for i in range(5, 9)})
+    initial_points.update({f"lc{i}": a_trainable[i + 1].item() for i in range(1, 5)})
+    initial_points.update({f"gr{i}": a_trainable[i + 5].item() for i in range(1, 5)})
+    initial_points.update({f"lc{i}": a_trainable[i + 5].item() for i in range(5, 9)})
+    initial_points.update({f"gr{i}": a_trainable[i + 9].item() for i in range(5, 9)})
     initial_points.update({f"gm{i}": a_trainable[i + 18].item() for i in range(16)})
 
     eval_model = partial(
@@ -102,6 +102,7 @@ def train_ax(
                 )[0]
 
             param_flatten = [parameters[key] for key in param_keys]
+            print(param_flatten)
             loss = eval_model(
                 data,
                 *param_flatten,

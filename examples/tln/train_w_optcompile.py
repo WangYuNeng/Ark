@@ -29,6 +29,7 @@ from spec import (
     unity,
     w_range,
 )
+from train_blackbox_opt import train_ax
 
 import wandb
 from ark.cdg.cdg import CDG, CDGEdge
@@ -141,6 +142,13 @@ parser.add_argument(
     help="Save the transient response of a single branch to a file. "
     "See `plot_single_star_rsp`",
 )
+parser.add_argument(
+    "--blackbox_opt",
+    type=str,
+    default=None,
+    choices=[None, "ax", "cma"],
+    help="Run blackbox optimization using ax or cma",
+)
 args = parser.parse_args()
 np.random.seed(args.seed)
 
@@ -198,6 +206,15 @@ FIX_GR = args.fix_gr
 
 PLOT_SINGLE_STAR = args.plot_single_star_rsp
 SAVE_TRACE_PATH = args.save_single_star_trace
+
+if args.blackbox_opt:
+    assert not (
+        FIX_LC or FIX_GM or FIX_GR
+    ), "Blackbox optimization should not fix LC and GM, but can fix GR"
+    assert LINE_LEN == 4, "Blackbox optimization should be conducted with LINE_LEN = 4"
+    assert (
+        NORMALIZE_WEIGHT
+    ), "Blackbox optimization should be conducted with NORMALIZE_WEIGHT=True"
 
 MmE.attr_def["ws"].rstd = RSTD
 MmE.attr_def["wt"].rstd = RSTD
@@ -703,16 +720,25 @@ if __name__ == "__main__":
     #     init_vals,
     #     mismatch,
     # )
-    best_loss, best_weight = train(
-        model=model,
-        loss=train_loss,
-        precise_loss=train_loss_precise,
-        dataloader=loader,
-        optim=optim,
-        steps=STEPS,
-        checkpoint=CHECKPOINT,
-        print_every=PRINT_EVERY,
-    )
+    if args.blackbox_opt == "ax":
+        best_loss, best_weight = train_ax(
+            model=model,
+            precise_loss=train_loss_precise,
+            dataloader=loader,
+            steps=STEPS,
+            use_wandb=args.wandb,
+        )
+    else:
+        best_loss, best_weight = train(
+            model=model,
+            loss=train_loss,
+            precise_loss=train_loss_precise,
+            dataloader=loader,
+            optim=optim,
+            steps=STEPS,
+            checkpoint=CHECKPOINT,
+            print_every=PRINT_EVERY,
+        )
 
     if args.save_weight:
         jnp.savez(args.save_weight, analog=best_weight[0], digital=best_weight[1])

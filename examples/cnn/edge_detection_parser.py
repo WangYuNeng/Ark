@@ -102,4 +102,16 @@ parser.add_argument(
     action="store_true",
     help="Whether to compile the ODE term in vectorized form",
 )
+parser.add_argument(
+    "--blackbox_opt",
+    type=str,
+    default=None,
+    choices=[None, "ax", "cma"],
+    help="Run blackbox optimization using ax or cma",
+)
+parser.add_argument(
+    "--limited_range",
+    action="store_true",
+    help="Use a limited range for the A, B, z parameters in blackbox optimization",
+)
 args = parser.parse_args()

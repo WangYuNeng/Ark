@@ -91,37 +91,36 @@ def train_ax(
     # Add initial point to the experiment
     trial_index = -1
 
-    for step in range(steps):
-        for data in dataloader:
-            if trial_index == -1:
-                trial_index = client.attach_trial(parameters=initial_points)
-                parameters = initial_points
-            else:
-                trial_index, parameters = list(
-                    client.get_next_trials(max_trials=1).items()
-                )[0]
+    for step, data in zip(range(steps), dataloader):
+        if trial_index == -1:
+            trial_index = client.attach_trial(parameters=initial_points)
+            parameters = initial_points
+        else:
+            trial_index, parameters = list(
+                client.get_next_trials(max_trials=1).items()
+            )[0]
 
-            param_flatten = [parameters[key] for key in param_keys]
-            print(param_flatten)
-            loss = eval_model(
-                data,
-                *param_flatten,
+        param_flatten = [parameters[key] for key in param_keys]
+        print(param_flatten)
+        loss = eval_model(
+            data,
+            *param_flatten,
+        )
+        raw_data = {
+            metric_name: loss,
+        }
+        client.complete_trial(
+            trial_index=trial_index,
+            raw_data=raw_data,
+        )
+        print(f"Completed trial {trial_index} with {raw_data=}")
+        if use_wandb:
+            wandb.log(
+                {
+                    "train_loss": loss,
+                    "loss_precise": loss,
+                }
             )
-            raw_data = {
-                metric_name: loss,
-            }
-            client.complete_trial(
-                trial_index=trial_index,
-                raw_data=raw_data,
-            )
-            print(f"Completed trial {trial_index} with {raw_data=}")
-            if use_wandb:
-                wandb.log(
-                    {
-                        "train_loss": loss,
-                        "loss_precise": loss,
-                    }
-                )
 
     best_parameters, prediction, index, name = client.get_best_parameterization(
         use_model_predictions=False

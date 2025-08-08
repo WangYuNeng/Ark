@@ -1,6 +1,5 @@
 # Check if ax and cma are installed
 try:
-    import cma
     from ax import Client, RangeParameterConfig
 except ImportError:
     Client = None

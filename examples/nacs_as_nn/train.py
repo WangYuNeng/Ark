@@ -54,12 +54,14 @@ EARLY_STOPPING = args.early_stopping
 TEST_ONLY = args.test_only
 
 DATASET = args.dataset
+DATA_IMG_DOWNSAMPLE = args.data_image_downsample
 train_loader, val_loader = get_dataloader(
     dataset=DATASET,
     batch_size=BATCH_SIZE,
     shuffle=True,
     train=True,
     validation_split=VALIDATION_SPLIT,
+    downsample=DATA_IMG_DOWNSAMPLE,
 )
 test_loader, _ = get_dataloader(
     dataset=DATASET,
@@ -67,6 +69,7 @@ test_loader, _ = get_dataloader(
     shuffle=False,
     train=False,
     validation_split=0,
+    downsample=DATA_IMG_DOWNSAMPLE,
 )
 WANDB = args.wandb
 RUN_NAME = args.run_name
@@ -75,6 +78,7 @@ IMG_SIZE = next(iter(train_loader))[0].shape[1]
 N_LABEL = 10  # 10 classes for MNIST and FashionMNIST
 SAVE_PATH = args.save_path
 LOAD_PATH = args.load_path
+NO_VECTORIZE_ODETERM = args.no_vectorize_odeterm
 
 if SAVE_PATH and BATCH_NORM or LOAD_PATH and BATCH_NORM:
     raise NotImplementedError(
@@ -275,6 +279,7 @@ if __name__ == "__main__":
             neighbor_dist=NEIGHBOR_DIST,
             input_type=INPUT_TYPE,
             trainable_initialization=TRAINABLE_INIT,
+            vectorize=not NO_VECTORIZE_ODETERM,
         )
     classifer, state = eqx.nn.make_with_state(NACSysClassifier)(
         n_classes=N_LABEL,

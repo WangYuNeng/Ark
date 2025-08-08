@@ -50,7 +50,7 @@ jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 jax.config.update("jax_enable_x64", True)
 
 
-plt.rcParams["text.usetex"] = True
+# plt.rcParams["text.usetex"] = True
 mgr = TrainableMgr()
 
 SEED = args.seed

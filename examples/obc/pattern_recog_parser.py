@@ -179,4 +179,11 @@ parser.add_argument(
     action="store_true",
     help="Whether to compile the ODE term in vectorized form",
 )
+parser.add_argument(
+    "--blackbox_opt",
+    type=str,
+    choices=["ax"],
+    default=None,
+    help="Type of blackbox optimization to use",
+)
 args = parser.parse_args()

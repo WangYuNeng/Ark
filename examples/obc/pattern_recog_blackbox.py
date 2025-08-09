@@ -13,9 +13,9 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
+import wandb
 from spec_optimization import nbits_to_val_choices
 
-import wandb
 from ark.optimization.base_module import BaseAnalogCkt
 
 
@@ -71,7 +71,8 @@ def train_ax(
         )
         n_cpl_param -= 1
         initial_points["coupling"] = model.a_trainable[1].item()
-    param_keys = [f"cpl{i}" for i in range(n_cpl_param)]
+    cpl_keys = [f"cpl{i}" for i in range(n_cpl_param)]
+    param_keys.extend(cpl_keys)
     if weight_bits is not None:
         parameters.extend(
             [
@@ -99,9 +100,18 @@ def train_ax(
     # Initial point for optimization
     a_trainable = model.a_trainable
     cpl_start_idx = len(a_trainable) - n_cpl_param
-    initial_points.update(
-        {f"cpl{i}": a_trainable[cpl_start_idx + i].item() for i in range(n_cpl_param)}
-    )
+    if not weight_bits:
+        cpl_weight_arr = [
+            a_trainable[cpl_start_idx + i].item() for i in range(n_cpl_param)
+        ]
+    else:
+        # Convert the weight values to the indices closet to the choice values
+        choices = np.array(nbits_to_val_choices(n_bits=weight_bits))
+        cpl_weight_arr = [
+            np.argmin(np.abs(choices - a_trainable[cpl_start_idx + i].item()))
+            for i in range(n_cpl_param)
+        ]
+    initial_points.update({f"cpl{i}": cpl_weight_arr[i] for i in range(n_cpl_param)})
 
     eval_model = partial(
         evaluate_model_wrapper,
@@ -121,6 +131,12 @@ def train_ax(
             trial_index, parameters = list(
                 client.get_next_trials(max_trials=1).items()
             )[0]
+
+        if weight_bits is not None:
+            # Convert the integer weights to quantized values
+            choices = nbits_to_val_choices(n_bits=weight_bits)
+            for cpl_param in cpl_keys:
+                parameters[cpl_param] = choices[parameters[cpl_param]]
 
         param_flatten = [parameters[key] for key in param_keys]
         print(param_flatten)

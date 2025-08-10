@@ -2,6 +2,7 @@ import os
 import random
 
 os.environ["EQX_ON_ERROR"] = "nan"
+os.environ["XLA_FLAGS"] = "--xla_disable_hlo_passes=multi_output_fusion"
 
 import diffrax
 import equinox as eqx

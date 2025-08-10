@@ -6,6 +6,7 @@ from types import FunctionType
 from typing import Generator
 
 os.environ["EQX_ON_ERROR"] = "nan"
+os.environ["XLA_FLAGS"] = "--xla_disable_hlo_passes=multi_output_fusion"
 
 import equinox as eqx
 import jax

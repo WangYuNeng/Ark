@@ -705,6 +705,7 @@ if __name__ == "__main__":
             trainable_locking=TRAINABLE_LOCKING,
             trainable_coupling=TRAINABLE_COUPLING,
             weight_bits=WEIGHT_BITS,
+            l1_norm_weight=L1_NORM_WEIGHT,
             log_prefix="tran_noisy",
         )
     else:

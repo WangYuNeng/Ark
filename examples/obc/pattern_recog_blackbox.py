@@ -13,22 +13,21 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
-import wandb
 from spec_optimization import nbits_to_val_choices
 
+import wandb
 from ark.optimization.base_module import BaseAnalogCkt
 
 
 def evaluate_model_wrapper(
-    data: jax.Array,
-    *args,
-    model: BaseAnalogCkt,
-    loss_fn: Callable,
+    data: jax.Array, *args, model: BaseAnalogCkt, loss_fn: Callable, l1_norm_weight: int
 ):
     a_trainable = jnp.array(args)
     model = eqx.tree_at(lambda m: m.a_trainable, model, a_trainable)
     # The latter 3 are dummy arguments just for compatibility
-    loss = loss_fn(model, *data, gumbel_temp=1.0, hard_gumbel=True, l1_norm_weight=0)
+    loss = loss_fn(
+        model, *data, gumbel_temp=1.0, hard_gumbel=True, l1_norm_weight=l1_norm_weight
+    )
     return loss.item()
 
 
@@ -42,6 +41,7 @@ def train_ax(
     trainable_locking: bool = False,
     trainable_coupling: bool = False,
     weight_bits: Optional[int] = None,
+    l1_norm_weight: int = 0,
     log_prefix: str = "",
 ):
     if not Client:
@@ -117,6 +117,7 @@ def train_ax(
         evaluate_model_wrapper,
         model=model,
         loss_fn=loss_fn,
+        l1_norm_weight=l1_norm_weight,
     )
     eqx.filter_jit(eval_model)
 

@@ -9,7 +9,7 @@ snp_prob=0.1
 n_class=5
 tag=snp-noise-exp
 l1_norm_weight=1e-4
-trans_noise_std=0.01
+trans_noise_std=0.001
 weight_init=hebbian
 for connection in "all" "neighbor" 
 do

@@ -14,8 +14,9 @@ parser.add_argument(
 )
 parser.add_argument(
     "--mismatched_node",
-    action="store_true",
-    help="Use 10 percent random mismatched node for the CNN",
+    type=float,
+    default=0.0,
+    help="Use random mismatched node with specified rstd for the CNN",
 )
 parser.add_argument(
     "--mismatched_edge",

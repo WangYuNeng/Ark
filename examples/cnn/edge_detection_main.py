@@ -524,6 +524,7 @@ if __name__ == "__main__":
 
     if MM_NODE:
         v_nt = Vm
+        v_nt.attr_def["mm"].rstd = MM_NODE
     else:
         v_nt = IdealV
 

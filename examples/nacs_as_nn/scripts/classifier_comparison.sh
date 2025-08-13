@@ -19,7 +19,7 @@ do
     do
         for nbits in 1 2 8
         do
-            for seed in {0..5}
+            for seed in {0..4}
             do
                 for dataset in mnist fashion_mnist
                 do

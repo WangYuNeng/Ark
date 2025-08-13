@@ -1,17 +1,18 @@
 # python edge_detection_main.py --store --ed_img_path data/ed_28x28.npz --bz 512 --downsample 1
 dir=weights
 tag=edge-detection-exp
-mmstd=0.02
+mmstd=0.04
+lr=0.05
 mkdir -p $dir
-for seed in {0..5}
+for seed in {0..4}
 do
     save_path=$dir/$seed.npz
-    python edge_detection_main.py --plot_evolve 5 --dataset silhouettes --mismatched_edge $mmstd --end_time 1.5 \
-    --bz 128 --seed $seed --steps 1  --lr 0.1 --mismatched_node $mmstd --vectorize \
+    python edge_detection_main.py --plot_evolve 5 --dataset silhouettes --mismatched_edge $mmstd --end_time 1.0 \
+    --bz 128 --seed $seed --steps 1  --lr $lr --mismatched_node $mmstd --vectorize \
     --save_weight $save_path --tag $tag --wandb
 done
 
-for seed in {0..5}
+for seed in {0..4}
 do
     # Test the model
     # seed+=4
@@ -31,6 +32,6 @@ python edge_detection_main.py --dataset silhouettes --mismatched_edge $mmstd --e
 for seed in {0..0}
 do
     python edge_detection_main.py --plot_evolve 5 --dataset silhouettes --mismatched_edge $mmstd --end_time 1.5 \
-    --bz 128 --seed $seed --steps 1  --lr 0.1 --mismatched_node $mmstd \
+    --bz 128 --seed $seed --steps 1  --lr $lr --mismatched_node $mmstd \
     --tag $tag --wandb
 done

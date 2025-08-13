@@ -11,19 +11,17 @@ tag=snp-noise-exp
 l1_norm_weight=1e-4
 trans_noise_std=0.001
 weight_init=hebbian
+locking_strength=2.0
+dir=weights/$tag
+mkdir -p $dir
 for connection in "all" "neighbor" 
 do
-    dir=weights/$tag
-    mkdir -p $dir
-    if [[ $connection == "all" ]]; then
-        locking_strength=4.0
-    else
-        locking_strength=1.0
+    if [[ $connection == "neighbor" ]]; then
         l1_norm_weight=0.0
     fi
     for fcw in "" "--fix_coupling_weight"
     do
-        for seed in {0..5}
+        for seed in {0..4}
         do
             run_name=seed$seed-conn-$connection$fcw
             save_path=$dir/$run_name.npz
@@ -39,24 +37,19 @@ done
 
 for connection in "all" "neighbor" 
 do
-    dir=weights/$tag
-    mkdir -p $dir
-    if [[ $connection == "all" ]]; then
-        locking_strength=4.0
-    else
-        locking_strength=1.0
+    if [[ $connection == "neighbor" ]]; then
         l1_norm_weight=0.0
     fi
     for fcw in "" "--fix_coupling_weight"
     do
-        for seed in {0..5}
+        for seed in {0..4}
         do
             run_name=seed$seed-conn-$connection$fcw
             save_path=$dir/$run_name.npz
 
             # Test the model
             python3 pattern_recog_main.py --n_class $n_class --diff_fn $diff_fn  --vectorize --connection $connection --test \
-            --trans_noise_std $trans_noise_std --steps $test_steps --bz $bz  --seed $seed  --wandb --tag $tag \
+            --trans_noise_std $trans_noise_std --steps $test_steps --bz $bz  --seed $((seed+444))  --wandb --tag $tag \
             --pattern_shape 10x6 --load_weight $save_path --weight_init $weight_init --run_name $run_name-test --no_noiseless \
             --trainable_locking --trainable_coupling $fcw --l1_norm_weight $l1_norm_weight --snp_prob $snp_prob \
             --locking_strength $locking_strength
@@ -67,7 +60,7 @@ do
                 for weight_drop_ratio in 0.5 0.7 0.9
                 do
                     python3 pattern_recog_main.py --n_class $n_class --diff_fn $diff_fn  --vectorize --connection $connection --test \
-                    --trans_noise_std $trans_noise_std --steps $test_steps --bz $bz --seed $seed  --wandb --tag $tag \
+                    --trans_noise_std $trans_noise_std --steps $test_steps --bz $bz --seed $((seed+444))  --wandb --tag $tag \
                     --pattern_shape 10x6 --load_weight $save_path --weight_init $weight_init --run_name $run_name-test-wd$weight_drop_ratio --no_noiseless \
                     --trainable_locking --trainable_coupling $fcw --l1_norm_weight $l1_norm_weight --snp_prob $snp_prob --weight_drop_ratio $weight_drop_ratio
                 done
@@ -81,13 +74,10 @@ for connection in "all" "neighbor"
 do
     dir=weights/$tag
     mkdir -p $dir
-    if [[ $connection == "all" ]]; then
-        locking_strength=4.0
-    else
-        locking_strength=1.0
+    if [[ $connection == "neighbor" ]]; then
         l1_norm_weight=0.0
     fi
-    for fcw in "" "--fix_coupling_weight"
+    for fcw in ""
     do
         for seed in {0..0}
         do

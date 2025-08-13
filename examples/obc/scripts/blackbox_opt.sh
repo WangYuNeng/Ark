@@ -4,7 +4,7 @@ optimizer="adam"
 steps=64
 bz=1024
 lr=1e-1
-trans_noise_std=0.01
+trans_noise_std=0.001
 n_class=5
 tag=blackbox-exp
 wandb="" # --wandb
@@ -28,7 +28,7 @@ do
                     $tc $tl --pattern_shape 10x6 --save_weight $save_path --weight_init $weight_init --run_name $run_name --no_noiseless \
                     --blackbox_opt ax
                     python3 pattern_recog_main.py --n_class $n_class --diff_fn $diff_fn  --uniform_noise --vectorize \
-                    --trans_noise_std $trans_noise_std --steps $steps --bz $bz --optimizer $optimizer --seed $seed $wandb --tag $tag \
+                    --trans_noise_std $trans_noise_std --steps $steps --bz $bz --optimizer $optimizer --seed $((seed+444)) $wandb --tag $tag \
                     $tc $tl --pattern_shape 10x6 --load_weight $save_path --weight_init $weight_init \
                     --run_name $run_name-test --test --no_noiseless
                 done
@@ -47,16 +47,14 @@ lr=1e-2
 snp_prob=0.1
 n_class=5
 l1_norm_weight=1e-4
-trans_noise_std=0.01
+trans_noise_std=0.001
 weight_init=hebbian
+locking_strength=2.0
 for connection in "all" "neighbor" 
 do
     dir=weights/$tag
     mkdir -p $dir
-    if [[ $connection == "all" ]]; then
-        locking_strength=4.0
-    else
-        locking_strength=1.0
+    if [[ $connection == "neighbor" ]]; then
         l1_norm_weight=0.0
     fi
     for fcw in ""
@@ -70,6 +68,12 @@ do
             --pattern_shape 10x6 --save_weight $save_path --weight_init $weight_init --run_name $run_name --no_noiseless \
             --trainable_locking --trainable_coupling $fcw --l1_norm_weight $l1_norm_weight --snp_prob $snp_prob \
             --locking_strength $locking_strength --blackbox_opt ax $wandb
+            # Test the model
+            python3 pattern_recog_main.py --n_class $n_class --diff_fn $diff_fn  --vectorize --connection $connection --test \
+            --trans_noise_std $trans_noise_std --steps $test_steps --bz $bz  --seed $((seed+444))  --wandb --tag $tag \
+            --pattern_shape 10x6 --load_weight $save_path --weight_init $weight_init --run_name $run_name-test --no_noiseless \
+            --trainable_locking --trainable_coupling $fcw --l1_norm_weight $l1_norm_weight --snp_prob $snp_prob \
+            --locking_strength $locking_strength
         done
     done
 done

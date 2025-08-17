@@ -164,6 +164,11 @@ def train_ax(
         use_model_predictions=False
     )
     loss_best = prediction[metric_name][0]
+    if weight_bits is not None:
+        # Convert the integer weights to quantized values
+        choices = nbits_to_val_choices(n_bits=weight_bits)
+        for cpl_param in cpl_keys:
+            best_parameters[cpl_param] = choices[best_parameters[cpl_param]]
     weight_best = (
         jnp.array([best_parameters[key] for key in param_keys]),
         [],

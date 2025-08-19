@@ -696,7 +696,7 @@ if __name__ == "__main__":
     model = initialize_model(rec_circuit_class, best_weight, True)
 
     if BLACKBOX_OPT == "ax":
-        train_ax(
+        best_loss, best_weight = train_ax(
             model=model,
             loss_fn=loss_fn,
             dataloader=dl,

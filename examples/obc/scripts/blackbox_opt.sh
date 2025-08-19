@@ -70,7 +70,7 @@ do
             --locking_strength $locking_strength --blackbox_opt ax $wandb
             # Test the model
             python3 pattern_recog_main.py --n_class $n_class --diff_fn $diff_fn  --vectorize --connection $connection --test \
-            --trans_noise_std $trans_noise_std --steps $test_steps --bz $bz  --seed $((seed+444))  --wandb --tag $tag \
+            --trans_noise_std $trans_noise_std --steps $test_steps --bz $bz  --seed $((seed+444))  $wandb --tag $tag \
             --pattern_shape 10x6 --load_weight $save_path --weight_init $weight_init --run_name $run_name-test --no_noiseless \
             --trainable_locking --trainable_coupling $fcw --l1_norm_weight $l1_norm_weight --snp_prob $snp_prob \
             --locking_strength $locking_strength

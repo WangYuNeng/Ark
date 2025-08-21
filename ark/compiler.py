@@ -1114,7 +1114,7 @@ class ArkCompiler:
 
             # Convert sympy equations to ast statements
             for eq in equations:
-                eq_str = sympy.pycode(eq)
+                eq_str = sympy.pycode(eq, strict=False)
                 stmts.append(ast.parse(eq_str).body[0])
 
             # Return statement of the ode function

@@ -1,3 +1,10 @@
+import os
+
+os.environ["EQX_ON_ERROR"] = "nan"
+os.environ["XLA_FLAGS"] = "--xla_disable_hlo_passes=multi_output_fusion"
+from functools import partial
+from typing import Callable, Generator
+
 if True:  # Temporarily solution to avoid the libomp.dylib error
     from edge_detection_dataloader import (
         MNISTTestDataLoader,
@@ -7,12 +14,6 @@ if True:  # Temporarily solution to avoid the libomp.dylib error
         SimpleShapeDataloader,
     )
 
-import os
-from functools import partial
-from typing import Callable, Generator
-
-os.environ["EQX_ON_ERROR"] = "nan"
-
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -20,6 +21,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import optax
 from diffrax import Heun
+from edge_detection_blackbox_opt import train_ax
 from edge_detection_parser import args
 from jaxtyping import PyTree
 from spec import (
@@ -49,7 +51,7 @@ jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 jax.config.update("jax_enable_x64", True)
 
 
-plt.rcParams["text.usetex"] = True
+# plt.rcParams["text.usetex"] = True
 mgr = TrainableMgr()
 
 SEED = args.seed
@@ -80,6 +82,9 @@ DATASET = args.dataset
 LONG_COMPILE_DEMO = args.long_compile_demo
 
 VECTORIZE_ODETERM = args.vectorize_odeterm
+
+BLACKBOX_OPT = args.blackbox_opt
+LIMITED_RANGE = args.limited_range
 
 if DATASET == "mnist":
     train_dl = MNISTTrainDataLoader(BZ, downsample=DW_SAMPLE)
@@ -519,6 +524,7 @@ if __name__ == "__main__":
 
     if MM_NODE:
         v_nt = Vm
+        v_nt.attr_def["mm"].rstd = MM_NODE
     else:
         v_nt = IdealV
 
@@ -652,7 +658,22 @@ if __name__ == "__main__":
         title="Before training",
     )
 
-    loss_best, best_weight = train(model, activation_fn, mse_loss, train_dl, test_dl)
+    if BLACKBOX_OPT == "ax":
+        loss_best, best_weight = train_ax(
+            model=model,
+            activation=activation_fn,
+            loss_fn=mse_loss,
+            train_dl=train_dl,
+            steps=STEPS,
+            use_wandb=USE_WANDB,
+            limited_range=LIMITED_RANGE,
+        )
+    elif BLACKBOX_OPT == "cma":
+        raise NotImplementedError
+    else:
+        loss_best, best_weight = train(
+            model, activation_fn, mse_loss, train_dl, test_dl
+        )
 
     print(f"Best loss: {loss_best}")
     print(f"Best weight: {best_weight}")

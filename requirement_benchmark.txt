@@ -1,2 +1,1 @@
 ax-platform==1.0.0
-cma==4.3.0

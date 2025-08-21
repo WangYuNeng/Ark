@@ -14,8 +14,9 @@ parser.add_argument(
 )
 parser.add_argument(
     "--mismatched_node",
-    action="store_true",
-    help="Use 10 percent random mismatched node for the CNN",
+    type=float,
+    default=0.0,
+    help="Use random mismatched node with specified rstd for the CNN",
 )
 parser.add_argument(
     "--mismatched_edge",
@@ -101,5 +102,17 @@ parser.add_argument(
     "--vectorize_odeterm",
     action="store_true",
     help="Whether to compile the ODE term in vectorized form",
+)
+parser.add_argument(
+    "--blackbox_opt",
+    type=str,
+    default=None,
+    choices=[None, "ax", "cma"],
+    help="Run blackbox optimization using ax or cma",
+)
+parser.add_argument(
+    "--limited_range",
+    action="store_true",
+    help="Use a limited range for the A, B, z parameters in blackbox optimization",
 )
 args = parser.parse_args()

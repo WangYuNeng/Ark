@@ -3,6 +3,7 @@ from functools import partial
 from typing import Callable, Generator
 
 os.environ["EQX_ON_ERROR"] = "nan"
+os.environ["XLA_FLAGS"] = "--xla_disable_hlo_passes=multi_output_fusion"
 
 import equinox as eqx
 import jax
@@ -12,6 +13,7 @@ import numpy as np
 import optax
 from diffrax import Heun
 from jaxtyping import PyTree
+from pattern_recog_blackbox import train_ax
 from pattern_recog_dataloader import NUMBERS_5x3, NUMBERS_10x6, dataloader, dataloader2
 from pattern_recog_loss import (
     min_rand_reconstruction_loss,
@@ -169,6 +171,8 @@ if USE_WANDB:
 
 VECTORIZE_ODETERM = args.vectorize_odeterm
 
+BLACKBOX_OPT = args.blackbox_opt
+
 
 def enumerate_node_pairs(
     n_row=N_ROW, n_col=N_COL
@@ -224,7 +228,7 @@ def edge_init_to_trainable_init(
         return one_hot
 
     if not FIX_COUPLING_WEIGHT:
-        if WEIGHT_BITS is not None:
+        if WEIGHT_BITS is not None and not BLACKBOX_OPT:
             weight_choices: list = Cpl_digital.attr_def["k"].attr_type.val_choices
 
             # normalize the weight choices to between -1 and 1
@@ -489,7 +493,9 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator, log_prefix: st
 
 def new_coupling_weight():
     return (
-        trainable_mgr.new_analog() if not WEIGHT_BITS else trainable_mgr.new_digital()
+        trainable_mgr.new_analog()
+        if not WEIGHT_BITS or BLACKBOX_OPT
+        else trainable_mgr.new_digital()
     )
 
 
@@ -498,7 +504,7 @@ if __name__ == "__main__":
     graph = CDG()
     nodes = [[None for _ in range(N_COL)] for _ in range(N_ROW)]
 
-    if not WEIGHT_BITS:
+    if not WEIGHT_BITS or BLACKBOX_OPT:
         cpl_type = Coupling
     else:
         cpl_type = Cpl_digital
@@ -689,7 +695,22 @@ if __name__ == "__main__":
     # Fine-tune the best model w/ noise
     model = initialize_model(rec_circuit_class, best_weight, True)
 
-    best_loss, best_weight = train(model, loss_fn, dl, "tran_noisy")
+    if BLACKBOX_OPT == "ax":
+        best_loss, best_weight = train_ax(
+            model=model,
+            loss_fn=loss_fn,
+            dataloader=dl,
+            steps=STEPS,
+            batch_size=BZ,
+            use_wandb=USE_WANDB,
+            trainable_locking=TRAINABLE_LOCKING,
+            trainable_coupling=TRAINABLE_COUPLING,
+            weight_bits=WEIGHT_BITS,
+            l1_norm_weight=L1_NORM_WEIGHT,
+            log_prefix="tran_noisy",
+        )
+    else:
+        best_loss, best_weight = train(model, loss_fn, dl, "tran_noisy")
     print(f"\tFine-tune Best Loss: {best_loss}")
     print(f"Fine-tune Best Weights: {best_weight}")
 

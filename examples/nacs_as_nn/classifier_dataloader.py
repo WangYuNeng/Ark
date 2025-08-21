@@ -4,18 +4,6 @@ import torch.utils.data
 import torchvision
 from torch.utils.data import DataLoader
 
-normalize = torchvision.transforms.Compose(
-    [
-        torchvision.transforms.ToTensor(),
-        # Normalize to [-1, 1]
-        torchvision.transforms.Normalize((0.5,), (0.5,)),
-        # Squeez the channel dimension
-        torchvision.transforms.Lambda(lambda x: x.squeeze(0)),
-        # Convert to float64
-        torchvision.transforms.Lambda(lambda x: x.double()),
-    ]
-)
-
 
 def get_dataloader(
     dataset: str,
@@ -23,7 +11,24 @@ def get_dataloader(
     shuffle: bool,
     train: bool,
     validation_split: float,
+    downsample: int = None,
 ) -> tuple[DataLoader, DataLoader]:
+    normalize = torchvision.transforms.Compose(
+        [
+            torchvision.transforms.ToTensor(),
+            # Normalize to [-1, 1]
+            torchvision.transforms.Normalize((0.5,), (0.5,)),
+            # Squeez the channel dimension
+            torchvision.transforms.Lambda(lambda x: x.squeeze(0)),
+            # Convert to float64
+            torchvision.transforms.Lambda(lambda x: x.double()),
+            # Downsample if specified
+            torchvision.transforms.Lambda(
+                lambda x: x[::downsample, ::downsample] if downsample else x
+            ),
+        ]
+    )
+
     if dataset == "mnist":
         dataset = torchvision.datasets.MNIST(
             root="data",

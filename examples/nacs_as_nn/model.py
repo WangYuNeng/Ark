@@ -101,6 +101,7 @@ class NACSysGrid(eqx.Module):
         input_type: Literal["fixed", "initial_state"],
         solver: AbstractSolver = Tsit5(),
         trainable_initialization: Literal["uniform", "normal"] = "uniform",
+        vectorize: bool = True,
     ):
         self.sys_name = sys_name
         self.mismatch_rstd = mismatch_rstd
@@ -119,7 +120,7 @@ class NACSysGrid(eqx.Module):
             cdg_spec=cdg_spec,
             trainable_mgr=trainable_mgr,
             readout_nodes=nodes_flatten,
-            vectorize=True,
+            vectorize=vectorize,
             normalize_weight=False,
             do_clipping=False,
             # TODO: Figure out why aggregate line causes system w/ mismatched to run faster but

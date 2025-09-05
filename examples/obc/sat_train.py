@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import optax
 import spec_optimization as opt_spec
+from ax import Client
 from diffrax import Tsit5
 from jaxtyping import PyTree
 from sat_dataloader import (
@@ -35,6 +36,10 @@ from sat_utils import (
     create_3sat_graph,
     create_3sat_graph_v2,
     flatten_nw_stateful_oscillators,
+    param_keys_v1,
+    param_keys_v2,
+    parameters_v1,
+    parameters_v2,
 )
 
 import wandb
@@ -49,9 +54,10 @@ jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 jax.config.update("jax_enable_x64", True)
 args = parser.parse_args()
 
-if args.network_version == "v1":
+NETWORK_VERSION = args.network_version
+if NETWORK_VERSION == "v1":
     create_graph = create_3sat_graph
-elif args.network_version == "v2":
+elif NETWORK_VERSION == "v2":
     create_graph = create_3sat_graph_v2
 
 SEED = args.seed
@@ -87,6 +93,8 @@ if USE_WANDB:
 
 N_PLOT = args.n_plots
 
+AX_OPT = args.ax_opt
+
 trainable_mgr = TrainableMgr()
 optim = optax.adam(learning_rate=LR)
 time_info = TimeInfo(
@@ -105,6 +113,12 @@ def make_step(model: BaseAnalogCkt, opt_state: PyTree, loss_fn: Callable, data):
     updates, opt_state = optim.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
     return model, opt_state, train_loss, phase_raw
+
+
+def make_step_ax(model: BaseAnalogCkt, params: jax.Array, loss_fn: Callable, data):
+    model = eqx.tree_at(lambda m: m.a_trainable, model, params)
+    (train_loss, phase_raw) = loss_fn(model, *data)
+    return model, train_loss, phase_raw
 
 
 def visualize_energy_and_clause_sat_rate(
@@ -222,6 +236,7 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator):
     print("Initial trainable params:")
     print(model.a_trainable)
     best_loss = float("inf")
+    best_sat_rate = 0.0
     fig_titles = [
         "Energy vs Clause SAT Rate",
         "Approximate SAT Loss vs Clause SAT Rate",
@@ -229,6 +244,19 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator):
         "Clause SAT Rate Histogram",
         "Approximate SAT Loss Histogram",
     ]
+
+    if AX_OPT:
+        client = Client(random_seed=np.random.randint(0, 2**31))
+        if NETWORK_VERSION == "v1":
+            param_keys = param_keys_v1
+            parameters = parameters_v1
+        elif NETWORK_VERSION == "v2":
+            param_keys = param_keys_v2
+            parameters = parameters_v2
+        client.configure_experiment(parameters=parameters)
+        metric_name = "sat_rate"
+        objective = f"{metric_name}"
+        client.configure_optimization(objective=objective)
     for step, data in zip(range(STEPS), dl):
 
         if step == 0:
@@ -248,10 +276,38 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator):
                     plt.show()
                     plt.close(fig)
 
-        model, opt_state, train_loss, phase_raw = make_step(
-            model, opt_state, loss_fn, data
-        )
-        sat_rate = phase_to_sat_clause_rate(data[4], phase_raw, data[5])
+        if AX_OPT:
+            # Use Ax
+            if step == 0:
+                # Attach initial point with the initial trainable params
+                initial_points = {
+                    key: model.a_trainable[i].item() for i, key in enumerate(param_keys)
+                }
+                trial_index = client.attach_trial(parameters=initial_points)
+                parameters = initial_points
+            else:
+                trial_index, parameters = list(
+                    client.get_next_trials(max_trials=1).items()
+                )[0]
+            param_flatten = jnp.array([parameters[key] for key in param_keys])
+            model, train_loss, phase_raw = make_step_ax(
+                model, param_flatten, loss_fn, data
+            )
+            sat_rate = phase_to_sat_clause_rate(data[4], phase_raw, data[5])
+            opt_data = {
+                metric_name: sat_rate.mean().item(),
+            }
+            client.complete_trial(
+                trial_index=trial_index,
+                raw_data=opt_data,
+            )
+
+        else:
+            # Use gradient descent
+            model, opt_state, train_loss, phase_raw = make_step(
+                model, opt_state, loss_fn, data
+            )
+        sat_rate = jnp.mean(phase_to_sat_clause_rate(data[4], phase_raw, data[5]))
 
         print(
             f"\nStep {step}, Train loss: {train_loss}, Clause SAT Rate: {jnp.mean(sat_rate):.2f}"
@@ -263,12 +319,15 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator):
             wandb.log(
                 {
                     "train_loss": train_loss,
-                    "sat_rate": jnp.mean(sat_rate),
+                    "sat_rate": sat_rate,
                     "step": step,
                 }
             )
 
-        if train_loss < best_loss:
+        if sat_rate > best_sat_rate or (
+            sat_rate == best_sat_rate and train_loss < best_loss
+        ):
+            best_sat_rate = sat_rate
             best_loss = train_loss
             if SAVE_PATH:
                 eqx.tree_serialise_leaves(SAVE_PATH, model)

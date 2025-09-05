@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import jax.numpy as jnp
 import numpy as np
 import spec_optimization as opt_spec
+from ax import RangeParameterConfig
 
 from ark.cdg.cdg import CDG, CDGEdge, CDGNode
 from ark.optimization.base_module import BaseAnalogCkt
@@ -797,3 +798,69 @@ def parse_cnf_file(file_name: str) -> Problem:
             f"Variable index out of bounds. Expected variables in range 1 to {n_var}."
         )
     return Problem(clauses)
+
+
+# Parameters name and ranges for ax optimization
+pos_var, neg_var = (1e-4, 10), (-10, -1e-4)
+param_keys_v1 = [
+    "var_osc_lock",
+    "var_osc_cpl",
+    "var_cpl_k",
+    "clause_osc_lock",
+    "clause_osc_cpl",
+    "clause_cpl_k",
+    "blue2var_cpl_k",
+    "base2clause_cpl_k",
+    "var2clause_cpl_k",
+]
+parameters_v1 = [
+    RangeParameterConfig(name="var_osc_lock", parameter_type="float", bounds=pos_var),
+    RangeParameterConfig(name="var_osc_cpl", parameter_type="float", bounds=pos_var),
+    RangeParameterConfig(name="var_cpl_k", parameter_type="float", bounds=neg_var),
+    RangeParameterConfig(
+        name="clause_osc_lock", parameter_type="float", bounds=pos_var
+    ),
+    RangeParameterConfig(name="clause_osc_cpl", parameter_type="float", bounds=pos_var),
+    RangeParameterConfig(name="clause_cpl_k", parameter_type="float", bounds=neg_var),
+    RangeParameterConfig(name="blue2var_cpl_k", parameter_type="float", bounds=neg_var),
+    RangeParameterConfig(
+        name="base2clause_cpl_k", parameter_type="float", bounds=neg_var
+    ),
+    RangeParameterConfig(
+        name="var2clause_cpl_k", parameter_type="float", bounds=neg_var
+    ),
+]
+param_keys_v2 = [
+    "var_osc_lock",
+    "var_osc_cpl",
+    "var_cpl_k",
+    "clause_osc_lock",
+    "clause_osc_cpl",
+    "blue2var_cpl_k",
+    "false2clause_cpl_k",
+    "true2clause_cpl_k",
+    "blue2clause_cpl_k",
+    "var2clause_cpl_k",
+]
+parameters_v2 = [
+    RangeParameterConfig(name="var_osc_lock", parameter_type="float", bounds=pos_var),
+    RangeParameterConfig(name="var_osc_cpl", parameter_type="float", bounds=pos_var),
+    RangeParameterConfig(name="var_cpl_k", parameter_type="float", bounds=neg_var),
+    RangeParameterConfig(
+        name="clause_osc_lock", parameter_type="float", bounds=pos_var
+    ),
+    RangeParameterConfig(name="clause_osc_cpl", parameter_type="float", bounds=neg_var),
+    RangeParameterConfig(name="blue2var_cpl_k", parameter_type="float", bounds=neg_var),
+    RangeParameterConfig(
+        name="false2clause_cpl_k", parameter_type="float", bounds=pos_var
+    ),
+    RangeParameterConfig(
+        name="true2clause_cpl_k", parameter_type="float", bounds=pos_var
+    ),
+    RangeParameterConfig(
+        name="blue2clause_cpl_k", parameter_type="float", bounds=pos_var
+    ),
+    RangeParameterConfig(
+        name="var2clause_cpl_k", parameter_type="float", bounds=neg_var
+    ),
+]

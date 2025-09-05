@@ -123,3 +123,9 @@ parser.add_argument(
     default=3,
     help="Number of plots to generate for the results.",
 )
+
+parser.add_argument(
+    "--ax_opt",
+    action="store_true",
+    help="Enable hyperparameter optimization using Ax.",
+)

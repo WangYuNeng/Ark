@@ -3,6 +3,15 @@ import argparse
 parser = argparse.ArgumentParser()
 
 parser.add_argument(
+    "--network_version",
+    type=str,
+    choices=["v1", "v2"],
+    default="v2",
+    help="Version of the network architecture to use. "
+    "v1: Directly mapped from 3sat to graph coloring reduction. "
+    "v2: WenXiao's improved version.",
+)
+parser.add_argument(
     "--seed",
     type=int,
     default=428,
@@ -19,6 +28,14 @@ parser.add_argument(
     type=float,
     default=0.01,
     help="The time step size for the simulation.",
+)
+parser.add_argument(
+    "--initial_state",
+    type=str,
+    choices=["random", "false", "true", "blue"],
+    default="blue",
+    help="Initial state of the oscillator phases. Randomly initialized or set"
+    " to a specific phase.",
 )
 parser.add_argument(
     "--lr", type=float, default=1e-3, help="Learning rate for the optimizer."

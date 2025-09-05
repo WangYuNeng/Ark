@@ -621,7 +621,7 @@ def create_3sat_graph(n_vars: int, n_clauses: int, trainable_mgr: TrainableMgr):
     return sat_graph, sat_network
 
 
-def create_3sat_graph_potts(n_vars: int, n_clauses: int, trainable_mgr: TrainableMgr):
+def create_3sat_graph_v2(n_vars: int, n_clauses: int, trainable_mgr: TrainableMgr):
     """
     Create a configurable 3-State Potts Variation3-SAT graph with the given # of variables and clauses.
 

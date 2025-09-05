@@ -33,6 +33,7 @@ from sat_utils import (
     FALSE_PHASE,
     TRUE_PHASE,
     create_3sat_graph,
+    create_3sat_graph_v2,
     flatten_nw_stateful_oscillators,
 )
 
@@ -48,10 +49,16 @@ jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 jax.config.update("jax_enable_x64", True)
 args = parser.parse_args()
 
+if args.network_version == "v1":
+    create_graph = create_3sat_graph
+elif args.network_version == "v2":
+    create_graph = create_3sat_graph_v2
+
 SEED = args.seed
 
 T1 = args.t1
 DT0 = args.dt0
+INITIAL_STATE = args.initial_state
 
 BZ = args.batch_size
 STEPS = args.steps
@@ -349,9 +356,7 @@ if __name__ == "__main__":
         loss_fn_base = system_energy_loss
 
     if TASK == "3var7clauses":
-        graph, nw = create_3sat_graph(
-            n_vars=3, n_clauses=7, trainable_mgr=trainable_mgr
-        )
+        graph, nw = create_graph(n_vars=3, n_clauses=7, trainable_mgr=trainable_mgr)
         sat_probs, sat_solutions = sat_3var7clauses_data()
         loss_fn = partial(loss_w_sol, time_info=time_info)
 
@@ -360,7 +365,7 @@ if __name__ == "__main__":
         prob = sat_probs[0]
         n_vars = max(abs(var) for clause in prob for var in clause)
         n_clauses = len(prob)
-        graph, nw = create_3sat_graph(
+        graph, nw = create_graph(
             n_vars=n_vars, n_clauses=n_clauses, trainable_mgr=trainable_mgr
         )
         sat_solutions = None
@@ -374,7 +379,7 @@ if __name__ == "__main__":
             n_vars=N_VARS, n_clauses=N_CLAUSES, n_prob=BZ * 1024
         )
         n_vars, n_clauses = N_VARS, N_CLAUSES
-        graph, nw = create_3sat_graph(
+        graph, nw = create_graph(
             n_vars=n_vars, n_clauses=n_clauses, trainable_mgr=trainable_mgr
         )
         sat_solutions = None
@@ -404,7 +409,7 @@ if __name__ == "__main__":
         model = eqx.tree_deserialise_leaves(LOAD_PATH, model)
     nw.set_var_clause_cpls_args_idx(model=model)
 
-    dataloader = SATDataloader(BZ, sat_probs, nw, sat_solutions)
+    dataloader = SATDataloader(INITIAL_STATE, BZ, sat_probs, nw, sat_solutions)
     init_states, switches, sol, adj_mat, n_vars, probs, transform_mats = next(
         dataloader.__iter__()
     )

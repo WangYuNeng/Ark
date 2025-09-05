@@ -1,5 +1,8 @@
+import sys
+
 import jax.numpy as jnp
-from pattern_recog_parser import args
+
+# from pattern_recog_parser import args
 from spec import Coupling, Osc, obc_spec
 
 from ark.specification.attribute_def import AttrDef
@@ -55,15 +58,24 @@ SelfCpl = EdgeType(
 )
 
 obc_spec.add_cdg_types([Osc_modified, FixedSource])
-# Digital coupling with 3 bit resolution -2**(n_bit-1) to 2**(n_bit-1) -1
-# Rescale to between +/- 1
-if args.weight_bits is None:
-    N_BITS = 3
+
+# import pattern_recog_parser if the top-level entry file is pattern_recog_main
+if sys.argv[0].endswith("pattern_recog_main.py"):
+    from pattern_recog_parser import args
+
+    input(123)
+    if args.weight_bits is None:
+        N_BITS = 3
+    else:
+        N_BITS = args.weight_bits
 else:
-    N_BITS = args.weight_bits
+    N_BITS = 3
+
 N_CHOICES = 2**N_BITS
 
 
+# Digital coupling with 3 bit resolution -2**(n_bit-1) to 2**(n_bit-1) -1
+# Rescale to between +/- 1
 def nbits_to_val_choices(n_bits: int) -> list[float]:
     if n_bits == 1:
         return [-1, 1]

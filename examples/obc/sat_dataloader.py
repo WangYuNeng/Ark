@@ -3,7 +3,22 @@ from typing import Generator, Optional
 
 import jax.numpy as jnp
 import numpy as np
-from sat_utils import Assignment, Clause, Problem, SATOscNetwork, parse_cnf_file
+from sat_utils import (
+    BLUE_PHASE,
+    FALSE_PHASE,
+    TRUE_PHASE,
+    Assignment,
+    Clause,
+    Problem,
+    SATOscNetwork,
+    parse_cnf_file,
+)
+
+phasestr_to_val = {
+    "false": FALSE_PHASE,
+    "true": TRUE_PHASE,
+    "blue": BLUE_PHASE,
+}
 
 
 def sat_kvar_exact_assignment_clauses_with_redundant_data(
@@ -131,6 +146,7 @@ class SATDataloader:
             clauses as the SAT problem.
     """
 
+    initial_state: str
     batch_size: int
     sat_probs: list[Problem]
     osc_network: SATOscNetwork
@@ -140,6 +156,7 @@ class SATDataloader:
 
     def __init__(
         self,
+        initial_state: str,
         batch_size: int,
         sat_probs: list[Problem],
         osc_network: SATOscNetwork,
@@ -155,6 +172,7 @@ class SATDataloader:
             abs(var) for sat_prob in sat_probs for clause in sat_prob for var in clause
         ), "The OBC network must have the same number of variables as the SAT problem."
 
+        self.initial_state = initial_state
         self.batch_size = batch_size
         self.sat_probs = sat_probs
         self.osc_network = osc_network
@@ -201,14 +219,20 @@ class SATDataloader:
 
         osc_network = self.osc_network
         batch_size = self.batch_size
-        n_oscillators = 2 * len(osc_network.var_oscs) + 6 * len(osc_network.clause_oscs)
+        n_oscillators = osc_network.n_stateful_oscillators
         n_vars = len(osc_network.var_oscs)
 
         while True:
-            initial_states = np.random.rand(batch_size, n_oscillators) * 2
-            # initial states are equally spaced in [0, 2]
-            # initial_states = np.linspace(0, 2, n_oscillators, endpoint=False)
-            # initial_states = np.tile(initial_states, (batch_size, 1))
+            if self.initial_state == "random":
+                initial_states = np.random.rand(batch_size, n_oscillators) * 2
+            elif self.initial_state in phasestr_to_val:
+                phase = phasestr_to_val[self.initial_state]
+                initial_states = np.ones((batch_size, n_oscillators)) * phase
+            else:
+                raise ValueError(
+                    f"Invalid initial_state setup: {self.initial_state}. Must be 'random', 'false', 'true', or 'blue'."
+                )
+
             sampled_prob_idx = np.random.choice(
                 len(self.sat_probs), batch_size, replace=True
             )

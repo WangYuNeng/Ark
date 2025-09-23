@@ -38,6 +38,11 @@ parser.add_argument(
     " to a specific phase.",
 )
 parser.add_argument(
+    "--stochastic",
+    action="store_true",
+    help="Enable stochastic noise in the oscillator dynamics.",
+)
+parser.add_argument(
     "--lr", type=float, default=1e-3, help="Learning rate for the optimizer."
 )
 parser.add_argument(

@@ -65,6 +65,7 @@ SEED = args.seed
 T1 = args.t1
 DT0 = args.dt0
 INITIAL_STATE = args.initial_state
+STOCHASTIC = args.stochastic
 
 BZ = args.batch_size
 STEPS = args.steps
@@ -461,7 +462,7 @@ if __name__ == "__main__":
     init_weight = trainable_mgr.get_initial_vals()
     model: BaseAnalogCkt = ckt_class(
         init_trainable=init_weight,
-        is_stochastic=False,
+        is_stochastic=STOCHASTIC,
         solver=Tsit5(),
     )
     if LOAD_PATH:

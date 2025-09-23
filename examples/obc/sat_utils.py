@@ -176,7 +176,10 @@ class BaseSATNetwork(ABC):
         )
 
 
-def locking_3x(x, lock_strength: float):
+def locking_3x(x, lock_strength: float, alpha, t: float):
+    # clock that goes from -0.1 to 0.9
+    anneal_cycle = jnp.tanh(alpha * jnp.sin(jnp.pi * t))
+    lock_strength = lock_strength * (anneal_cycle / 2 + 0.4)
     return lock_strength * jnp.sin(3 * jnp.pi * x)
 
 
@@ -635,9 +638,14 @@ def create_3sat_graph_v2(n_vars: int, n_clauses: int, trainable_mgr: TrainableMg
     """
 
     sat_graph = CDG()
-    var_osc_lock, var_osc_cpl = 1.0, 1.0
+
+    var_osc_lock, var_osc_lock_alpha, var_osc_cpl = 1.0, 1.0, 1.0
     var_cpl = -8.0  # out-of-phase
-    clause_osc_lock, clause_osc_cpl = 1.0, -1.0  # invert the coupling
+    clause_osc_lock, clause_osc_lock_alpha, clause_osc_cpl = (
+        1.0,
+        1.0,
+        -1.0,
+    )  # invert the coupling
     blue_to_var_cpl = -8.0  # out-of-phase
     false_to_clause_cpl = 3.5  # out-of-phase (inverted)
     true_to_clause_cpl = 4.0  # out-of-phase (inverted)
@@ -650,6 +658,7 @@ def create_3sat_graph_v2(n_vars: int, n_clauses: int, trainable_mgr: TrainableMg
         "lock_fn": locking_3x,
         "osc_fn": opt_spec.coupling_fn,
         "lock_strength": trainable_mgr.new_analog(init_val=var_osc_lock),
+        "lock_alpha": trainable_mgr.new_analog(init_val=var_osc_lock_alpha),
         "cpl_strength": trainable_mgr.new_analog(init_val=var_osc_cpl),
     }
     var_cpl_args = {
@@ -659,6 +668,7 @@ def create_3sat_graph_v2(n_vars: int, n_clauses: int, trainable_mgr: TrainableMg
         "lock_fn": locking_3x,
         "osc_fn": opt_spec.coupling_fn,
         "lock_strength": trainable_mgr.new_analog(init_val=clause_osc_lock),
+        "lock_alpha": trainable_mgr.new_analog(init_val=clause_osc_lock_alpha),
         "cpl_strength": trainable_mgr.new_analog(init_val=clause_osc_cpl),
     }
     blue2var_cpl_args = {
@@ -832,9 +842,11 @@ parameters_v1 = [
 ]
 param_keys_v2 = [
     "var_osc_lock",
+    "var_osc_lock_alpha",
     "var_osc_cpl",
     "var_cpl_k",
     "clause_osc_lock",
+    "clause_osc_lock_alpha",
     "clause_osc_cpl",
     "blue2var_cpl_k",
     "false2clause_cpl_k",
@@ -844,10 +856,16 @@ param_keys_v2 = [
 ]
 parameters_v2 = [
     RangeParameterConfig(name="var_osc_lock", parameter_type="float", bounds=pos_var),
+    RangeParameterConfig(
+        name="var_osc_lock_alpha", parameter_type="float", bounds=pos_var
+    ),
     RangeParameterConfig(name="var_osc_cpl", parameter_type="float", bounds=pos_var),
     RangeParameterConfig(name="var_cpl_k", parameter_type="float", bounds=neg_var),
     RangeParameterConfig(
         name="clause_osc_lock", parameter_type="float", bounds=pos_var
+    ),
+    RangeParameterConfig(
+        name="clause_osc_lock_alpha", parameter_type="float", bounds=pos_var
     ),
     RangeParameterConfig(name="clause_osc_cpl", parameter_type="float", bounds=neg_var),
     RangeParameterConfig(name="blue2var_cpl_k", parameter_type="float", bounds=neg_var),

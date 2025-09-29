@@ -64,6 +64,7 @@ SEED = args.seed
 
 T1 = args.t1
 DT0 = args.dt0
+READOUT_MULTI_STEPS = args.readout_multi_steps
 INITIAL_STATE = args.initial_state
 STOCHASTIC = args.stochastic
 
@@ -98,11 +99,16 @@ AX_OPT = args.ax_opt
 
 trainable_mgr = TrainableMgr()
 optim = optax.adam(learning_rate=LR)
+saveat = (
+    [T1]
+    if not READOUT_MULTI_STEPS
+    else jnp.array([i for i in range(0, int(T1 + 1), 2)])
+)
 time_info = TimeInfo(
     t0=0.0,
     t1=T1,
     dt0=DT0,
-    saveat=[T1],
+    saveat=saveat,
 )
 
 
@@ -142,38 +148,38 @@ def visualize_energy_and_clause_sat_rate(
         loss (float): Loss value to be displayed in the title.
         title_prefix (str): Prefix for the plot title.
     """
-    scatter_fig, ax = plt.subplots()
-    ax.scatter(energy, clause_rate)
-    ax.set_xlabel("Energy")
-    ax.set_ylabel("Clause SAT Rate")
-    ax.set_title(
-        f"Energy ({jnp.mean(energy):.2e}) vs. Clause SAT Rate ({jnp.mean(clause_rate):.2f}). Loss: {loss:.4f}"
-    )
-    ax.grid(True)
-    plt.tight_layout()
+    # scatter_fig, ax = plt.subplots()
+    # ax.scatter(energy, clause_rate)
+    # ax.set_xlabel("Energy")
+    # ax.set_ylabel("Clause SAT Rate")
+    # ax.set_title(
+    #     f"Energy ({jnp.mean(energy):.2e}) vs. Clause SAT Rate ({jnp.mean(clause_rate):.2f}). Loss: {loss:.4f}"
+    # )
+    # ax.grid(True)
+    # plt.tight_layout()
 
-    scatter_fig_approx, ax = plt.subplots()
-    ax.scatter(clause_rate_approx, clause_rate)
-    ax.set_xlabel("Approximate SAT Loss")
-    ax.set_ylabel("Clause SAT Rate")
-    ax.set_title(
-        f"Approximate SAT Loss vs. Clause SAT Rate. Mean Loss: {jnp.mean(clause_rate_approx):.2f}. "
-        f"Mean Clause SAT Rate: {jnp.mean(clause_rate):.2f}"
-    )
-    ax.grid(True)
-    plt.tight_layout()
+    # scatter_fig_approx, ax = plt.subplots()
+    # ax.scatter(clause_rate_approx, clause_rate)
+    # ax.set_xlabel("Approximate SAT Loss")
+    # ax.set_ylabel("Clause SAT Rate")
+    # ax.set_title(
+    #     f"Approximate SAT Loss vs. Clause SAT Rate. Mean Loss: {jnp.mean(clause_rate_approx):.2f}. "
+    #     f"Mean Clause SAT Rate: {jnp.mean(clause_rate):.2f}"
+    # )
+    # ax.grid(True)
+    # plt.tight_layout()
 
-    hist_energy, ax = plt.subplots()
-    ax.hist(energy, bins=30)
-    ax.set_xlabel("Energy")
-    ax.set_ylabel("Frequency")
-    ax.set_title(
-        f"Energy Histogram. Mean: {jnp.mean(energy):.2e}. Median: {jnp.median(energy):.2e}"
-    )
-    plt.tight_layout()
+    # hist_energy, ax = plt.subplots()
+    # ax.hist(energy, bins=30)
+    # ax.set_xlabel("Energy")
+    # ax.set_ylabel("Frequency")
+    # ax.set_title(
+    #     f"Energy Histogram. Mean: {jnp.mean(energy):.2e}. Median: {jnp.median(energy):.2e}"
+    # )
+    # plt.tight_layout()
 
     hist_clause_rate, ax = plt.subplots()
-    ax.hist(clause_rate, bins=30, range=(0, 1))
+    ax.hist(clause_rate, bins=30)
     ax.set_xlabel("Clause SAT Rate")
     ax.set_ylabel("Frequency")
     ax.set_title(
@@ -181,22 +187,22 @@ def visualize_energy_and_clause_sat_rate(
     )
     plt.tight_layout()
 
-    hist_approx_sat_loss, ax = plt.subplots()
-    ax.hist(clause_rate_approx, bins=30)
-    ax.set_xlabel("Approximate SAT Loss")
-    ax.set_ylabel("Frequency")
-    ax.set_title(
-        f"Approximate SAT Loss Histogram. Mean: {jnp.mean(clause_rate_approx):.2f}. "
-        f"Median: {jnp.median(clause_rate_approx):.2f}"
-    )
-    plt.tight_layout()
+    # hist_approx_sat_loss, ax = plt.subplots()
+    # ax.hist(clause_rate_approx, bins=30)
+    # ax.set_xlabel("Approximate SAT Loss")
+    # ax.set_ylabel("Frequency")
+    # ax.set_title(
+    #     f"Approximate SAT Loss Histogram. Mean: {jnp.mean(clause_rate_approx):.2f}. "
+    #     f"Median: {jnp.median(clause_rate_approx):.2f}"
+    # )
+    # plt.tight_layout()
 
     return [
-        scatter_fig,
-        scatter_fig_approx,
-        hist_energy,
+        # scatter_fig,
+        # scatter_fig_approx,
+        # hist_energy,
         hist_clause_rate,
-        hist_approx_sat_loss,
+        # hist_approx_sat_loss,
     ]
 
 
@@ -212,19 +218,18 @@ def profile_nw_performance(
     for step, data in zip(range(8), dl):
         loss, phase_raw = loss_fn(model, *data)
         adj_mats, n_vars, probs, transform_mats = data[3:7]
-        energy, clause_rate = phase_to_energy(
-            phase_raw, adj_mats
-        ), phase_to_sat_clause_rate(n_vars, phase_raw, probs)
-        approx_sat_rate = phase_to_approx_sat_loss(n_vars, phase_raw, transform_mats)
-        loss_list.append(loss)
-        energy_list.append(energy)
+        # energy = phase_to_energy(phase_raw, adj_mats)
+        clause_rate = phase_to_sat_clause_rate(n_vars, phase_raw, probs)
+        # approx_sat_rate = phase_to_approx_sat_loss(n_vars, phase_raw, transform_mats)
+        # loss_list.append(loss)
+        # energy_list.append(energy)
         clause_rate_list.append(clause_rate)
-        approx_sat_rate_list.append(approx_sat_rate)
+        # approx_sat_rate_list.append(approx_sat_rate)
 
-    loss = jnp.array(loss_list)
-    energy = jnp.concatenate(energy_list)
-    clause_rate = jnp.concatenate(clause_rate_list)
-    approx_sat_rate = jnp.concatenate(approx_sat_rate_list)
+    loss = jnp.array(loss_list).flatten()
+    energy = jnp.array(energy_list).flatten()
+    clause_rate = jnp.array(clause_rate_list).flatten()
+    approx_sat_rate = jnp.array(approx_sat_rate_list).flatten()
     figs = visualize_energy_and_clause_sat_rate(
         energy, clause_rate, approx_sat_rate, jnp.mean(loss)
     )

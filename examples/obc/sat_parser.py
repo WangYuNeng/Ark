@@ -30,6 +30,13 @@ parser.add_argument(
     help="The time step size for the simulation.",
 )
 parser.add_argument(
+    "--readout_multi_steps",
+    action="store_true",
+    help="Whether to read out the phases at multiple time steps."
+    " If set, the phases will be read out at every high of annealing schedule."
+    " If not set, the phases will be read out only at the final time step.",
+)
+parser.add_argument(
     "--initial_state",
     type=str,
     choices=["random", "false", "true", "blue"],

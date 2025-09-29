@@ -100,7 +100,7 @@ modified_cp_src = ProdRule(
     Osc_modified,
     SRC,
     -EDGE.k * SRC.osc_fn(VAR(SRC) - VAR(DST), SRC.cpl_strength),
-    noise_exp=1e-1,
+    # noise_exp=1e-1,
 )
 
 modified_cp_dst = ProdRule(
@@ -109,7 +109,7 @@ modified_cp_dst = ProdRule(
     Osc_modified,
     DST,
     -EDGE.k * DST.osc_fn(VAR(DST) - VAR(SRC), DST.cpl_strength),
-    noise_exp=1e-1,
+    # noise_exp=1e-1,
 )
 
 modified_cp_self = ProdRule(

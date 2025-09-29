@@ -178,7 +178,7 @@ class BaseSATNetwork(ABC):
 
 def locking_3x(x, lock_strength: float, alpha, t: float):
     # clock that goes from -0.1 to 0.9
-    anneal_cycle = jnp.tanh(alpha * jnp.sin(jnp.pi * t))
+    anneal_cycle = jnp.tanh(alpha * jnp.cos(jnp.pi * t))
     lock_strength = lock_strength * (anneal_cycle / 2 + 0.4)
     return lock_strength * jnp.sin(3 * jnp.pi * x)
 

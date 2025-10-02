@@ -105,6 +105,12 @@ parser.add_argument(
     help="Path to load the model from. If provided, the model will be loaded from this path.",
 )
 parser.add_argument(
+    "--load_ax_run",
+    type=str,
+    default=None,
+    help="Path to load a previous Ax optimization run from.",
+)
+parser.add_argument(
     "--save_path",
     type=str,
     default=None,

@@ -197,6 +197,7 @@ class SATDataloader:
             int,
             jnp.ndarray,
             jnp.ndarray,
+            jnp.ndarray,
         ],
         None,
         None,
@@ -213,8 +214,9 @@ class SATDataloader:
             batch_size (int): The batch size for the dataloader.
 
         Returns:
-            Generator[tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]]: initial states, switch array, solution (if given),
-            adjacency matrices, number of variables, sat problems, and sat transformation matrices.
+            Generator[tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, int, jnp.ndarray, jnp.ndarray, jnp.ndarray]]:
+            initial states, switch array, solution (if given), adjacency matrices, number of variables, sat problems,
+            sat transformation matrices, and noise seed.
         """
 
         osc_network = self.osc_network
@@ -260,6 +262,7 @@ class SATDataloader:
                 self.sat_probs[prob_idx].to_transform_matrix(n_vars=n_vars)
                 for prob_idx in sampled_prob_idx
             ]
+            noise_seed = np.random.randint(0, 2**31 - 1, size=(batch_size,))
             yield (
                 jnp.array(initial_states),
                 jnp.array(switch_arrs),
@@ -268,4 +271,5 @@ class SATDataloader:
                 n_vars,
                 jnp.array(probs),
                 jnp.array(transform_mats),
+                jnp.array(noise_seed),
             )

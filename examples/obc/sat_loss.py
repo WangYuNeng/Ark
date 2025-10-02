@@ -107,6 +107,7 @@ def loss_w_sol(
     n_vars: int,
     problems: jax.Array,
     trasform_mats: jax.Array,
+    noise_seed: jax.Array,
     time_info: TimeInfo,
 ):
     """
@@ -116,8 +117,8 @@ def loss_w_sol(
     bz, n_vars = sol.shape
     # Get the output of the model, the first n_var output is a 1D array of shape (2n,) representing
     # the phase values of -var[0], var[0], -var[1], var[1], -var[2], var[2], ..., -var[n], var[n]
-    y_raw = jax.vmap(model, in_axes=(None, 0, 0, None, None))(
-        time_info, init_states, switches, 0, 0
+    y_raw = jax.vmap(model, in_axes=(None, 0, 0, None, 0))(
+        time_info, init_states, switches, 0, noise_seed
     )
     y_raw = jnp.squeeze(y_raw, axis=1)  # Shape: (batch_size, len(adj_matrix) - 3)
     # FIXME: Modular is too strict. E.g., because phase is periodic, 1.9 is close to 0
@@ -145,6 +146,7 @@ def system_energy_loss(
     n_vars: int,
     problems: jax.Array,
     trasform_mats: jax.Array,
+    noise_seed: jax.Array,
     time_info: TimeInfo,
 ) -> tuple[jax.Array, jax.Array]:
     """Calculate the oscillator system energy as the loss function.
@@ -154,8 +156,8 @@ def system_energy_loss(
     """
     # Get the output of the model, the first n_var output is a 1D array of shape (2n,) representing
     # the phase values of -var[0], var[0], -var[1], var[1], -var[2], var[2], ..., -var[n], var[n]
-    y_raw = jax.vmap(model, in_axes=(None, 0, 0, None, None))(
-        time_info, init_states, switches, 0, 0
+    y_raw = jax.vmap(model, in_axes=(None, 0, 0, None, 0))(
+        time_info, init_states, switches, 0, noise_seed
     )
 
     # y_raw: (batch_size, 1, len(adj_matrix) - 3)
@@ -180,6 +182,7 @@ def approx_sat_loss(
     n_vars: int,
     problems: jax.Array,
     trasform_mats: jax.Array,
+    noise_seed: jax.Array,
     time_info: TimeInfo,
 ) -> tuple[jax.Array, jax.Array]:
     """Calculate the oscillator system energy as the loss function.
@@ -189,8 +192,8 @@ def approx_sat_loss(
     """
     # Get the output of the model, the first n_var output is a 1D array of shape (2n,) representing
     # the phase values of -var[0], var[0], -var[1], var[1], -var[2], var[2], ..., -var[n], var[n]
-    y_raw = jax.vmap(model, in_axes=(None, 0, 0, None, None))(
-        time_info, init_states, switches, 0, 0
+    y_raw = jax.vmap(model, in_axes=(None, 0, 0, None, 0))(
+        time_info, init_states, switches, 0, noise_seed
     )
 
     if y_raw.shape[1] != 1:

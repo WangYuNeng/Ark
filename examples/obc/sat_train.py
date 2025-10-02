@@ -79,6 +79,7 @@ CNF_DIR: Optional[str] = args.cnf_dir
 N_VARS, N_CLAUSES = args.n_vars, args.n_clauses
 
 LOAD_PATH = args.load_path
+LOAD_AX_RUN = args.load_ax_run
 SAVE_PATH = args.save_path
 
 USE_WANDB = args.wandb
@@ -239,8 +240,6 @@ def profile_nw_performance(
 def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator):
     opt_state = optim.init(eqx.filter(model, eqx.is_array))
 
-    print("Initial trainable params:")
-    print(model.a_trainable)
     best_loss = float("inf")
     best_sat_rate = 0.0
     fig_titles = [
@@ -252,17 +251,32 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator):
     ]
 
     if AX_OPT:
-        client = Client(random_seed=np.random.randint(0, 2**31))
         if NETWORK_VERSION == "v1":
             param_keys = param_keys_v1
             parameters = parameters_v1
         elif NETWORK_VERSION == "v2":
             param_keys = param_keys_v2
             parameters = parameters_v2
-        client.configure_experiment(parameters=parameters)
         metric_name = "sat_rate"
         objective = f"{metric_name}"
-        client.configure_optimization(objective=objective)
+        if LOAD_AX_RUN:
+            client = Client.load_from_json_file(LOAD_AX_RUN)
+            # Intialize the model with the best known parameters
+            prev_best_param, _, _, _ = client.get_best_parameterization(
+                use_model_predictions=False
+            )
+            param_flatten = jnp.array([prev_best_param[key] for key in param_keys])
+            model = eqx.tree_at(
+                lambda m: m.a_trainable, model, param_flatten
+            )  # Update the model
+        else:
+            client = Client(random_seed=np.random.randint(0, 2**31))
+            client.configure_experiment(parameters=parameters)
+            client.configure_optimization(objective=objective)
+
+    print("Initial trainable params:")
+    print(model.a_trainable)
+
     for step, data in zip(range(STEPS), dl):
 
         if step == 0:
@@ -284,7 +298,7 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator):
 
         if AX_OPT:
             # Use Ax
-            if step == 0:
+            if step == 0 and not LOAD_AX_RUN:
                 # Attach initial point with the initial trainable params
                 initial_points = {
                     key: model.a_trainable[i].item() for i, key in enumerate(param_keys)
@@ -316,7 +330,7 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator):
         sat_rate = jnp.mean(phase_to_sat_clause_rate(data[4], phase_raw, data[5]))
 
         print(
-            f"\nStep {step}, Train loss: {train_loss}, Clause SAT Rate: {jnp.mean(sat_rate):.2f}"
+            f"\nStep {step}, Train loss: {train_loss}, Clause SAT Rate: {jnp.mean(sat_rate)}"
         )
         print("Trainable params")
         print(model.a_trainable)
@@ -353,6 +367,9 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator):
         for fig in figs:
             plt.show()
             plt.close(fig)
+
+    if AX_OPT and SAVE_PATH:
+        client.save_to_json_file(SAVE_PATH)
 
     return model
 
@@ -475,7 +492,7 @@ if __name__ == "__main__":
     nw.set_var_clause_cpls_args_idx(model=model)
 
     dataloader = SATDataloader(INITIAL_STATE, BZ, sat_probs, nw, sat_solutions)
-    init_states, switches, sol, adj_mat, n_vars, probs, transform_mats = next(
+    init_states, switches, sol, adj_mat, n_vars, probs, transform_mats, seeds = next(
         dataloader.__iter__()
     )
 

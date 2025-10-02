@@ -45,6 +45,8 @@ def kuramoto(
     coupling_contrib = J_matrix * jnp.sin(phi_diff)
     coupling_term: jax.Array = kc * jnp.sum(coupling_contrib, axis=1)
     locking_term = locking_2x(y, ks, alpha, t)
+    # Paper use dydt = - coupling_term - locking_term
+    # But that perform poorly. Maybe there is a sign I misread.
     dydt = coupling_term - locking_term
     # Mask the auxiliary variable (last oscillator) to have zero dynamics
     dydt = dydt.at[-1].set(0)
@@ -227,7 +229,7 @@ def sat_clause_rate_score(
     modular_phase = jnp.mod(assignment_phase, 2.0 * jnp.pi)
     threshold = (TRUE_PHASE - FALSE_PHASE) / 2
     bool_assignments = jnp.array(
-        [jnp.abs(phase - TRUE_PHASE) > threshold for phase in modular_phase]
+        [jnp.abs(phase - TRUE_PHASE) < threshold for phase in modular_phase]
     )
 
     # Calculate the number of satisfied clauses for each problem
@@ -299,7 +301,7 @@ def train(
         RangeParameterConfig(name="ks", parameter_type="float", bounds=[0.001, 10.0]),
         RangeParameterConfig(name="kc", parameter_type="float", bounds=[0.001, 10.0]),
         RangeParameterConfig(name="kn", parameter_type="float", bounds=[0.001, 10.0]),
-        RangeParameterConfig(name="alpha", parameter_type="float", bounds=[0.0, 1.0]),
+        RangeParameterConfig(name="alpha", parameter_type="float", bounds=[0.0, 5.0]),
     ]
     metric_name = "sat_rate"
     objective = f"{metric_name}"

@@ -21,7 +21,14 @@ def bool_to_phase(b):
 
 
 def phase_to_bool(p):
-    return 1 if p == 1 else 0
+    if isinstance(p, (int, float)):
+        return 1 if p == 1 else 0
+    elif isinstance(p, list):
+        return [1 if pi == 1 else 0 for pi in p]
+    elif isinstance(p, np.ndarray):
+        return np.where(p == 1, 1, 0)
+    else:
+        raise ValueError("Input must be int, float, list, or np.ndarray")
 
 
 def random_simulation(
@@ -35,7 +42,7 @@ def random_simulation(
     anneal=False,
 ):
     n_osc = J.shape[0]
-    fix_indx = np.array([3])  # Index of the fixed oscillator
+    fix_indx = -1
 
     def obc_ode(t, y):
         dydt = np.zeros(n_osc)
@@ -48,7 +55,7 @@ def random_simulation(
             Kl_anneal = Kl
         locking = Kl_anneal * np.sin(super_harmonic * y)
         dydt = coupling - locking
-        dydt[fix_indx] = 0  # Fix one oscillator
+        dydt[fix_indx] = 0  # Fix the reference oscillator
         return dydt
 
     results = []
@@ -82,7 +89,11 @@ def random_simulation(
 
 
 def synthesize_general(
-    logic_fn: Callable, n_free_osc: int, symmetric: bool = True, n_coupling: int = 0
+    logic_fn: Callable,
+    n_io_var: int,
+    n_aux_osc: int,
+    symmetric: bool = True,
+    n_coupling: int = 0,
 ):
 
     def energy_fn(J_max: np.ndarray, v: np.ndarray):
@@ -97,7 +108,7 @@ def synthesize_general(
         return (J_max * v_diff).sum()
 
     # 5 oscillators are input/output, 1 , rest are free variables
-    n_osc = n_free_osc + 4
+    n_osc = n_io_var + n_aux_osc + 1
     phases = [-1, 1]
     fixed_oscs = [1]  # Two fixed oscillators as references
 
@@ -111,18 +122,17 @@ def synthesize_general(
     # Auxiliary variable: minimum energy
     e_min = Int("e_min")
 
-    # Enumerate all free boolean values
-    free_val_tab = [list(v) for v in product(*[phases for _ in range(n_free_osc)])]
+    # Enumerate all io and free boolean values
+    io_val_tab = [list(v) for v in product(*[phases for _ in range(n_io_var)])]
+    aux_val_tab = [list(v) for v in product(*[phases for _ in range(n_aux_osc)])]
 
-    for xb, yb, ob in [
-        (_x, _y, _o) for _x in range(2) for _y in range(2) for _o in range(2)
-    ]:
-        xyo = bool_to_phase([xb, yb, ob])
+    for ios_phase in io_val_tab:
+        ios_bool = phase_to_bool(ios_phase)
         possible_min_energy_states = []
-        for free_vals in free_val_tab:
-            v = np.array(xyo + fixed_oscs + free_vals)
+        for free_vals in aux_val_tab:
+            v = np.array(ios_phase + free_vals + fixed_oscs)
             e = energy_fn(J_max, v)
-            if ob == logic_fn(xb, yb):
+            if logic_fn(*ios_bool):
                 # Solution states have energy at least e_min
                 constraints.append(e >= e_min)
                 possible_min_energy_states.append(e)
@@ -176,16 +186,14 @@ def synthesize_general(
 
         # List the truth table and corresponding energies
         print("Truth table and energies:")
-        for xb, yb, ob in [
-            (_x, _y, _o) for _x in range(2) for _y in range(2) for _o in range(2)
-        ]:
-            xyo = bool_to_phase([xb, yb, ob])
+        for ios_phase in io_val_tab:
             energies = []
-            for free_vals in free_val_tab:
-                v = np.array(xyo + fixed_oscs + free_vals)
+            for aux_vals in aux_val_tab:
+                v = np.array(ios_phase + aux_vals + fixed_oscs)
                 e = energy_fn(J_max, v)
                 energies.append(m[e])
-            print(f"x={xb}, y={yb}, o={ob} => energies: {energies}")
+            ios_bool = phase_to_bool(ios_phase)
+            print(f"ios={ios_bool} => energies: {energies}")
 
         # Validate with simulation
         J_val = (
@@ -193,40 +201,66 @@ def synthesize_general(
             .reshape((n_osc, n_osc))
             .astype(float)
         )
-        sim_results = random_simulation(J_val, n_sim=2**10, Kl=1, Kc=1)
+        sim_results = random_simulation(J_val, n_sim=2**10, Kl=1, Kc=1, anneal=False)
 
         # Plot the sim result histogram -- count how many times each input/output combination occurs
-        hist = {(x, y, o): 0 for x in [0, 1] for y in [0, 1] for o in [0, 1]}
+        hist = {tuple(phase_to_bool(ios_phase)): 0 for ios_phase in io_val_tab}
         for res in sim_results:
-            x, y, o = [int(bool(p)) for p in res[:3]]
-            key = (x, y, o)
+            key = tuple([int(bool(p)) for p in res[:n_io_var]])
             hist[key] += 1
-        print("Simulation results (x, y, o): count")
-        for key, count in hist.items():
-            print(f"{key}: {count}")
+
+        # Rotate the x-axis labels for better readability
+        # Highlight the valid states
         plt.bar(
             range(len(hist)), hist.values(), tick_label=[str(k) for k in hist.keys()]
         )
-        plt.xlabel("(x, y, o)")
+        # Highlight the valid states
+        valid_states = [
+            tuple(phase_to_bool(ios_phase))
+            for ios_phase in io_val_tab
+            if logic_fn(*phase_to_bool(ios_phase))
+        ]
+        for i, k in enumerate(hist.keys()):
+            if k in valid_states:
+                plt.gca().get_xticklabels()[i].set_color("red")
+        plt.xticks(rotation=90)
+        plt.xlabel(f"{n_io_var} Input/Output States")
         plt.ylabel("Count")
-        plt.title("Simulation Results Histogram")
+        plt.title("Final State Distribution")
+        plt.tight_layout()
         plt.show()
 
 
 if __name__ == "__main__":
 
-    # synthesize_logic(lambda x, y: x | y)  # OR
-    # synthesize_logic(lambda x, y: x & y)  # AND
-    # synthesize_logic(lambda x, y: x ^ y)  # XOR
-    # synthesize_logic(lambda x, y: (x & (not y)) | ((not x) & y))  # XNOR
-    # synthesize_logic(lambda x, y: not (x & y))  # NAND
-    # synthesize_logic(lambda x, y: not (x & y))  # NAND
+    # synthesize_general(lambda x, y, z: x | y == z, n_io_var=3, n_aux_osc=0)
+    # synthesize_general(lambda x, y, z: not (x | y) == z, n_io_var=3, n_aux_osc=0)
+    # synthesize_general(lambda x, y, z: x & y == z, n_io_var=3, n_aux_osc=0)
+    # synthesize_general(lambda x, y, z: not (x & y) == z, n_io_var=3, n_aux_osc=0)
+    # synthesize_general(lambda x, y, z: not x == z, n_io_var=3, n_aux_osc=0)
 
-    synthesize_general(lambda x, y: x | y, 0)
-    synthesize_general(lambda x, y: not (x | y), 0)
-    synthesize_general(lambda x, y: x & y, 0)
-    synthesize_general(lambda x, y: not (x & y), 0)
-    synthesize_general(lambda x, y: not x, 0)
+    # synthesize_general(
+    # lambda x, y, z: x ^ y == z, n_io_var=3, n_aux_osc=0
+    # )  # XOR, no solution w/o free osc
+    # synthesize_general(lambda x, y, z: x ^ y == z, n_io_var=3, n_aux_osc=1)  # XOR
 
-    synthesize_general(lambda x, y: x ^ y, 0)  # XOR, no solution w/o free osc
-    synthesize_general(lambda x, y: x ^ y, 1)  # XOR
+    # 3-input OR
+    synthesize_general(
+        lambda x, y, z, a: (x | (not y) | z) == a or x ^ y,
+        n_io_var=4,
+        n_aux_osc=1,
+    )
+
+    # CNOT gate
+    # synthesize_general(
+    #     lambda x, y, a, b: (x == a) and (x ^ y == b),
+    #     n_io_var=4,
+    #     n_aux_osc=1,
+    # )
+
+    # Toffoli gate
+    synthesize_general(
+        lambda x, y, z, a, b, c: (x == a) and (y == b) and (z ^ (x & y) == c),
+        n_io_var=6,
+        n_aux_osc=3,
+    )

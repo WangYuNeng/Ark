@@ -24,6 +24,63 @@ def phase_to_bool(p):
     return 1 if p == 1 else 0
 
 
+def random_simulation(
+    J: np.ndarray,
+    n_sim=256,
+    Kc=1,
+    Kl=1,
+    super_harmonic=2,
+    t_span=(0, 2),
+    dt=0.01,
+    anneal=False,
+):
+    n_osc = J.shape[0]
+    fix_indx = np.array([3])  # Index of the fixed oscillator
+
+    def obc_ode(t, y):
+        dydt = np.zeros(n_osc)
+        y_diff = y[:, None] - y[None, :]
+        coupling = Kc * np.sum(J * np.sin(y_diff), axis=1)
+        # Exponential schedule
+        if anneal:
+            Kl_anneal = Kl * (1 - np.exp(-0.1 * t))
+        else:
+            Kl_anneal = Kl
+        locking = Kl_anneal * np.sin(super_harmonic * y)
+        dydt = coupling - locking
+        dydt[fix_indx] = 0  # Fix one oscillator
+        return dydt
+
+    results = []
+    for _ in range(n_sim):
+        y0 = np.random.uniform(-np.pi, np.pi, n_osc)
+        y0[fix_indx] = np.pi  # Fix the reference oscillator
+        phases = solve_ivp(
+            obc_ode,
+            t_span,
+            y0,
+            t_eval=[t_span[1]],
+            method="RK45",
+        ).y
+
+        # Rectify to 0, 2pi/super_harmonic, 4pi/super_harmonic, ... 2pi
+        rect_vals = [
+            (2 * np.pi / super_harmonic) * i for i in range(super_harmonic + 1)
+        ]
+        phases = np.array(
+            [
+                rect_vals[np.argmin(np.abs(rect_vals - (v % (2 * np.pi))))]
+                for v in phases[:, -1]
+            ]
+        )
+        # Map 2pi back to 0
+        phases = np.where(phases == 2 * np.pi, 0, phases)
+        # print("Final phases:", phases)
+
+        results.append(phases)
+    return np.array(results)
+
+
 def synthesize_general(
     logic_fn: Callable, n_free_osc: int, symmetric: bool = True, n_coupling: int = 0
 ):
@@ -130,6 +187,31 @@ def synthesize_general(
                 energies.append(m[e])
             print(f"x={xb}, y={yb}, o={ob} => energies: {energies}")
 
+        # Validate with simulation
+        J_val = (
+            np.array([val.as_long() for val in j_mat])
+            .reshape((n_osc, n_osc))
+            .astype(float)
+        )
+        sim_results = random_simulation(J_val, n_sim=2**10, Kl=1, Kc=1)
+
+        # Plot the sim result histogram -- count how many times each input/output combination occurs
+        hist = {(x, y, o): 0 for x in [0, 1] for y in [0, 1] for o in [0, 1]}
+        for res in sim_results:
+            x, y, o = [int(bool(p)) for p in res[:3]]
+            key = (x, y, o)
+            hist[key] += 1
+        print("Simulation results (x, y, o): count")
+        for key, count in hist.items():
+            print(f"{key}: {count}")
+        plt.bar(
+            range(len(hist)), hist.values(), tick_label=[str(k) for k in hist.keys()]
+        )
+        plt.xlabel("(x, y, o)")
+        plt.ylabel("Count")
+        plt.title("Simulation Results Histogram")
+        plt.show()
+
 
 if __name__ == "__main__":
 
@@ -141,6 +223,8 @@ if __name__ == "__main__":
     # synthesize_logic(lambda x, y: not (x & y))  # NAND
 
     synthesize_general(lambda x, y: x | y, 0)
+    synthesize_general(lambda x, y: not (x | y), 0)
+    synthesize_general(lambda x, y: x & y, 0)
     synthesize_general(lambda x, y: not (x & y), 0)
     synthesize_general(lambda x, y: not x, 0)
 

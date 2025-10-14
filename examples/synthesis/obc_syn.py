@@ -94,6 +94,7 @@ def synthesize_general(
     n_aux_osc: int,
     symmetric: bool = True,
     n_coupling: int = 0,
+    constrain_energy_threshold: bool = False,
 ):
 
     def energy_fn(J_max: np.ndarray, v: np.ndarray):
@@ -121,6 +122,10 @@ def synthesize_general(
 
     # Auxiliary variable: minimum energy
     e_min = Int("e_min")
+    e_thresh = Int(
+        "e_thresh"
+    )  # Want that total energy of non-solution states is above e_thresh and total energy of solution states is below e_min
+    constraints.append(e_thresh >= e_min)
 
     # Enumerate all io and free boolean values
     io_val_tab = [list(v) for v in product(*[phases for _ in range(n_io_var)])]
@@ -128,20 +133,25 @@ def synthesize_general(
 
     for ios_phase in io_val_tab:
         ios_bool = phase_to_bool(ios_phase)
-        possible_min_energy_states = []
+        possible_solution_states = []
+        non_solution_states = []
         for free_vals in aux_val_tab:
             v = np.array(ios_phase + free_vals + fixed_oscs)
             e = energy_fn(J_max, v)
             if logic_fn(*ios_bool):
                 # Solution states have energy at least e_min
-                constraints.append(e >= e_min)
-                possible_min_energy_states.append(e)
+                possible_solution_states.append(e)
             else:
                 # Non-solution states have energy strictly greater than e_min
                 constraints.append(e > e_min)
-        if possible_min_energy_states:
+                non_solution_states.append(e)
+        if possible_solution_states:
             # At least one solution state has energy equal to e_min
-            constraints.append(Or(*[e == e_min for e in possible_min_energy_states]))
+            constraints.append(Or(*[e == e_min for e in possible_solution_states]))
+            if constrain_energy_threshold:
+                constraints.append(sum(possible_solution_states) <= e_thresh)
+        if non_solution_states and constrain_energy_threshold:
+            constraints.append(sum(non_solution_states) > e_thresh)
 
     # Symmetry and zero diagonal constraints
     for i in range(n_osc):
@@ -176,6 +186,7 @@ def synthesize_general(
         m = s.model()
         j_mat = []
         print("Minimum energy:", m[e_min])
+        print("Accepting energy threshold:", m[e_thresh])
 
         print("Coupling matrix:")
 
@@ -246,9 +257,10 @@ if __name__ == "__main__":
 
     # 3-input OR
     synthesize_general(
-        lambda x, y, z, a: (x | (not y) | z) == a or x ^ y,
+        lambda x, y, z, a: (x | y | z) == a,
         n_io_var=4,
         n_aux_osc=1,
+        constrain_energy_threshold=True,
     )
 
     # CNOT gate
@@ -262,5 +274,5 @@ if __name__ == "__main__":
     synthesize_general(
         lambda x, y, z, a, b, c: (x == a) and (y == b) and (z ^ (x & y) == c),
         n_io_var=6,
-        n_aux_osc=3,
+        n_aux_osc=1,
     )

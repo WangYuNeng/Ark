@@ -41,6 +41,21 @@ def random_simulation(
     dt=0.01,
     anneal=False,
 ):
+    """Simulate Kuramoto model with random initial states
+
+    Args:
+        J (np.ndarray): Coupling matrix
+        n_sim (int, optional): Number of simulation runs. Defaults to 256.
+        Kc (int, optional): Coupling scale factor. Defaults to 1.
+        Kl (int, optional): Injection locking scale factor. Defaults to 1.
+        super_harmonic (int, optional): Injectio locking frequency. Defaults to 2.
+        t_span (tuple, optional): Simulation time span. Defaults to (0, 2).
+        dt (float, optional): Initial time step. Defaults to 0.01.
+        anneal (bool, optional): Whether to use an annealing schedule for locking. Defaults to False.
+
+    Returns:
+        np.ndarray: (n_sim, J.shape[0] - 1) the final state of each simulation run
+    """
     n_osc = J.shape[0]
     fix_indx = -1
 
@@ -97,6 +112,20 @@ def synthesize_general(
     constrain_energy_threshold: bool = False,
     exclude_ref_energy: bool = False,
 ):
+    """Synthesize oscillator coupling matrix to implement a logic function
+
+    Args:
+        logic_fn (Callable): Logic function to implement. Takes n_io_var boolean inputs and returns
+            a boolean output.
+        n_io_var (int): Number of input/output variables (oscillators).
+        n_aux_osc (int): Number of auxiliary oscillators (free variables).
+        symmetric (bool, optional): Whether to constrain the coupling matrix to be symmetric. Defaults to True.
+        constrain_coupling (int, optional): Maximum number of non-zero couplings. Defaults to 0 (no constraint).
+        constrain_energy_threshold (bool, optional): Whether to constrain the energy of non-solution states to be above
+            a threshold and solution states to be below a threshold. Defaults to False.
+        exclude_ref_energy (bool, optional): Whether to exclude the reference oscillator from energy calculation.
+            Defaults to False.
+    """
 
     def energy_fn(J_mat: np.ndarray, v: np.ndarray, exclude_ref_energy: bool = False):
         n_var = len(v)

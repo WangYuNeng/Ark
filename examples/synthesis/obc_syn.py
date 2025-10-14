@@ -5,7 +5,7 @@ from typing import Callable, Iterable
 
 import matplotlib.pyplot as plt
 import numpy as np
-from cvc5.pythonic import Const, Int, Ints, Or, Reals, Solver, sat
+from cvc5.pythonic import Const, Int, Ints, Or, Real, Reals, RealVal, Solver, sat
 from scipy.integrate import solve_ivp
 
 
@@ -93,20 +93,27 @@ def synthesize_general(
     n_io_var: int,
     n_aux_osc: int,
     symmetric: bool = True,
-    n_coupling: int = 0,
+    constrain_coupling: int = 0,
     constrain_energy_threshold: bool = False,
+    exclude_ref_energy: bool = False,
 ):
 
-    def energy_fn(J_max: np.ndarray, v: np.ndarray):
+    def energy_fn(J_mat: np.ndarray, v: np.ndarray, exclude_ref_energy: bool = False):
         n_var = len(v)
-        assert J_max.shape == (n_var, n_var)
+        assert J_mat.shape == (n_var, n_var)
 
         # Pairwise products
         v_diff = v[:, None] * v[None, :]
 
         # Zero diagonal
         v_diff = v_diff * (1 - np.eye(n_var))
-        return (J_max * v_diff).sum()
+
+        energy_per_coupling = J_mat * v_diff
+
+        # The couplings to fixed oscillator does not contribute to energy
+        if exclude_ref_energy:
+            energy_per_coupling[-1, :] = 0
+        return energy_per_coupling.sum()
 
     # 5 oscillators are input/output, 1 , rest are free variables
     n_osc = n_io_var + n_aux_osc + 1
@@ -137,7 +144,7 @@ def synthesize_general(
         non_solution_states = []
         for free_vals in aux_val_tab:
             v = np.array(ios_phase + free_vals + fixed_oscs)
-            e = energy_fn(J_max, v)
+            e = energy_fn(J_max, v, exclude_ref_energy=exclude_ref_energy)
             if logic_fn(*ios_bool):
                 # Solution states have energy at least e_min
                 possible_solution_states.append(e)
@@ -161,7 +168,7 @@ def synthesize_general(
                 constraints.append(J[i * n_osc + j] == J[j * n_osc + i])
 
     # Constraint the number of non-zero couplings
-    if n_coupling > 0:
+    if constrain_coupling > 0:
         coupling_indicators = [
             Int(f"coup_ind_{i}_{j}") for i in range(n_osc) for j in range(n_osc)
         ]
@@ -173,7 +180,7 @@ def synthesize_general(
                 Or(J[idx] != 0, coup_ind == 0)
             )  # If coupling is zero, indicator is 0
         constraints.append(
-            sum(coupling_indicators) <= n_coupling
+            sum(coupling_indicators) <= constrain_coupling
         )  # Limit the number of couplings
 
     # Solve
@@ -197,27 +204,32 @@ def synthesize_general(
 
         # List the truth table and corresponding energies
         print("Truth table and energies:")
+        titles = ["I/O", "E_w_ref", "E_wo_ref"]
+        print(f"{titles[0]:<20}{titles[1]:<10}{titles[2]:<10}")
         for ios_phase in io_val_tab:
-            energies = []
+            es_w_ref, es_wo_ref = [], []
             for aux_vals in aux_val_tab:
                 v = np.array(ios_phase + aux_vals + fixed_oscs)
-                e = energy_fn(J_max, v)
-                energies.append(m[e])
+                es_w_ref.append(m[energy_fn(J_max, v, exclude_ref_energy=False)])
+                es_wo_ref.append(m[energy_fn(J_max, v, exclude_ref_energy=True)])
             ios_bool = phase_to_bool(ios_phase)
-            print(f"ios={ios_bool} => energies: {energies}")
+            print(f"{str(ios_bool):<20}{str(es_w_ref):<10} {str(es_wo_ref):<10}")
 
         # Validate with simulation
         J_val = (
-            np.array([val.as_long() for val in j_mat])
+            np.array([var.as_long() for var in j_mat])
             .reshape((n_osc, n_osc))
             .astype(float)
         )
         sim_results = random_simulation(J_val, n_sim=2**10, Kl=1, Kc=1, anneal=False)
 
         # Plot the sim result histogram -- count how many times each input/output combination occurs
-        hist = {tuple(phase_to_bool(ios_phase)): 0 for ios_phase in io_val_tab}
+        hist = {
+            tuple(phase_to_bool(list(p))): 0
+            for p in product(*[phases for _ in range(n_io_var + n_aux_osc)])
+        }
         for res in sim_results:
-            key = tuple([int(bool(p)) for p in res[:n_io_var]])
+            key = tuple([int(bool(p)) for p in res[: n_io_var + n_aux_osc]])
             hist[key] += 1
 
         # Rotate the x-axis labels for better readability
@@ -232,7 +244,8 @@ def synthesize_general(
             if logic_fn(*phase_to_bool(ios_phase))
         ]
         for i, k in enumerate(hist.keys()):
-            if k in valid_states:
+            ios = k[:n_io_var]
+            if ios in valid_states:
                 plt.gca().get_xticklabels()[i].set_color("red")
         plt.xticks(rotation=90)
         plt.xlabel(f"{n_io_var} Input/Output States")
@@ -260,7 +273,6 @@ if __name__ == "__main__":
         lambda x, y, z, a: (x | y | z) == a,
         n_io_var=4,
         n_aux_osc=1,
-        constrain_energy_threshold=True,
     )
 
     # CNOT gate

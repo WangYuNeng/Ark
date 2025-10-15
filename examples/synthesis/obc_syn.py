@@ -68,9 +68,9 @@ def fit_temperature(
             kl_div += prob * (cp.log(prob) - (log_Q_numerator - log_Q_denominator))
     prob = cp.Problem(cp.Minimize(kl_div))
     prob.solve()
-    fitted_beta = beta.value[0]
+    fitted_beta = beta.value[0].item()
     fitted_distribution = {
-        k: np.exp(-fitted_beta * e) for k, e in phase_to_energy.items()
+        k: np.exp(-fitted_beta * e).item() for k, e in phase_to_energy.items()
     }
     partition = sum(fitted_distribution.values())
     fitted_distribution = {
@@ -150,6 +150,34 @@ def random_simulation(
     return np.array(results)
 
 
+def energy_fn(J_mat: np.ndarray, v: np.ndarray, exclude_ref_energy: bool = False):
+    """Calculate the energy of a state given coupling matrix and oscillator phases.
+
+    Args:
+        J_mat (np.ndarray): Coupling matrix
+        v (np.ndarray): Oscillator phases, values should be -1 or 1
+        exclude_ref_energy (bool, optional): Whether to exclude the reference oscillator from energy calculation.
+            Defaults to False.
+    Returns:
+        Same type as elements in the ndarray: Energy value
+    """
+    n_var = len(v)
+    assert J_mat.shape == (n_var, n_var)
+
+    # Pairwise products
+    v_diff = v[:, None] * v[None, :]
+
+    # Zero diagonal
+    v_diff = v_diff * (1 - np.eye(n_var))
+
+    energy_per_coupling = J_mat * v_diff
+
+    # The couplings to fixed oscillator does not contribute to energy
+    if exclude_ref_energy:
+        energy_per_coupling[-1, :] = 0
+    return energy_per_coupling.sum()
+
+
 def synthesize_general(
     logic_fn: Callable,
     n_io_var: int,
@@ -172,24 +200,10 @@ def synthesize_general(
             a threshold and solution states to be below a threshold. Defaults to False.
         exclude_ref_energy (bool, optional): Whether to exclude the reference oscillator from energy calculation.
             Defaults to False.
+    Returns:
+        model: The solver model if a solution is found, else None.
+        J_mat: The coupling matrix if a solution is found, else None.
     """
-
-    def energy_fn(J_mat: np.ndarray, v: np.ndarray, exclude_ref_energy: bool = False):
-        n_var = len(v)
-        assert J_mat.shape == (n_var, n_var)
-
-        # Pairwise products
-        v_diff = v[:, None] * v[None, :]
-
-        # Zero diagonal
-        v_diff = v_diff * (1 - np.eye(n_var))
-
-        energy_per_coupling = J_mat * v_diff
-
-        # The couplings to fixed oscillator does not contribute to energy
-        if exclude_ref_energy:
-            energy_per_coupling[-1, :] = 0
-        return energy_per_coupling.sum()
 
     # 5 oscillators are input/output, 1 , rest are free variables
     n_osc = n_io_var + n_aux_osc + 1
@@ -264,78 +278,119 @@ def synthesize_general(
     s.add(*constraints)
     if s.check() != sat:
         print("UNSAT, no solution found")
+        return None, None
 
     else:
         m = s.model()
-        j_mat = []
-        print("Minimum energy:", m[e_min])
-        print("Accepting energy threshold:", m[e_thresh])
+        return m, J_mat
 
-        print("Coupling matrix:")
 
-        for i in range(n_osc):
-            for j in range(n_osc):
-                j_mat.append(m[J[i * n_osc + j]])
-        print(np.array(j_mat).reshape((n_osc, n_osc)))
+def validate_synthesis(
+    model,
+    J_mat: np.ndarray,
+    logic_fn: Callable,
+    n_io_var: int,
+    n_aux_osc: int,
+    Kc: int = 1,
+    Kl: int = 1,
+    t_span=(0, 2),
+    anneal: bool = False,
+    plot: bool = True,
+):
+    """Validate the synthesis result by calculating energies and simulating the system.
 
-        # List the truth table and corresponding energies
-        print("Truth table and energies:")
-        titles = ["I/O", "E_w_ref", "E_wo_ref"]
-        phase_to_energy_w_ref, phase_to_energy_wo_ref = {}, {}
-        print(f"{titles[0]:<20}{titles[1]:<10}{titles[2]:<10}")
-        for ios_phase in io_val_tab:
-            es_w_ref, es_wo_ref = [], []
-            for aux_vals in aux_val_tab:
-                v = np.array(ios_phase + aux_vals + fixed_oscs)
-                energy_w_ref = m[
-                    energy_fn(J_mat, v, exclude_ref_energy=False)
-                ].as_long()
-                energy_wo_ref = m[
-                    energy_fn(J_mat, v, exclude_ref_energy=True)
-                ].as_long()
-                es_w_ref.append(energy_w_ref)
-                es_wo_ref.append(energy_wo_ref)
-                phase_to_energy_w_ref[tuple(phase_to_bool(ios_phase + aux_vals))] = (
-                    energy_w_ref
-                )
-                phase_to_energy_wo_ref[tuple(phase_to_bool(ios_phase + aux_vals))] = (
-                    energy_wo_ref
-                )
-            ios_bool = phase_to_bool(ios_phase)
-            print(f"{str(ios_bool):<20}{str(es_w_ref):<10} {str(es_wo_ref):<10}")
+    Args:
+        model: The solver model from synthesis.
+        J_mat (np.ndarray): The coupling matrix from synthesis.
+        logic_fn (Callable): Logic function to implement. Takes n_io_var boolean inputs and returns
+            a boolean output.
+        n_io_var (int): Number of input/output variables (oscillators).
+        n_aux_osc (int): Number of auxiliary oscillators (free variables).
+        Kc (int, optional): Coupling scale factor for simulation. Defaults to 1.
+        Kl (int, optional): Injection locking scale factor for simulation. Defaults to 1.
+        t_span (tuple, optional): Simulation time span. Defaults to (0, 2).
+        anneal (bool, optional): Whether to use an annealing schedule for locking in simulation. Defaults to False.
+        plot (bool, optional): Whether to plot the simulation result histogram. Defaults to True.
+    Returns:
+        dict: Histogram of final states from simulation.
+        tuple: (w_ref_energy_data, wo_ref_energy_data) where each is a dict containing:
+            - beta: Fitted temperature parameter
+            - kl_div: KL divergence value
+            - distribution: Fitted distribution over states
+    """
+    m = model
+    n_osc = n_io_var + n_aux_osc + 1
+    fixed_oscs = [1]
+    phases = [-1, 1]
+    io_val_tab = [list(v) for v in product(*[phases for _ in range(n_io_var)])]
+    aux_val_tab = [list(v) for v in product(*[phases for _ in range(n_aux_osc)])]
 
-        # Validate with simulation
-        J_val = (
-            np.array([var.as_long() for var in j_mat])
-            .reshape((n_osc, n_osc))
-            .astype(float)
-        )
-        sim_results = random_simulation(
-            J_val, n_sim=2 ** (n_osc + 4), Kl=1, Kc=1, anneal=False, t_span=(0, 2)
-        )
+    J_val = np.array(
+        [[m[J_mat[i, j]].as_long() for j in range(n_osc)] for i in range(n_osc)]
+    )
+    # Normalize J to have mean absolute value of 1
+    J_val = J_val / np.mean(np.abs(J_val))
 
-        # Plot the sim result histogram -- count how many times each input/output combination occurs
-        hist = {
-            tuple(phase_to_bool(list(p))): 0
-            for p in product(*[phases for _ in range(n_io_var + n_aux_osc)])
-        }
-        for res in sim_results:
-            key = tuple([int(bool(p)) for p in res[: n_io_var + n_aux_osc]])
-            hist[key] += 1
+    print("Normalized Coupling matrix:")
+    print(J_val)
 
-        # Rotate the x-axis labels for better readability
-        # Highlight the valid states
+    # List the truth table and corresponding energies
+    print("Truth table and energies:")
+    titles = ["I/O", "E_w_ref", "E_wo_ref"]
+    phase_to_energy_w_ref, phase_to_energy_wo_ref = {}, {}
+    print(f"{titles[0]:<20}{titles[1]:<10}{titles[2]:<10}")
+    for ios_phase in io_val_tab:
+        es_w_ref, es_wo_ref = [], []
+        for aux_vals in aux_val_tab:
+            v = np.array(ios_phase + aux_vals + fixed_oscs)
+            energy_w_ref = m[energy_fn(J_mat, v, exclude_ref_energy=False)].as_long()
+            energy_wo_ref = m[energy_fn(J_mat, v, exclude_ref_energy=True)].as_long()
+            es_w_ref.append(energy_w_ref)
+            es_wo_ref.append(energy_wo_ref)
+            phase_to_energy_w_ref[tuple(phase_to_bool(ios_phase + aux_vals))] = (
+                energy_w_ref
+            )
+            phase_to_energy_wo_ref[tuple(phase_to_bool(ios_phase + aux_vals))] = (
+                energy_wo_ref
+            )
+        ios_bool = phase_to_bool(ios_phase)
+        print(f"{str(ios_bool):<20}{str(es_w_ref):<10} {str(es_wo_ref):<10}")
+
+    # Validate with simulation
+    sim_results = random_simulation(
+        J_val, n_sim=2 ** (n_osc + 6), Kl=Kl, Kc=Kc, anneal=anneal, t_span=t_span
+    )
+
+    # Plot the sim result histogram -- count how many times each input/output combination occurs
+    hist = {
+        tuple(phase_to_bool(list(p))): 0
+        for p in product(*[phases for _ in range(n_io_var + n_aux_osc)])
+    }
+    for res in sim_results:
+        key = tuple([int(bool(p)) for p in res[: n_io_var + n_aux_osc]])
+        hist[key] += 1
+
+    # Rotate the x-axis labels for better readability
+    # Highlight the valid states
+    if plot:
         plt.bar(
             range(len(hist)), hist.values(), tick_label=[str(k) for k in hist.keys()]
         )
 
-        for label, p2e, color in zip(
-            ["w/ Ref energy", "w/o Ref energy"],
-            [phase_to_energy_w_ref, phase_to_energy_wo_ref],
-            ["orange", "gold"],  # contrast to blue bars
-        ):
-            beta, kl_div, distribution = fit_temperature(p2e, hist)
-            # Plot the fitted distribution as a line on top of the histogram
+    w_ref_energy_data, wo_ref_energy_data = {}, {}
+    for label, p2e, color, data in zip(
+        ["w/ Ref energy", "w/o Ref energy"],
+        [phase_to_energy_w_ref, phase_to_energy_wo_ref],
+        ["orange", "gold"],  # contrast to blue bars
+        [w_ref_energy_data, wo_ref_energy_data],
+    ):
+        beta, kl_div, distribution = fit_temperature(p2e, hist)
+        data["beta"] = beta
+        data["kl_div"] = kl_div
+        data["distribution"] = distribution
+
+        # Plot the fitted distribution as a line on top of the histogram
+        if plot:
             plt.plot(
                 range(len(hist)),
                 [distribution[k] for k in hist.keys()],
@@ -343,7 +398,8 @@ def synthesize_general(
                 marker="o",
                 color=color,
             )
-        # Highlight the valid states
+    # Highlight the valid states
+    if plot:
         valid_states = [
             tuple(phase_to_bool(ios_phase))
             for ios_phase in io_val_tab
@@ -361,6 +417,10 @@ def synthesize_general(
         plt.legend()
         plt.show()
 
+    # Organize data
+
+    return hist, (w_ref_energy_data, wo_ref_energy_data)
+
 
 if __name__ == "__main__":
 
@@ -376,10 +436,23 @@ if __name__ == "__main__":
     # synthesize_general(lambda x, y, z: x ^ y == z, n_io_var=3, n_aux_osc=1)  # XOR
 
     # 3-input OR
-    synthesize_general(
+    np.random.seed(428)
+    model, j = synthesize_general(
         lambda x, y, z, a: (x | y | z) == a,
         n_io_var=4,
         n_aux_osc=1,
+    )
+    hist, (w_ref_energy_data, wo_ref_energy_data) = validate_synthesis(
+        model,
+        j,
+        lambda x, y, z, a: (x | y | z) == a,
+        n_io_var=4,
+        n_aux_osc=1,
+        Kc=0.5,
+        Kl=1,
+        plot=True,
+        anneal=False,
+        t_span=(0, 5),
     )
 
     # CNOT gate

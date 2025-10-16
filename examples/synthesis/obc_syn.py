@@ -1,8 +1,7 @@
 # Demonstrate syntheizing function with oscillators
 
-from cmath import phase
 from itertools import product
-from typing import Callable, Iterable
+from typing import Callable
 
 import cvxpy as cp
 import matplotlib.pyplot as plt
@@ -176,6 +175,56 @@ def energy_fn(J_mat: np.ndarray, v: np.ndarray, exclude_ref_energy: bool = False
     if exclude_ref_energy:
         energy_per_coupling[-1, :] = 0
     return energy_per_coupling.sum()
+
+
+def KL_divergence_to_ideal(
+    phase_to_energy: dict[tuple, int],
+    phase_to_measurements: dict[tuple, int],
+    n_io_var: int,
+):
+    """Calculate the KL divergence between the measured distribution and the ideal distribution.
+
+    Ideal distribution is from infinite beta, i.e., probability 1 for lowest energy states and 0
+      for others. Here ideal distribution is P and measured distribution is Q for KL divergence.
+
+    Args:
+        phase_to_energy (dict[tuple, int]): Mapping from state (tuple of phases) to energy value
+        phase_to_measurements (dict[tuple, int]): Mapping from state (tuple of phases) to count of occurrences
+        n_io_var (int): Number of input/output variables (oscillators).
+    Returns:
+        float: KL divergence value
+    """
+
+    assert set(phase_to_energy.keys()) == set(
+        phase_to_measurements.keys()
+    ), "Energy and measurement keys must match"
+    n_measurement = sum(phase_to_measurements.values())
+    phase_to_probs = {k: v / n_measurement for k, v in phase_to_measurements.items()}
+
+    min_energy = min(phase_to_energy.values())
+    min_energy_states = set()
+    agg_phase_to_prob = {}
+    for phase, energy in phase_to_energy.items():
+        io_phase = phase[:n_io_var]
+        if energy == min_energy:
+            min_energy_states.add(io_phase)
+        agg_phase_to_prob[io_phase] = (
+            agg_phase_to_prob.get(io_phase, 0) + phase_to_probs[phase]
+        )
+
+    n_ideal_states = len(min_energy_states)
+    ideal_prob = 1 / n_ideal_states
+
+    kl_div = 0
+    for phase, q in agg_phase_to_prob.items():
+        if phase in min_energy_states:
+            p = ideal_prob
+            if q == 0:
+                print("Measured distribution has zero probability for an ideal state")
+                return None
+            kl_div += p * (np.log2(p) - np.log2(q))
+
+    return kl_div
 
 
 def synthesize_general(
@@ -398,6 +447,10 @@ def validate_synthesis(
                 marker="o",
                 color=color,
             )
+
+    kl_div_to_ideal = KL_divergence_to_ideal(
+        phase_to_energy_w_ref, hist, n_io_var=n_io_var
+    )
     # Highlight the valid states
     if plot:
         valid_states = [
@@ -412,7 +465,12 @@ def validate_synthesis(
         plt.xticks(rotation=90)
         plt.xlabel(f"{n_io_var} Input/Output States")
         plt.ylabel("Count")
-        plt.title("Final State Distribution")
+        if kl_div_to_ideal is None:
+            plt.title("Final State Distribution")
+        else:
+            plt.title(
+                f"Final State Distribution, KL Div to Ideal={kl_div_to_ideal:.4f}"
+            )
         plt.tight_layout()
         plt.legend()
         plt.show()

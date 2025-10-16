@@ -64,7 +64,11 @@ def fit_temperature(
         prob = phase_to_probs[phases]
         log_Q_numerator = -beta * energy
         if prob != 0:
-            kl_div += prob * (cp.log(prob) - (log_Q_numerator - log_Q_denominator))
+            kl_div += (
+                prob
+                * (cp.log(prob) - (log_Q_numerator - log_Q_denominator))
+                / np.log(2)
+            )
     prob = cp.Problem(cp.Minimize(kl_div))
     prob.solve()
     fitted_beta = beta.value[0].item()

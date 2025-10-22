@@ -4,10 +4,16 @@ from itertools import product
 from typing import Callable
 
 import cvxpy as cp
+import diffrax
+import jax
+import jax.numpy as jnp
+import lineax
 import matplotlib.pyplot as plt
 import numpy as np
 from cvc5.pythonic import Const, Int, Ints, Or, Real, Reals, RealVal, Solver, sat
 from scipy.integrate import solve_ivp
+
+jax.config.update("jax_enable_x64", True)
 
 
 def bool_to_phase(b):
@@ -88,9 +94,13 @@ def random_simulation(
     n_sim=256,
     Kc=1,
     Kl=1,
+    Kt=0.1,
+    Kt_ratio=100,
     super_harmonic=2,
-    t_span=(0, 2),
+    t_end=2,
+    dt0=0.01,
     anneal=False,
+    plot=False,
 ):
     """Simulate Kuramoto model with random initial states
 
@@ -100,57 +110,91 @@ def random_simulation(
         Kc (int, optional): Coupling scale factor. Defaults to 1.
         Kl (int, optional): Injection locking scale factor. Defaults to 1.
         super_harmonic (int, optional): Injectio locking frequency. Defaults to 2.
-        t_span (tuple, optional): Simulation time span. Defaults to (0, 2).
         anneal (bool, optional): Whether to use an annealing schedule for locking. Defaults to False.
 
     Returns:
         np.ndarray: (n_sim, J.shape[0] - 1) the final state of each simulation run
     """
-    n_osc = J.shape[0]
-    fix_indx = -1
+    n_free_osc = J.shape[0] - 1
+    J = jnp.array(J)
 
-    def obc_ode(t, y):
-        dydt = np.zeros(n_osc)
-        y_diff = y[:, None] - y[None, :]
-        coupling = Kc * np.sum(J * np.sin(y_diff), axis=1)
-        # Exponential schedule
-        if anneal:
-            Kl_anneal = Kl * (1 - np.exp(-0.1 * t))
-        else:
-            Kl_anneal = Kl
-        locking = Kl_anneal * np.sin(super_harmonic * y)
-        dydt = coupling - locking
-        dydt[fix_indx] = 0  # Fix the reference oscillator
+    def obc_ode(t, y, args):
+        y_w_fixed = jnp.concatenate([y, jnp.array([jnp.pi])])  # Fixed oscillator at pi
+        y_diff = y_w_fixed[:, None] - y_w_fixed[None, :]
+        coupling = Kc * jnp.sum(J * jnp.sin(y_diff), axis=1)
+        locking = Kl * jnp.sin(super_harmonic * y_w_fixed)
+        dydt = (coupling - locking)[:-1]  # Exclude the fixed oscillator
         return dydt
 
-    results = []
-    for _ in range(n_sim):
-        y0 = np.random.uniform(-np.pi, np.pi, n_osc)
-        y0[fix_indx] = np.pi  # Fix the reference oscillator
-        phases = solve_ivp(
-            obc_ode,
-            t_span,
-            y0,
-            t_eval=[t_span[1]],
-            method="RK45",
-        ).y
+    def noise_ode(t, y, args):
+        if not anneal:
+            Kt_anneal = Kt
+        else:
+            # From Kt_ratio * Kt to Kt exponentially over [0, t_end]
+            Kt_anneal = Kt_ratio * Kt * jnp.exp(-jnp.log(Kt_ratio) * t / t_end)
+        return lineax.DiagonalLinearOperator(Kt_anneal * jnp.ones(n_free_osc))
 
-        # Rectify to 0, 2pi/super_harmonic, 4pi/super_harmonic, ... 2pi
-        rect_vals = [
-            (2 * np.pi / super_harmonic) * i for i in range(super_harmonic + 1)
-        ]
-        phases = np.array(
-            [
-                rect_vals[np.argmin(np.abs(rect_vals - (v % (2 * np.pi))))]
-                for v in phases[:, -1]
-            ]
+    ode_term = diffrax.ODETerm(obc_ode)
+    results = []
+    ts = jnp.arange(0, t_end, dt0)
+    for _ in range(n_sim):
+        y0 = jnp.array(np.random.uniform(-np.pi, np.pi, n_free_osc))
+        seed = np.random.randint(0, 2**32 - 1)
+        brownian = diffrax.VirtualBrownianTree(
+            t0=0,
+            t1=t_end,
+            tol=1e-3,
+            shape=(n_free_osc,),
+            key=jax.random.PRNGKey(seed),
         )
-        # Map 2pi back to 0
-        phases = np.where(phases == 2 * np.pi, 0, phases)
-        # print("Final phases:", phases)
+
+        brownian_term = diffrax.ControlTerm(noise_ode, brownian)
+        solution = diffrax.diffeqsolve(
+            terms=diffrax.MultiTerm(ode_term, brownian_term),
+            solver=diffrax.Heun(),
+            t0=0,
+            t1=t_end,
+            dt0=dt0,
+            y0=y0,
+            saveat=diffrax.SaveAt(ts=ts),
+        )
+
+        phases = solution.ys.T
+
+        # Plot
+        if plot:
+            plt.figure(figsize=(10, 5))
+            for i in range(phases.shape[0]):
+                plt.plot(ts, phases[i], label=f"oscillator {i}")
+            plt.xlabel("Time")
+            plt.ylabel("Phase")
+            plt.legend()
+            plt.show()
 
         results.append(phases)
-    return np.array(results)
+
+    return jnp.array(results), ts
+
+
+def rectify_phases(phases: np.ndarray, super_harmonic: int):
+    """Rectify oscillator phases to discrete states based on super harmonic injection locking.
+
+    Args:
+        phases (np.ndarray): Array of oscillator phases
+        super_harmonic (int): Injection locking frequency
+
+    Returns:
+        np.ndarray: Rectified phases
+    """
+    rect_vals = jnp.array(
+        [(2 * jnp.pi / super_harmonic) * i for i in range(super_harmonic + 1)]
+    )
+    rectified_phases = jnp.array(
+        [rect_vals[jnp.argmin(jnp.abs(rect_vals - (v % (2 * jnp.pi))))] for v in phases]
+    )
+    # Map 2pi back to 0
+    rectified_phases = jnp.where(rectified_phases == 2 * jnp.pi, 0, rectified_phases)
+    return rectified_phases
 
 
 def energy_fn(J_mat: np.ndarray, v: np.ndarray, exclude_ref_energy: bool = False):
@@ -166,6 +210,9 @@ def energy_fn(J_mat: np.ndarray, v: np.ndarray, exclude_ref_energy: bool = False
     """
     n_var = len(v)
     assert J_mat.shape == (n_var, n_var)
+    assert (
+        v[-1] == 1
+    ), "Last oscillator must be the fixed reference oscillator with phase 1"
 
     # Pairwise products
     v_diff = v[:, None] * v[None, :]
@@ -346,6 +393,8 @@ def validate_synthesis(
     n_aux_osc: int,
     Kc: int = 1,
     Kl: int = 1,
+    Kt: int = 0.1,
+    Kt_ratio: int = 100,
     t_span=(0, 2),
     anneal: bool = False,
     plot: bool = True,
@@ -410,9 +459,19 @@ def validate_synthesis(
         print(f"{str(ios_bool):<20}{str(es_w_ref):<10} {str(es_wo_ref):<10}")
 
     # Validate with simulation
-    sim_results = random_simulation(
-        J_val, n_sim=2 ** (n_osc + 6), Kl=Kl, Kc=Kc, anneal=anneal, t_span=t_span
+    traces, ts = random_simulation(
+        J_val,
+        n_sim=2 ** (n_osc + 6),
+        Kl=Kl,
+        Kc=Kc,
+        Kt=Kt,
+        Kt_ratio=Kt_ratio,
+        anneal=anneal,
+        t_end=t_span[1],
     )
+    sim_results = []
+    for trace in traces:
+        sim_results.append(rectify_phases(trace[:, -1], super_harmonic=2))
 
     # Plot the sim result histogram -- count how many times each input/output combination occurs
     hist = {
@@ -485,48 +544,45 @@ def validate_synthesis(
 
 
 if __name__ == "__main__":
-
-    # synthesize_general(lambda x, y, z: x | y == z, n_io_var=3, n_aux_osc=0)
-    # synthesize_general(lambda x, y, z: not (x | y) == z, n_io_var=3, n_aux_osc=0)
-    # synthesize_general(lambda x, y, z: x & y == z, n_io_var=3, n_aux_osc=0)
-    # synthesize_general(lambda x, y, z: not (x & y) == z, n_io_var=3, n_aux_osc=0)
-    # synthesize_general(lambda x, y, z: not x == z, n_io_var=3, n_aux_osc=0)
-
-    # synthesize_general(
-    # lambda x, y, z: x ^ y == z, n_io_var=3, n_aux_osc=0
-    # )  # XOR, no solution w/o free osc
-    # synthesize_general(lambda x, y, z: x ^ y == z, n_io_var=3, n_aux_osc=1)  # XOR
-
-    # 3-input OR
     np.random.seed(428)
-    model, j = synthesize_general(
-        lambda x, y, z, a: (x | y | z) == a,
-        n_io_var=4,
-        n_aux_osc=1,
-    )
-    hist, (w_ref_energy_data, wo_ref_energy_data) = validate_synthesis(
-        model,
-        j,
-        lambda x, y, z, a: (x | y | z) == a,
-        n_io_var=4,
-        n_aux_osc=1,
-        Kc=0.5,
-        Kl=1,
-        plot=True,
-        anneal=False,
-        t_span=(0, 5),
-    )
 
-    # CNOT gate
-    # synthesize_general(
-    #     lambda x, y, a, b: (x == a) and (x ^ y == b),
-    #     n_io_var=4,
-    #     n_aux_osc=1,
-    # )
+    gates = {
+        "2-OR": [lambda x, y, z: (x | y) == z, 3, 0],
+        "2-AND": [lambda x, y, z: (x & y) == z, 3, 0],
+        "2-XOR": [lambda x, y, z: (x ^ y) == z, 3, 1],
+        "1-ADDER": [lambda a0, b0, s0, c: ((a0 ^ b0) == s0 and (a0 & b0) == c), 4, 0],
+        "3-OR": [lambda x, y, z, a: (x | y | z) == a, 4, 1],
+    }
 
-    # Toffoli gate
-    synthesize_general(
-        lambda x, y, z, a, b, c: (x == a) and (y == b) and (z ^ (x & y) == c),
-        n_io_var=6,
-        n_aux_osc=1,
-    )
+    Kl = 1
+    Kc = 1
+    Kt = 0.01
+    Kt_ratio = 100
+    t_span = (0, 10)
+    anneal = True
+
+    for gate_name, [gate_func, n_io_var, n_aux_osc] in gates.items():
+        model, j_mat = synthesize_general(
+            gate_func,
+            n_io_var=n_io_var,
+            n_aux_osc=n_aux_osc,
+            symmetric=True,
+            constrain_coupling=0,
+            constrain_energy_threshold=False,
+        )
+
+        # np.random.seed(428)
+        hist, (w_ref_energy_data, wo_ref_energy_data) = validate_synthesis(
+            model,
+            j_mat,
+            gate_func,
+            n_io_var=n_io_var,
+            n_aux_osc=n_aux_osc,
+            Kc=Kc,
+            Kl=Kl,
+            Kt=Kt,
+            Kt_ratio=Kt_ratio,
+            plot=True,
+            anneal=anneal,
+            t_span=t_span,
+        )

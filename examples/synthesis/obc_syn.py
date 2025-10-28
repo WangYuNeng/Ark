@@ -135,15 +135,14 @@ def random_simulation(
         return lineax.DiagonalLinearOperator(Kt_anneal * jnp.ones(n_free_osc))
 
     ode_term = diffrax.ODETerm(obc_ode)
-    results = []
     ts = jnp.arange(0, t_end, dt0)
-    for _ in range(n_sim):
-        y0 = jnp.array(np.random.uniform(-np.pi, np.pi, n_free_osc))
-        seed = np.random.randint(0, 2**32 - 1)
+
+    @jax.jit
+    def sim(y0: jax.Array, seed: int):
         brownian = diffrax.VirtualBrownianTree(
             t0=0,
             t1=t_end,
-            tol=1e-3,
+            tol=dt0 / 2,
             shape=(n_free_osc,),
             key=jax.random.PRNGKey(seed),
         )
@@ -151,27 +150,31 @@ def random_simulation(
         brownian_term = diffrax.ControlTerm(noise_ode, brownian)
         solution = diffrax.diffeqsolve(
             terms=diffrax.MultiTerm(ode_term, brownian_term),
-            solver=diffrax.Heun(),
+            solver=diffrax.Euler(),
             t0=0,
             t1=t_end,
             dt0=dt0,
             y0=y0,
             saveat=diffrax.SaveAt(ts=ts),
+            max_steps=int(t_end // dt0 * 2),
         )
 
-        phases = solution.ys.T
+        return solution.ys.T
 
-        # Plot
-        if plot:
-            plt.figure(figsize=(10, 5))
-            for i in range(phases.shape[0]):
-                plt.plot(ts, phases[i], label=f"oscillator {i}")
-            plt.xlabel("Time")
-            plt.ylabel("Phase")
-            plt.legend()
-            plt.show()
+    y0s = jnp.array(np.random.uniform(-np.pi, np.pi, (n_sim, n_free_osc)))
+    seed = jnp.array(np.random.randint(0, 2**32 - 1, n_sim))
+    results = jax.vmap(sim, in_axes=(0, 0))(y0s, seed)
 
-        results.append(phases)
+    # Plot
+    if plot:
+        phases = results[0]
+        plt.figure(figsize=(10, 5))
+        for i in range(phases.shape[0]):
+            plt.plot(ts, phases[i], label=f"oscillator {i}")
+        plt.xlabel("Time")
+        plt.ylabel("Phase")
+        plt.legend()
+        plt.show()
 
     return jnp.array(results), ts
 
@@ -396,6 +399,7 @@ def validate_synthesis(
     Kt: int = 0.1,
     Kt_ratio: int = 100,
     t_span=(0, 2),
+    dt0: float = 0.01,
     anneal: bool = False,
     plot: bool = True,
 ):
@@ -468,6 +472,7 @@ def validate_synthesis(
         Kt_ratio=Kt_ratio,
         anneal=anneal,
         t_end=t_span[1],
+        dt0=dt0,
     )
     sim_results = []
     for trace in traces:
@@ -559,6 +564,7 @@ if __name__ == "__main__":
     Kt = 0.01
     Kt_ratio = 100
     t_span = (0, 10)
+    dt0 = 0.01
     anneal = True
 
     for gate_name, [gate_func, n_io_var, n_aux_osc] in gates.items():
@@ -585,4 +591,5 @@ if __name__ == "__main__":
             plot=True,
             anneal=anneal,
             t_span=t_span,
+            dt0=dt0,
         )

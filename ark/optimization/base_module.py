@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import diffrax
 import equinox as eqx
 import jax
+import lineax
 
 
 @dataclass
@@ -54,7 +55,7 @@ class BaseAnalogCkt(eqx.Module):
         noise_seed: jax.typing.DTypeLike,
         gumbel_temp: jax.typing.DTypeLike = 1,
         hard_gumbel: bool = False,
-        max_steps: int = 4096,
+        max_steps: int = 4096 * 16,
         stepsize_controller: diffrax.AbstractAdaptiveStepSizeController = diffrax.PIDController(
             rtol=1e-3, atol=1e-6
         ),
@@ -97,7 +98,10 @@ class BaseAnalogCkt(eqx.Module):
                 shape=initial_state.shape,
                 key=jax.random.PRNGKey(noise_seed),
             )
-            brownian_term = diffrax.WeaklyDiagonalControlTerm(self.noise_fn, brownian)
+            vector_field = lambda t, y, args: lineax.DiagonalLinearOperator(
+                self.noise_fn(t, y, args)
+            )
+            brownian_term = diffrax.ControlTerm(vector_field, brownian)
             solution = diffrax.diffeqsolve(
                 terms=diffrax.MultiTerm(ode_term, brownian_term),
                 solver=self.solver,

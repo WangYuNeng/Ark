@@ -80,6 +80,24 @@ def phase_to_assignment_ste(assignment_phase: jax.Array) -> jax.Array:
     return assignment_ste
 
 
+# # plot the phase to assignment function
+# import matplotlib.pyplot as plt
+
+# plt.figure(figsize=(5, 3))
+# x = jnp.linspace(0, 2, 100)
+# y = jnp.array([phase_to_assignment_ste(jnp.array([xi]))[0] for xi in x])
+# plt.plot(x, y, label="Forward", color="orange")
+# y_fit = phase_to_bool_fit(x)
+# plt.plot(x, y_fit, label="STE", linestyle="--")
+# plt.xlabel("Phase")
+# plt.ylabel("Assignment")
+# plt.title("Phase to Assignment Function")
+# plt.grid(True, linestyle="--", alpha=0.4)
+# plt.legend()
+# plt.tight_layout()
+# plt.show()
+
+
 def loss_w_sol(
     model: BaseAnalogCkt,
     init_states: jax.Array,
@@ -89,6 +107,7 @@ def loss_w_sol(
     n_vars: int,
     problems: jax.Array,
     trasform_mats: jax.Array,
+    noise_seed: jax.Array,
     time_info: TimeInfo,
 ):
     """
@@ -98,13 +117,17 @@ def loss_w_sol(
     bz, n_vars = sol.shape
     # Get the output of the model, the first n_var output is a 1D array of shape (2n,) representing
     # the phase values of -var[0], var[0], -var[1], var[1], -var[2], var[2], ..., -var[n], var[n]
-    y_raw = jax.vmap(model, in_axes=(None, 0, 0, None, None))(
-        time_info, init_states, switches, 0, 0
+    y_raw = jax.vmap(model, in_axes=(None, 0, 0, None, 0))(
+        time_info, init_states, switches, 0, noise_seed
     )
     y_raw = jnp.squeeze(y_raw, axis=1)  # Shape: (batch_size, len(adj_matrix) - 3)
     # FIXME: Modular is too strict. E.g., because phase is periodic, 1.9 is close to 0
     # and the loss should be small if the solution is 0.
     y_modular = jnp.mod(y_raw[:, :n_vars], 2.0).reshape(sol.shape)
+
+    # Convert the phase p in [BLUE/2 + 1, 2) to [0, TRUE/2] range
+    # by mapping p to 2 - p for p > BLUE/2 + 1
+    y_modular = jnp.where(y_modular > (BLUE_PHASE / 2 + 1), 2 - y_modular, y_modular)
 
     # Convert the solution assignment to phase values
     sine_sol = assignment_to_phase(sol)
@@ -123,6 +146,7 @@ def system_energy_loss(
     n_vars: int,
     problems: jax.Array,
     trasform_mats: jax.Array,
+    noise_seed: jax.Array,
     time_info: TimeInfo,
 ) -> tuple[jax.Array, jax.Array]:
     """Calculate the oscillator system energy as the loss function.
@@ -132,8 +156,8 @@ def system_energy_loss(
     """
     # Get the output of the model, the first n_var output is a 1D array of shape (2n,) representing
     # the phase values of -var[0], var[0], -var[1], var[1], -var[2], var[2], ..., -var[n], var[n]
-    y_raw = jax.vmap(model, in_axes=(None, 0, 0, None, None))(
-        time_info, init_states, switches, 0, 0
+    y_raw = jax.vmap(model, in_axes=(None, 0, 0, None, 0))(
+        time_info, init_states, switches, 0, noise_seed
     )
 
     # y_raw: (batch_size, 1, len(adj_matrix) - 3)
@@ -158,6 +182,7 @@ def approx_sat_loss(
     n_vars: int,
     problems: jax.Array,
     trasform_mats: jax.Array,
+    noise_seed: jax.Array,
     time_info: TimeInfo,
 ) -> tuple[jax.Array, jax.Array]:
     """Calculate the oscillator system energy as the loss function.
@@ -167,17 +192,21 @@ def approx_sat_loss(
     """
     # Get the output of the model, the first n_var output is a 1D array of shape (2n,) representing
     # the phase values of -var[0], var[0], -var[1], var[1], -var[2], var[2], ..., -var[n], var[n]
-    y_raw = jax.vmap(model, in_axes=(None, 0, 0, None, None))(
-        time_info, init_states, switches, 0, 0
+    y_raw = jax.vmap(model, in_axes=(None, 0, 0, None, 0))(
+        time_info, init_states, switches, 0, noise_seed
     )
 
+    if y_raw.shape[1] != 1:
+        y_final = y_raw[:, -1:, :]  # Take the last time step
+    else:
+        y_final = y_raw
     # y_raw: (batch_size, 1, len(adj_matrix) - 3)
     # Squeeze y_raw to remove the second dimension
-    y_raw = jnp.squeeze(y_raw, axis=1)  # Shape: (batch_size, len(adj_matrix) - 3)
+    y_final = jnp.squeeze(y_final, axis=1)  # Shape: (batch_size, len(adj_matrix) - 3)
 
     sat_loss = phase_to_approx_sat_loss(
         n_vars=n_vars,
-        phase_raw=y_raw,
+        phase_raw=y_final,
         transform_mats=trasform_mats,
     )  # Shape: (batch_size,)
 
@@ -221,23 +250,29 @@ def phase_to_sat_clause_rate(
     """Calculate the number of satisfied clauses in the SAT problems.
     Args:
         n_vars (int): Number of variables in the SAT problem.
-        phase_raw (jax.Array): Phase values of the variables, shape (n_problmes, n_oscs).
+        phase_raw (jax.Array): Phase values of the variables, shape (n_problmes, n_time_points, n_oscs).
         problems (list[Problem]): List of SAT problems.
 
     Returns:
         jax.Array: Ratio of satisfied clauses.
     """
     # Take the POSITIVE oscillators' phases
-    var_phases = phase_raw[:, 1 : n_vars * 2 : 2]
+    var_phases = phase_raw[:, :, 1 : n_vars * 2 : 2]
 
     # Map the variable phases to boolean assignments
-    bool_assignments = jax.vmap(phase_to_bool_assignments, in_axes=0)(var_phases)
+    bool_assignments = phase_to_bool_assignments(var_phases)
 
     # Calculate the number of satisfied clauses for each problem
     n_sat_clause_list = []
-    for clauses, assignment in zip(problems, bool_assignments):
-        # Count the number of satisfied clauses
-        n_sat_clause_list.append(n_sat_clauses(clauses, assignment))
+    for clauses, assignments_in_run in zip(problems, bool_assignments):
+        # Count the number of satisfied clauses for each run
+        # Record the assignment that satisfies the most clauses
+        best_n_sat_clause = 0
+        for assignment in assignments_in_run:
+            best_n_sat_clause = max(
+                best_n_sat_clause, n_sat_clauses(clauses, assignment)
+            )
+        n_sat_clause_list.append(best_n_sat_clause)
 
     # Convert the list to a jax array
     n_satisfied_clauses = jnp.array(n_sat_clause_list)

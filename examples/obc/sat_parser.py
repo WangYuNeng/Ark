@@ -3,6 +3,15 @@ import argparse
 parser = argparse.ArgumentParser()
 
 parser.add_argument(
+    "--network_version",
+    type=str,
+    choices=["v1", "v2"],
+    default="v2",
+    help="Version of the network architecture to use. "
+    "v1: Directly mapped from 3sat to graph coloring reduction. "
+    "v2: WenXiao's improved version.",
+)
+parser.add_argument(
     "--seed",
     type=int,
     default=428,
@@ -19,6 +28,26 @@ parser.add_argument(
     type=float,
     default=0.01,
     help="The time step size for the simulation.",
+)
+parser.add_argument(
+    "--readout_multi_steps",
+    action="store_true",
+    help="Whether to read out the phases at multiple time steps."
+    " If set, the phases will be read out at every high of annealing schedule."
+    " If not set, the phases will be read out only at the final time step.",
+)
+parser.add_argument(
+    "--initial_state",
+    type=str,
+    choices=["random", "false", "true", "blue"],
+    default="blue",
+    help="Initial state of the oscillator phases. Randomly initialized or set"
+    " to a specific phase.",
+)
+parser.add_argument(
+    "--stochastic",
+    action="store_true",
+    help="Enable stochastic noise in the oscillator dynamics.",
 )
 parser.add_argument(
     "--lr", type=float, default=1e-3, help="Learning rate for the optimizer."
@@ -76,6 +105,12 @@ parser.add_argument(
     help="Path to load the model from. If provided, the model will be loaded from this path.",
 )
 parser.add_argument(
+    "--load_ax_run",
+    type=str,
+    default=None,
+    help="Path to load a previous Ax optimization run from.",
+)
+parser.add_argument(
     "--save_path",
     type=str,
     default=None,
@@ -105,4 +140,10 @@ parser.add_argument(
     type=int,
     default=3,
     help="Number of plots to generate for the results.",
+)
+
+parser.add_argument(
+    "--ax_opt",
+    action="store_true",
+    help="Enable hyperparameter optimization using Ax.",
 )

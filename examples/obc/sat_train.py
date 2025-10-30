@@ -10,7 +10,8 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
-import spec_optimization as opt_spec
+import spec_sat as opt_spec
+from ax import Client
 from diffrax import Tsit5
 from jaxtyping import PyTree
 from sat_dataloader import (
@@ -33,7 +34,12 @@ from sat_utils import (
     FALSE_PHASE,
     TRUE_PHASE,
     create_3sat_graph,
+    create_3sat_graph_v2,
     flatten_nw_stateful_oscillators,
+    param_keys_v1,
+    param_keys_v2,
+    parameters_v1,
+    parameters_v2,
 )
 
 import wandb
@@ -48,10 +54,19 @@ jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 jax.config.update("jax_enable_x64", True)
 args = parser.parse_args()
 
+NETWORK_VERSION = args.network_version
+if NETWORK_VERSION == "v1":
+    create_graph = create_3sat_graph
+elif NETWORK_VERSION == "v2":
+    create_graph = create_3sat_graph_v2
+
 SEED = args.seed
 
 T1 = args.t1
 DT0 = args.dt0
+READOUT_MULTI_STEPS = args.readout_multi_steps
+INITIAL_STATE = args.initial_state
+STOCHASTIC = args.stochastic
 
 BZ = args.batch_size
 STEPS = args.steps
@@ -64,6 +79,7 @@ CNF_DIR: Optional[str] = args.cnf_dir
 N_VARS, N_CLAUSES = args.n_vars, args.n_clauses
 
 LOAD_PATH = args.load_path
+LOAD_AX_RUN = args.load_ax_run
 SAVE_PATH = args.save_path
 
 USE_WANDB = args.wandb
@@ -80,13 +96,20 @@ if USE_WANDB:
 
 N_PLOT = args.n_plots
 
+AX_OPT = args.ax_opt
+
 trainable_mgr = TrainableMgr()
 optim = optax.adam(learning_rate=LR)
+saveat = (
+    [T1]
+    if not READOUT_MULTI_STEPS
+    else jnp.array([i for i in range(0, int(T1 + 1), 2)])
+)
 time_info = TimeInfo(
     t0=0.0,
     t1=T1,
     dt0=DT0,
-    saveat=[T1],
+    saveat=saveat,
 )
 
 
@@ -98,6 +121,12 @@ def make_step(model: BaseAnalogCkt, opt_state: PyTree, loss_fn: Callable, data):
     updates, opt_state = optim.update(grads, opt_state, model)
     model = eqx.apply_updates(model, updates)
     return model, opt_state, train_loss, phase_raw
+
+
+def make_step_ax(model: BaseAnalogCkt, params: jax.Array, loss_fn: Callable, data):
+    model = eqx.tree_at(lambda m: m.a_trainable, model, params)
+    (train_loss, phase_raw) = loss_fn(model, *data)
+    return model, train_loss, phase_raw
 
 
 def visualize_energy_and_clause_sat_rate(
@@ -120,38 +149,38 @@ def visualize_energy_and_clause_sat_rate(
         loss (float): Loss value to be displayed in the title.
         title_prefix (str): Prefix for the plot title.
     """
-    scatter_fig, ax = plt.subplots()
-    ax.scatter(energy, clause_rate)
-    ax.set_xlabel("Energy")
-    ax.set_ylabel("Clause SAT Rate")
-    ax.set_title(
-        f"Energy ({jnp.mean(energy):.2e}) vs. Clause SAT Rate ({jnp.mean(clause_rate):.2f}). Loss: {loss:.4f}"
-    )
-    ax.grid(True)
-    plt.tight_layout()
+    # scatter_fig, ax = plt.subplots()
+    # ax.scatter(energy, clause_rate)
+    # ax.set_xlabel("Energy")
+    # ax.set_ylabel("Clause SAT Rate")
+    # ax.set_title(
+    #     f"Energy ({jnp.mean(energy):.2e}) vs. Clause SAT Rate ({jnp.mean(clause_rate):.2f}). Loss: {loss:.4f}"
+    # )
+    # ax.grid(True)
+    # plt.tight_layout()
 
-    scatter_fig_approx, ax = plt.subplots()
-    ax.scatter(clause_rate_approx, clause_rate)
-    ax.set_xlabel("Approximate SAT Loss")
-    ax.set_ylabel("Clause SAT Rate")
-    ax.set_title(
-        f"Approximate SAT Loss vs. Clause SAT Rate. Mean Loss: {jnp.mean(clause_rate_approx):.2f}. "
-        f"Mean Clause SAT Rate: {jnp.mean(clause_rate):.2f}"
-    )
-    ax.grid(True)
-    plt.tight_layout()
+    # scatter_fig_approx, ax = plt.subplots()
+    # ax.scatter(clause_rate_approx, clause_rate)
+    # ax.set_xlabel("Approximate SAT Loss")
+    # ax.set_ylabel("Clause SAT Rate")
+    # ax.set_title(
+    #     f"Approximate SAT Loss vs. Clause SAT Rate. Mean Loss: {jnp.mean(clause_rate_approx):.2f}. "
+    #     f"Mean Clause SAT Rate: {jnp.mean(clause_rate):.2f}"
+    # )
+    # ax.grid(True)
+    # plt.tight_layout()
 
-    hist_energy, ax = plt.subplots()
-    ax.hist(energy, bins=30)
-    ax.set_xlabel("Energy")
-    ax.set_ylabel("Frequency")
-    ax.set_title(
-        f"Energy Histogram. Mean: {jnp.mean(energy):.2e}. Median: {jnp.median(energy):.2e}"
-    )
-    plt.tight_layout()
+    # hist_energy, ax = plt.subplots()
+    # ax.hist(energy, bins=30)
+    # ax.set_xlabel("Energy")
+    # ax.set_ylabel("Frequency")
+    # ax.set_title(
+    #     f"Energy Histogram. Mean: {jnp.mean(energy):.2e}. Median: {jnp.median(energy):.2e}"
+    # )
+    # plt.tight_layout()
 
     hist_clause_rate, ax = plt.subplots()
-    ax.hist(clause_rate, bins=30, range=(0, 1))
+    ax.hist(clause_rate, bins=30)
     ax.set_xlabel("Clause SAT Rate")
     ax.set_ylabel("Frequency")
     ax.set_title(
@@ -159,22 +188,22 @@ def visualize_energy_and_clause_sat_rate(
     )
     plt.tight_layout()
 
-    hist_approx_sat_loss, ax = plt.subplots()
-    ax.hist(clause_rate_approx, bins=30)
-    ax.set_xlabel("Approximate SAT Loss")
-    ax.set_ylabel("Frequency")
-    ax.set_title(
-        f"Approximate SAT Loss Histogram. Mean: {jnp.mean(clause_rate_approx):.2f}. "
-        f"Median: {jnp.median(clause_rate_approx):.2f}"
-    )
-    plt.tight_layout()
+    # hist_approx_sat_loss, ax = plt.subplots()
+    # ax.hist(clause_rate_approx, bins=30)
+    # ax.set_xlabel("Approximate SAT Loss")
+    # ax.set_ylabel("Frequency")
+    # ax.set_title(
+    #     f"Approximate SAT Loss Histogram. Mean: {jnp.mean(clause_rate_approx):.2f}. "
+    #     f"Median: {jnp.median(clause_rate_approx):.2f}"
+    # )
+    # plt.tight_layout()
 
     return [
-        scatter_fig,
-        scatter_fig_approx,
-        hist_energy,
+        # scatter_fig,
+        # scatter_fig_approx,
+        # hist_energy,
         hist_clause_rate,
-        hist_approx_sat_loss,
+        # hist_approx_sat_loss,
     ]
 
 
@@ -190,19 +219,18 @@ def profile_nw_performance(
     for step, data in zip(range(8), dl):
         loss, phase_raw = loss_fn(model, *data)
         adj_mats, n_vars, probs, transform_mats = data[3:7]
-        energy, clause_rate = phase_to_energy(
-            phase_raw, adj_mats
-        ), phase_to_sat_clause_rate(n_vars, phase_raw, probs)
-        approx_sat_rate = phase_to_approx_sat_loss(n_vars, phase_raw, transform_mats)
-        loss_list.append(loss)
-        energy_list.append(energy)
+        # energy = phase_to_energy(phase_raw, adj_mats)
+        clause_rate = phase_to_sat_clause_rate(n_vars, phase_raw, probs)
+        # approx_sat_rate = phase_to_approx_sat_loss(n_vars, phase_raw, transform_mats)
+        # loss_list.append(loss)
+        # energy_list.append(energy)
         clause_rate_list.append(clause_rate)
-        approx_sat_rate_list.append(approx_sat_rate)
+        # approx_sat_rate_list.append(approx_sat_rate)
 
-    loss = jnp.array(loss_list)
-    energy = jnp.concatenate(energy_list)
-    clause_rate = jnp.concatenate(clause_rate_list)
-    approx_sat_rate = jnp.concatenate(approx_sat_rate_list)
+    loss = jnp.array(loss_list).flatten()
+    energy = jnp.array(energy_list).flatten()
+    clause_rate = jnp.array(clause_rate_list).flatten()
+    approx_sat_rate = jnp.array(approx_sat_rate_list).flatten()
     figs = visualize_energy_and_clause_sat_rate(
         energy, clause_rate, approx_sat_rate, jnp.mean(loss)
     )
@@ -212,9 +240,8 @@ def profile_nw_performance(
 def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator):
     opt_state = optim.init(eqx.filter(model, eqx.is_array))
 
-    print("Initial trainable params:")
-    print(model.a_trainable)
     best_loss = float("inf")
+    best_sat_rate = 0.0
     fig_titles = [
         "Energy vs Clause SAT Rate",
         "Approximate SAT Loss vs Clause SAT Rate",
@@ -222,6 +249,34 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator):
         "Clause SAT Rate Histogram",
         "Approximate SAT Loss Histogram",
     ]
+
+    if AX_OPT:
+        if NETWORK_VERSION == "v1":
+            param_keys = param_keys_v1
+            parameters = parameters_v1
+        elif NETWORK_VERSION == "v2":
+            param_keys = param_keys_v2
+            parameters = parameters_v2
+        metric_name = "sat_rate"
+        objective = f"{metric_name}"
+        if LOAD_AX_RUN:
+            client = Client.load_from_json_file(LOAD_AX_RUN)
+            # Intialize the model with the best known parameters
+            prev_best_param, _, _, _ = client.get_best_parameterization(
+                use_model_predictions=False
+            )
+            param_flatten = jnp.array([prev_best_param[key] for key in param_keys])
+            model = eqx.tree_at(
+                lambda m: m.a_trainable, model, param_flatten
+            )  # Update the model
+        else:
+            client = Client(random_seed=np.random.randint(0, 2**31))
+            client.configure_experiment(parameters=parameters)
+            client.configure_optimization(objective=objective)
+
+    print("Initial trainable params:")
+    print(model.a_trainable)
+
     for step, data in zip(range(STEPS), dl):
 
         if step == 0:
@@ -241,13 +296,41 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator):
                     plt.show()
                     plt.close(fig)
 
-        model, opt_state, train_loss, phase_raw = make_step(
-            model, opt_state, loss_fn, data
-        )
-        sat_rate = phase_to_sat_clause_rate(data[4], phase_raw, data[5])
+        if AX_OPT:
+            # Use Ax
+            if step == 0 and not LOAD_AX_RUN:
+                # Attach initial point with the initial trainable params
+                initial_points = {
+                    key: model.a_trainable[i].item() for i, key in enumerate(param_keys)
+                }
+                trial_index = client.attach_trial(parameters=initial_points)
+                parameters = initial_points
+            else:
+                trial_index, parameters = list(
+                    client.get_next_trials(max_trials=1).items()
+                )[0]
+            param_flatten = jnp.array([parameters[key] for key in param_keys])
+            model, train_loss, phase_raw = make_step_ax(
+                model, param_flatten, loss_fn, data
+            )
+            sat_rate = phase_to_sat_clause_rate(data[4], phase_raw, data[5])
+            opt_data = {
+                metric_name: sat_rate.mean().item(),
+            }
+            client.complete_trial(
+                trial_index=trial_index,
+                raw_data=opt_data,
+            )
+
+        else:
+            # Use gradient descent
+            model, opt_state, train_loss, phase_raw = make_step(
+                model, opt_state, loss_fn, data
+            )
+        sat_rate = jnp.mean(phase_to_sat_clause_rate(data[4], phase_raw, data[5]))
 
         print(
-            f"\nStep {step}, Train loss: {train_loss}, Clause SAT Rate: {jnp.mean(sat_rate):.2f}"
+            f"\nStep {step}, Train loss: {train_loss}, Clause SAT Rate: {jnp.mean(sat_rate)}"
         )
         print("Trainable params")
         print(model.a_trainable)
@@ -256,12 +339,15 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator):
             wandb.log(
                 {
                     "train_loss": train_loss,
-                    "sat_rate": jnp.mean(sat_rate),
+                    "sat_rate": sat_rate,
                     "step": step,
                 }
             )
 
-        if train_loss < best_loss:
+        if sat_rate > best_sat_rate or (
+            sat_rate == best_sat_rate and train_loss < best_loss
+        ):
+            best_sat_rate = sat_rate
             best_loss = train_loss
             if SAVE_PATH:
                 eqx.tree_serialise_leaves(SAVE_PATH, model)
@@ -281,6 +367,9 @@ def train(model: BaseAnalogCkt, loss_fn: Callable, dl: Generator):
         for fig in figs:
             plt.show()
             plt.close(fig)
+
+    if AX_OPT and SAVE_PATH:
+        client.save_to_json_file(SAVE_PATH)
 
     return model
 
@@ -349,9 +438,7 @@ if __name__ == "__main__":
         loss_fn_base = system_energy_loss
 
     if TASK == "3var7clauses":
-        graph, nw = create_3sat_graph(
-            n_vars=3, n_clauses=7, trainable_mgr=trainable_mgr
-        )
+        graph, nw = create_graph(n_vars=3, n_clauses=7, trainable_mgr=trainable_mgr)
         sat_probs, sat_solutions = sat_3var7clauses_data()
         loss_fn = partial(loss_w_sol, time_info=time_info)
 
@@ -360,7 +447,7 @@ if __name__ == "__main__":
         prob = sat_probs[0]
         n_vars = max(abs(var) for clause in prob for var in clause)
         n_clauses = len(prob)
-        graph, nw = create_3sat_graph(
+        graph, nw = create_graph(
             n_vars=n_vars, n_clauses=n_clauses, trainable_mgr=trainable_mgr
         )
         sat_solutions = None
@@ -374,7 +461,7 @@ if __name__ == "__main__":
             n_vars=N_VARS, n_clauses=N_CLAUSES, n_prob=BZ * 1024
         )
         n_vars, n_clauses = N_VARS, N_CLAUSES
-        graph, nw = create_3sat_graph(
+        graph, nw = create_graph(
             n_vars=n_vars, n_clauses=n_clauses, trainable_mgr=trainable_mgr
         )
         sat_solutions = None
@@ -397,15 +484,15 @@ if __name__ == "__main__":
     init_weight = trainable_mgr.get_initial_vals()
     model: BaseAnalogCkt = ckt_class(
         init_trainable=init_weight,
-        is_stochastic=False,
+        is_stochastic=STOCHASTIC,
         solver=Tsit5(),
     )
     if LOAD_PATH:
         model = eqx.tree_deserialise_leaves(LOAD_PATH, model)
     nw.set_var_clause_cpls_args_idx(model=model)
 
-    dataloader = SATDataloader(BZ, sat_probs, nw, sat_solutions)
-    init_states, switches, sol, adj_mat, n_vars, probs, transform_mats = next(
+    dataloader = SATDataloader(INITIAL_STATE, BZ, sat_probs, nw, sat_solutions)
+    init_states, switches, sol, adj_mat, n_vars, probs, transform_mats, seeds = next(
         dataloader.__iter__()
     )
 

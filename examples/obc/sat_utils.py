@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 import jax.numpy as jnp
 import numpy as np
-import spec_optimization as opt_spec
+import spec_sat as opt_spec
 from ax import RangeParameterConfig
 
 from ark.cdg.cdg import CDG, CDGEdge, CDGNode

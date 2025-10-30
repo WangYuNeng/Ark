@@ -10,7 +10,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
-import spec_optimization as opt_spec
+import spec_sat as opt_spec
 from ax import Client
 from diffrax import Tsit5
 from jaxtyping import PyTree

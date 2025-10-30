@@ -1,12 +1,15 @@
+import sys
+
 import jax.numpy as jnp
-from pattern_recog_parser import args
+
+# from pattern_recog_parser import args
 from spec import Coupling, Osc, obc_spec
 
 from ark.specification.attribute_def import AttrDef
 from ark.specification.attribute_type import AnalogAttr, DigitalAttr, FunctionAttr
 from ark.specification.cdg_types import EdgeType, NodeType
 from ark.specification.production_rule import ProdRule
-from ark.specification.rule_keyword import DST, EDGE, SELF, SRC, VAR
+from ark.specification.rule_keyword import DST, EDGE, SELF, SRC, TIME, VAR
 
 T = 1
 
@@ -29,9 +32,10 @@ Osc_modified = NodeType(
     attrs={
         "order": 1,
         "attr_def": {
-            "lock_fn": AttrDef(attr_type=FunctionAttr(nargs=2)),
+            "lock_fn": AttrDef(attr_type=FunctionAttr(nargs=4)),
             "osc_fn": AttrDef(attr_type=FunctionAttr(nargs=2)),
             "lock_strength": AttrDef(attr_type=AnalogAttr((-10, 10))),
+            "lock_alpha": AttrDef(attr_type=AnalogAttr((0, 10))),
             "cpl_strength": AttrDef(attr_type=AnalogAttr((-10, 10))),
             # Custom range for obc SAT
             # "lock_strength": AttrDef(attr_type=AnalogAttr((0, 10))),
@@ -55,15 +59,24 @@ SelfCpl = EdgeType(
 )
 
 obc_spec.add_cdg_types([Osc_modified, FixedSource])
-# Digital coupling with 3 bit resolution -2**(n_bit-1) to 2**(n_bit-1) -1
-# Rescale to between +/- 1
-if args.weight_bits is None:
-    N_BITS = 3
+
+# import pattern_recog_parser if the top-level entry file is pattern_recog_main
+if sys.argv[0].endswith("pattern_recog_main.py"):
+    from pattern_recog_parser import args
+
+    input(123)
+    if args.weight_bits is None:
+        N_BITS = 3
+    else:
+        N_BITS = args.weight_bits
 else:
-    N_BITS = args.weight_bits
+    N_BITS = 3
+
 N_CHOICES = 2**N_BITS
 
 
+# Digital coupling with 3 bit resolution -2**(n_bit-1) to 2**(n_bit-1) -1
+# Rescale to between +/- 1
 def nbits_to_val_choices(n_bits: int) -> list[float]:
     if n_bits == 1:
         return [-1, 1]
@@ -87,7 +100,7 @@ modified_cp_src = ProdRule(
     Osc_modified,
     SRC,
     -EDGE.k * SRC.osc_fn(VAR(SRC) - VAR(DST), SRC.cpl_strength),
-    noise_exp=1e-1,
+    # noise_exp=1e-1,
 )
 
 modified_cp_dst = ProdRule(
@@ -96,7 +109,7 @@ modified_cp_dst = ProdRule(
     Osc_modified,
     DST,
     -EDGE.k * DST.osc_fn(VAR(DST) - VAR(SRC), DST.cpl_strength),
-    noise_exp=1e-1,
+    # noise_exp=1e-1,
 )
 
 modified_cp_self = ProdRule(
@@ -112,7 +125,8 @@ modified_cp_self_no_k = ProdRule(
     Osc_modified,
     Osc_modified,
     SELF,
-    -SRC.lock_fn(VAR(SRC), SRC.lock_strength),
+    -SRC.lock_fn(VAR(SRC), SRC.lock_strength, SRC.lock_alpha, TIME),
+    noise_exp=0.1,
 )
 
 source_cp_osc = ProdRule(

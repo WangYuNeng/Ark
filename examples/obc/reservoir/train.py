@@ -173,6 +173,7 @@ def train(
             model, opt_state, train_loss, train_acc = make_step(
                 model, opt_state, img, label, reservoir_t_end
             )
+            print(f"Batch {i}: train_loss={train_loss}, train_acc={train_acc}")
             train_losses.append(train_loss)
             train_accs.append(train_acc)
         for i, (img, label) in enumerate(val_loader):
@@ -234,6 +235,7 @@ if __name__ == "__main__":
     grid_coupling = jnp.array(np.random.rand(n_row, n_col, n_row, n_col) - 0.5)
     input_coupling = jnp.array(np.random.rand(n_row, n_col, n_row, n_col) - 0.5)
     init_locking = jnp.array(np.random.rand(n_row, n_col) - 0.5)
+    reference_coupling = jnp.array(np.random.rand(n_row, n_col) - 0.5)
 
     obc_func = OBCStateFunc(
         grid_coupling=grid_coupling,
@@ -241,6 +243,7 @@ if __name__ == "__main__":
         init_locking=init_locking,
         input_kernel_size=INPUT_KERNEL_SIZE,
         grid_kernel_size=GRID_KERNEL_SIZE,
+        reference_coupling=reference_coupling,
     )
     reservoir = OscillatorReservoir(
         ode_fn=obc_func,
@@ -264,3 +267,9 @@ if __name__ == "__main__":
         val_loader=val_loader,
         test_loader=test_loader if TESTING else None,
     )
+    print(model.reservoir.ode_fn.grid_coupling_matrix)
+    print(model.reservoir.ode_fn.grid_coupling_matrix)
+    print(model.reservoir.ode_fn.grid_coupling_matrix)
+    print(model.reservoir.ode_fn.grid_coupling_matrix)
+    print(model.reservoir.ode_fn.grid_coupling_matrix)
+    print(model.reservoir.ode_fn.grid_coupling_matrix)

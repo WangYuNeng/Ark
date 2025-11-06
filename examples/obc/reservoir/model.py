@@ -14,15 +14,15 @@ jax.config.update("jax_enable_x64", True)
 
 class OBCStateFunc(eqx.Module):
 
-    grid_coupling: jax.Array
-    input_coupling: jax.Array
     _locking: jax.Array
-    input_mask: np.ndarray
-    grid_mask: np.ndarray
+    grid_neighbors: jax.Array
+    grid_weights: jax.Array = eqx.field(static=True)
+    input_neighbors: jax.Array
+    input_weights: jax.Array = eqx.field(static=True)
     n_row: int = eqx.field(static=True)
     n_col: int = eqx.field(static=True)
     pos_locking: bool
-    reference_coupling: Optional[jax.Array]
+    reference_coupling: Optional[jax.Array] = eqx.field(static=True)
 
     def __init__(
         self,
@@ -51,8 +51,6 @@ class OBCStateFunc(eqx.Module):
         ), f"Grid and input coupling must have the same shape. Got {grid_coupling.shape} and {input_coupling.shape}."
         n_row, n_col = grid_coupling.shape[0], grid_coupling.shape[1]
         self.n_row, self.n_col = n_row, n_col
-        self.grid_coupling = grid_coupling
-        self.input_coupling = input_coupling
 
         assert init_locking.shape == (
             n_row,
@@ -60,8 +58,17 @@ class OBCStateFunc(eqx.Module):
         ), f"Locking shape ({init_locking.shape}) must match grid shape ({n_row}, {n_col})."
         self._locking = init_locking
 
-        self.grid_mask = self.get_kernel_mask(grid_kernel_size)
-        self.input_mask = self.get_kernel_mask(input_kernel_size)
+        grid_mask = self.get_kernel_mask(grid_kernel_size)
+        input_mask = self.get_kernel_mask(input_kernel_size)
+
+        (
+            self.grid_neighbors,
+            self.grid_weights,
+        ) = self._build_sparse_struct(grid_coupling, grid_mask, exclude_self=True)
+        (
+            self.input_neighbors,
+            self.input_weights,
+        ) = self._build_sparse_struct(input_coupling, input_mask, exclude_self=False)
 
         self.reference_coupling = reference_coupling
         self.pos_locking = pos_locking
@@ -77,17 +84,14 @@ class OBCStateFunc(eqx.Module):
                 - input_phase (jax.Array): phases of the input oscillators (shape: N_ROW * N_COL)
         """
         input_phase = args["input_phase"]
-        grid_coupling = self.grid_coupling_matrix
-        input_coupling = self.input_coupling_matrix
 
-        phase_diff = y[:, None] - y[None, :]
-        input_phase_diff = y[:, None] - input_phase[None, :]
-
-        tot_coupling_strength = jnp.sum(
-            jax.lax.mul(grid_coupling, jnp.sin(jnp.pi * phase_diff))
-            + jax.lax.mul(input_coupling, jnp.sin(jnp.pi * input_phase_diff)),
-            axis=1,
+        grid_contrib = self._sparse_coupling_sum(
+            self.grid_neighbors, self.grid_weights, y, y
         )
+        input_contrib = self._sparse_coupling_sum(
+            self.input_neighbors, self.input_weights, input_phase, y
+        )
+        tot_coupling_strength = grid_contrib + input_contrib
         lock_strength = self.locking.flatten() * jnp.sin(2 * jnp.pi * y)
 
         dydt = tot_coupling_strength - lock_strength
@@ -103,17 +107,31 @@ class OBCStateFunc(eqx.Module):
 
     @property
     def grid_coupling_matrix(self):
-        m = jax.lax.mul(self.grid_coupling, jnp.array(self.grid_mask)).reshape(
-            self.n_osc, self.n_osc
-        )
-        m = m - jnp.diag(jnp.diag(m))  # No self-coupling
-        return m
+        # Return the full grid coupling matrix (N_ROW, N_COL, N_ROW, N_COL)
+        # reconstructed from the sparse representation
+        n = self.n_osc
+        coupling_matrix = jnp.zeros((n, n))
+        for i in range(n):
+            for j in range(self.grid_neighbors.shape[1]):
+                neighbor_idx = self.grid_neighbors[i, j]
+                if neighbor_idx >= 0:
+                    weight = self.grid_weights[i, j]
+                    coupling_matrix = coupling_matrix.at[i, neighbor_idx].set(weight)
+        return coupling_matrix.reshape(self.n_row, self.n_col, self.n_row, self.n_col)
 
     @property
     def input_coupling_matrix(self):
-        return jax.lax.mul(self.input_coupling, jnp.array(self.input_mask)).reshape(
-            self.n_osc, self.n_osc
-        )
+        # Return the full input coupling matrix (N_ROW, N_COL, N_ROW, N_COL)
+        # reconstructed from the sparse representation
+        n = self.n_osc
+        coupling_matrix = jnp.zeros((n, n))
+        for i in range(n):
+            for j in range(self.input_neighbors.shape[1]):
+                neighbor_idx = self.input_neighbors[i, j]
+                if neighbor_idx >= 0:
+                    weight = self.input_weights[i, j]
+                    coupling_matrix = coupling_matrix.at[i, neighbor_idx].set(weight)
+        return coupling_matrix.reshape(self.n_row, self.n_col, self.n_row, self.n_col)
 
     @property
     def locking(self):
@@ -125,6 +143,59 @@ class OBCStateFunc(eqx.Module):
     @property
     def n_osc(self) -> int:
         return self.n_row * self.n_col
+
+    def _build_sparse_struct(
+        self, coupling: jax.Array, mask: np.ndarray, exclude_self: bool
+    ):
+        """Precompute sparse neighbor indices and weights for a coupling tensor."""
+        n = self.n_osc
+        coupling_np = np.asarray(jax.device_get(coupling)).reshape(n, n)
+        mask_np = np.asarray(mask, dtype=np.int8).reshape(n, n)
+
+        if exclude_self:
+            np.fill_diagonal(mask_np, 0)
+
+        neighbor_counts = mask_np.sum(axis=1).astype(int)
+        max_neighbors = int(neighbor_counts.max()) if neighbor_counts.size else 0
+        if max_neighbors == 0:
+            neighbors = jnp.zeros((n, 0), dtype=jnp.int32)
+            weights = jnp.zeros((n, 0), dtype=coupling.dtype)
+            return neighbors, weights
+
+        neighbors_np = np.full((n, max_neighbors), -1, dtype=np.int32)
+        weights_np = np.zeros((n, max_neighbors), dtype=coupling_np.dtype)
+
+        for i in range(n):
+            idxs = np.nonzero(mask_np[i])[0]
+            count = idxs.size
+            if count == 0:
+                continue
+            neighbors_np[i, :count] = idxs
+            weights_np[i, :count] = coupling_np[i, idxs]
+
+        neighbors = jnp.asarray(neighbors_np)
+        weights = jnp.asarray(weights_np)
+        return neighbors, weights
+
+    @staticmethod
+    def _sparse_coupling_sum(
+        neighbors: jax.Array,
+        weights: jax.Array,
+        source_phase: jax.Array,
+        target_phase: jax.Array,
+    ) -> jax.Array:
+        """Efficiently compute coupling sums using sparse neighbor indexing."""
+        if neighbors.shape[1] == 0:
+            return jnp.zeros_like(target_phase)
+
+        valid = neighbors >= 0
+        safe_indices = jnp.where(valid, neighbors, 0)
+        neighbor_phase = source_phase[safe_indices]
+        phase_diff = target_phase[:, None] - neighbor_phase
+        sin_term = jnp.sin(jnp.pi * phase_diff)
+        zero = jnp.zeros((), dtype=weights.dtype)
+        contrib = jnp.where(valid, weights * sin_term, zero)
+        return contrib.sum(axis=1)
 
     def get_kernel_mask(self, kernel_size: int) -> list:
         """Generate a kernel mask for convolution-like coupling.
@@ -178,9 +249,9 @@ class OscillatorReservoir(eqx.Module):
             args=args,
             t0=0,
             t1=t_end,
-            dt0=0.01,
+            dt0=1,
             y0=initial_state,
-            stepsize_controller=diffrax.PIDController(rtol=1e-3, atol=1e-6),
+            stepsize_controller=diffrax.ConstantStepSize(),
             saveat=diffrax.SaveAt(ts=self.save_at),
         )
 
@@ -256,14 +327,15 @@ if __name__ == "__main__":
 
     # Test the kernel mask generation
     n_row, n_col = 3, 3
-    grid_coupling = jnp.ones((n_row, n_col, n_row, n_col))
-    input_coupling = jnp.ones((n_row, n_col, n_row, n_col))
+    grid_coupling = jnp.array(np.random.rand(n_row, n_col, n_row, n_col))
+    input_coupling = jnp.array(np.random.rand(n_row, n_col, n_row, n_col))
     init_locking = jnp.ones((n_row, n_col)) * 0.5
     obc_func = OBCStateFunc(
         grid_coupling=grid_coupling,
         input_coupling=input_coupling,
         init_locking=init_locking,
-        input_kernel_size=-1,
+        input_kernel_size=1,
         grid_kernel_size=3,
     )
     print(obc_func.grid_coupling_matrix)
+    print(obc_func.input_coupling_matrix)

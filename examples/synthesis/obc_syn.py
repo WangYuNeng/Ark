@@ -1,7 +1,7 @@
 # Demonstrate syntheizing function with oscillators
 
 from itertools import product
-from typing import Callable
+from typing import Callable, Optional
 
 import cvxpy as cp
 import diffrax
@@ -289,6 +289,7 @@ def synthesize_general(
     constrain_coupling: int = 0,
     constrain_energy_threshold: bool = False,
     exclude_ref_energy: bool = False,
+    block_solution: Optional[list[np.ndarray]] = None,
 ):
     """Synthesize oscillator coupling matrix to implement a logic function
 
@@ -303,6 +304,8 @@ def synthesize_general(
             a threshold and solution states to be below a threshold. Defaults to False.
         exclude_ref_energy (bool, optional): Whether to exclude the reference oscillator from energy calculation.
             Defaults to False.
+        block_solution (Optional[list[np.ndarray]], optional): List of coupling matrices to block as solutions.
+            Defaults to None.
     Returns:
         J_mat: The coupling matrix if a solution is found, else None.
     """
@@ -318,6 +321,18 @@ def synthesize_general(
     # J = Ints(" ".join([f"J{i}{j}" for i in range(n_osc) for j in range(n_osc)]))
     J = Ints(" ".join([f"J{i}{j}" for i in range(n_osc) for j in range(n_osc)]))
     J_mat = np.array(J).reshape((n_osc, n_osc))
+
+    if block_solution is not None:
+        for blocked_J in block_solution:
+            constraints.append(
+                Or(
+                    *[
+                        J_mat[i, j] != int(blocked_J[i, j])
+                        for i in range(n_osc)
+                        for j in range(n_osc)
+                    ]
+                )
+            )
 
     # Auxiliary variable: minimum energy
     e_min = Int("e_min")
@@ -379,7 +394,7 @@ def synthesize_general(
     s = Solver()
     s.add(*constraints)
     if s.check() != sat:
-        print("UNSAT, no solution found")
+        # print("UNSAT, no solution found")
         return None
 
     else:
@@ -498,14 +513,14 @@ def validate_synthesis(
     w_ref_energy_data["distribution"] = distribution
 
     # Plot the fitted distribution as a line on top of the histogram
-    if plot:
-        plt.plot(
-            range(len(hist)),
-            [distribution[k] for k in hist.keys()],
-            label=f"beta={beta:.2f}, KL Div={kl_div:.4f}",
-            marker="o",
-            color="orange",
-        )
+    # if plot:
+    #     plt.plot(
+    #         range(len(hist)),
+    #         [distribution[k] for k in hist.keys()],
+    #         label=f"beta={beta:.2f}, KL Div={kl_div:.4f}",
+    #         marker="o",
+    #         color="orange",
+    #     )
 
     kl_div_to_ideal = KL_divergence_to_ideal(
         phase_to_energy_w_ref, hist, n_io_var=n_io_var
@@ -518,18 +533,16 @@ def validate_synthesis(
             if logic_fn(*phase_to_bool(ios_phase))
         ]
         for i, k in enumerate(hist.keys()):
-            ios = k[:n_io_var]
+            ios = k
             if ios in valid_states:
                 plt.gca().get_xticklabels()[i].set_color("red")
         plt.xticks(rotation=90)
-        plt.xlabel(f"{n_io_var} Input/Output States")
+        plt.xlabel("Input/Output States")
         plt.ylabel("Count")
         if kl_div_to_ideal is None:
             plt.title("Final State Distribution")
         else:
-            plt.title(
-                f"Final State Distribution, KL Div to Ideal={kl_div_to_ideal:.4f}"
-            )
+            plt.title(f"Final State Distribution ({2 ** (n_osc + 6)} simulations)")
         plt.tight_layout()
         plt.legend()
         plt.show()
@@ -552,9 +565,9 @@ if __name__ == "__main__":
 
     Kl = 1
     Kc = 1
-    Kt = 0.01
+    Kt = 0.1
     Kt_ratio = 100
-    t_span = (0, 10)
+    t_span = (0, 100)
     dt0 = 0.01
     anneal = True
 

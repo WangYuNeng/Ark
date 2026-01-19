@@ -354,6 +354,7 @@ def synthesize_general(
             e = energy_fn(J_mat, v, exclude_ref_energy=exclude_ref_energy)
             if logic_fn(*ios_bool):
                 # Solution states have energy at least e_min
+                constraints.append(e >= e_min)
                 possible_solution_states.append(e)
             else:
                 # Non-solution states have energy strictly greater than e_min
